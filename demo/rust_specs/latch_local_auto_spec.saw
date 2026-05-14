@@ -1,0 +1,18 @@
+// Auto-generated spec for: latch_local
+// Constraints derived from type system and annotations
+
+let latch_local_auto_spec : LLVMSetup () = do {
+
+    // Parameter: state
+    state_ptr <- llvm_alloc (llvm_alias "LatchState");
+    state_val <- llvm_fresh_var "state" (llvm_alias "LatchState");
+    llvm_points_to state_ptr (llvm_term state_val);
+    llvm_precond {{ state_disc <= (1 : [64]) }};
+
+    llvm_execute_func [state_ptr];
+
+    ret <- llvm_fresh_var "ret" (// Result<llvm_alias "LatchState", llvm_alias "ValidationError">);
+    llvm_return (llvm_term ret);
+};
+
+// Usage: ov_latch_local <- llvm_unsafe_assume_spec m "latch_local" latch_local_auto_spec;

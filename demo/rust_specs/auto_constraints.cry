@@ -1,0 +1,17 @@
+// Auto-generated Cryptol type constraints
+module AutoConstraints where
+
+// Boolean constraint
+valid_bool : [1] -> Bit
+valid_bool x = x <= 1
+
+// Enum: LatchState (2 variants)
+//   0 = Unlatched
+//   1 = Latched
+valid_LatchState_disc : [64] -> Bit
+valid_LatchState_disc x = x <= 1
+
+// Result<LatchState, ValidationError>
+valid_result_LatchState_ValidationError_disc : [8] -> Bit
+valid_result_LatchState_ValidationError_disc x = x <= 1
+

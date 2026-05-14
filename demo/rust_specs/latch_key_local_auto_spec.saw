@@ -1,0 +1,26 @@
+// Auto-generated spec for: latch_key_local
+// Constraints derived from type system and annotations
+
+let latch_key_local_auto_spec : LLVMSetup () = do {
+
+    // Parameter: state
+    state_ptr <- llvm_alloc (llvm_alias "LatchState");
+    state_val <- llvm_fresh_var "state" (llvm_alias "LatchState");
+    llvm_points_to state_ptr (llvm_term state_val);
+    llvm_precond {{ state_disc <= (1 : [64]) }};
+
+    // Parameter: key_data
+    key_data_ptr <- llvm_alloc_readonly (llvm_alias "[ty::Uint::U8]");
+    key_data_before <- llvm_fresh_var "key_data" (llvm_alias "[ty::Uint::U8]");
+    llvm_points_to key_data_ptr (llvm_term key_data_before);
+
+    llvm_execute_func [state_ptr, key_data_ptr];
+
+    ret <- llvm_fresh_var "ret" (// Result<llvm_alias "LatchState", llvm_alias "ValidationError">);
+    llvm_return (llvm_term ret);
+
+    // Postconditions
+    llvm_points_to key_data_ptr (llvm_term key_data_before);
+};
+
+// Usage: ov_latch_key_local <- llvm_unsafe_assume_spec m "latch_key_local" latch_key_local_auto_spec;
