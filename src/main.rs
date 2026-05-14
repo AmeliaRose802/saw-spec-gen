@@ -1,7 +1,9 @@
 mod clang_ast;
+mod constraints;
+mod cryptol_emit;
+mod llvm_ir;
 mod mir_json;
 mod saw_emit;
-mod constraints;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -9,8 +11,8 @@ use std::path::PathBuf;
 
 /// Auto-generate SAW verification specs from C++ AST and Rust MIR type information.
 ///
-/// Reads compiler-provided type info (clang -ast-dump=json, mir-json output) and
-/// generates SAW override specs with the tightest correct constraints derivable
+/// Reads compiler-provided type info (clang -ast-dump=json, mir-json output, LLVM IR)
+/// and generates SAW override specs with the tightest correct constraints derivable
 /// from the type system, annotations, and compiler attributes.
 #[derive(Parser)]
 #[command(name = "saw-spec-gen", version, about)]
@@ -36,6 +38,17 @@ enum Commands {
         /// Only generate specs for functions matching this pattern
         #[arg(short, long)]
         filter: Option<String>,
+
+        /// Also generate Cryptol type constraint files
+        #[arg(long)]
+        cryptol: bool,
+
+        /// Generate vtable stubs + havoc SAW specs for virtual methods
+        ///
+        /// Produces vtable_stubs.c (compile to .bc and combine with llvm_combine_modules)
+        /// and havoc specs where mutable memory is explicitly havoced by the solver.
+        #[arg(long)]
+        emit_stubs: bool,
     },
 
     /// Generate SAW specs from mir-json output (Rust)
@@ -53,9 +66,17 @@ enum Commands {
         /// Only generate specs for functions matching this pattern
         #[arg(short, long)]
         filter: Option<String>,
+
+        /// Emit mir_verify specs instead of llvm_verify specs
+        #[arg(long)]
+        mir_verify: bool,
+
+        /// Also generate Cryptol type constraint files
+        #[arg(long)]
+        cryptol: bool,
     },
 
-    /// Generate SAW specs from LLVM bitcode attributes (any language)
+    /// Generate SAW specs from LLVM IR text (any language)
     ///
     /// Usage: saw-spec-gen from-llvm-ir --input module.ll --output specs/
     FromLlvmIr {
@@ -70,6 +91,10 @@ enum Commands {
         /// Only generate specs for functions matching this pattern
         #[arg(short, long)]
         filter: Option<String>,
+
+        /// Also generate Cryptol type constraint files
+        #[arg(long)]
+        cryptol: bool,
     },
 }
 
@@ -77,7 +102,13 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::FromClangAst { input, output, filter } => {
+        Commands::FromClangAst {
+            input,
+            output,
+            filter,
+            cryptol,
+            emit_stubs,
+        } => {
             eprintln!("Reading clang AST from: {}", input.display());
             let ast = clang_ast::parse_ast(&input)?;
             let functions = clang_ast::extract_functions(&ast, filter.as_deref())?;
@@ -86,21 +117,75 @@ fn main() -> Result<()> {
             let specs = constraints::derive_constraints(&functions)?;
             saw_emit::emit_saw_specs(&specs, &output)?;
             eprintln!("Generated {} specs in {}", specs.len(), output.display());
+
+            if cryptol {
+                cryptol_emit::emit_cryptol_constraints(&functions, &output)?;
+                eprintln!("Generated Cryptol constraints in {}", output.display());
+            }
+
+            if emit_stubs {
+                let vmethods = clang_ast::extract_virtual_methods(&ast, filter.as_deref())?;
+                if vmethods.is_empty() {
+                    eprintln!("No virtual methods found");
+                } else {
+                    saw_emit::emit_interface_stubs(&vmethods, &output)?;
+                    eprintln!(
+                        "Generated {} interface stubs in {}",
+                        vmethods.len(),
+                        output.display(),
+                    );
+                }
+            }
         }
-        Commands::FromMirJson { input, output, filter } => {
+        Commands::FromMirJson {
+            input,
+            output,
+            filter,
+            mir_verify,
+            cryptol,
+        } => {
             eprintln!("Reading MIR JSON from: {}", input.display());
             let mir = mir_json::parse_mir(&input)?;
             let functions = mir_json::extract_functions(&mir, filter.as_deref())?;
             eprintln!("Found {} functions", functions.len());
 
             let specs = constraints::derive_constraints(&functions)?;
+            if mir_verify {
+                saw_emit::emit_mir_saw_specs(&specs, &output)?;
+                eprintln!(
+                    "Generated {} MIR specs in {}",
+                    specs.len(),
+                    output.display()
+                );
+            } else {
+                saw_emit::emit_saw_specs(&specs, &output)?;
+                eprintln!("Generated {} specs in {}", specs.len(), output.display());
+            }
+
+            if cryptol {
+                cryptol_emit::emit_cryptol_constraints(&functions, &output)?;
+                eprintln!("Generated Cryptol constraints in {}", output.display());
+            }
+        }
+        Commands::FromLlvmIr {
+            input,
+            output,
+            filter,
+            cryptol,
+        } => {
+            eprintln!("Reading LLVM IR from: {}", input.display());
+            let ir = llvm_ir::parse_llvm_ir(&input)?;
+            let functions = llvm_ir::extract_functions(&ir, filter.as_deref())?;
+            eprintln!("Found {} functions", functions.len());
+
+            let specs = constraints::derive_constraints(&functions)?;
             saw_emit::emit_saw_specs(&specs, &output)?;
             eprintln!("Generated {} specs in {}", specs.len(), output.display());
-        }
-        Commands::FromLlvmIr { input, output, filter } => {
-            eprintln!("LLVM IR parsing not yet implemented");
-            eprintln!("For now, use from-clang-ast or from-mir-json");
-            std::process::exit(1);
+
+            if cryptol {
+                cryptol_emit::emit_cryptol_constraints(&functions, &output)?;
+                eprintln!("Generated Cryptol constraints in {}", output.display());
+            }
         }
     }
 

@@ -1,0 +1,172 @@
+// SAW verification of checksum.cpp functions
+// Verifies the auto-generated specs actually match the compiled code
+
+let saw = "C:\\Users\\ameliapayne\\saw-script\\dist-newstyle\\build\\x86_64-windows\\ghc-9.6.7\\saw-1.5.0.99\\x\\saw\\build\\saw\\saw.exe";
+
+// Load the bitcode
+m <- llvm_load_module "checksum.bc";
+
+import "checksum_spec.cry";
+
+// ============================================================================
+// 1. Verify validate_packet: prove it only returns {-1, 0, 1, 2}
+// ============================================================================
+
+let validate_packet_spec : LLVMSetup () = do {
+    // Allocate the struct: %struct.PacketHeader = type { i32, i64, i32 }
+    header_ptr <- llvm_alloc_readonly (llvm_alias "struct.PacketHeader");
+    
+    // Create fresh symbolic values for each field
+    version     <- llvm_fresh_var "version"     (llvm_int 32);
+    timestamp   <- llvm_fresh_var "timestamp"   (llvm_int 64);
+    payload_len <- llvm_fresh_var "payload_len" (llvm_int 32);
+    
+    // Set up the struct fields using the LLVM struct type
+    llvm_points_to header_ptr (llvm_struct_value
+        [ llvm_term version
+        , llvm_term timestamp
+        , llvm_term payload_len
+        ]);
+    
+    llvm_execute_func [header_ptr];
+    
+    ret <- llvm_fresh_var "ret" (llvm_int 32);
+    llvm_postcond {{ valid_return ret }};
+    llvm_return (llvm_term ret);
+};
+
+print "=== Verifying validate_packet (non-null path) ===";
+llvm_verify m "?validate_packet@@YAHPEBUPacketHeader@@@Z" [] false
+    validate_packet_spec
+    z3;
+print "PASS: validate_packet only returns -1, 0, 1, or 2";
+
+// ============================================================================
+// 2. Verify validate_packet returns -1 for null pointer
+// ============================================================================
+
+let validate_packet_null_spec : LLVMSetup () = do {
+    np <- llvm_alloc (llvm_alias "struct.PacketHeader");
+    llvm_precond {{ True }};
+    
+    // Pass null pointer
+    llvm_execute_func [llvm_null];
+    
+    llvm_return (llvm_term {{ (0 - 1) : [32] }});
+};
+
+print "=== Verifying validate_packet(NULL) returns -1 ===";
+llvm_verify m "?validate_packet@@YAHPEBUPacketHeader@@@Z" [] false
+    validate_packet_null_spec
+    z3;
+print "PASS: validate_packet(NULL) == -1";
+
+// ============================================================================
+// 3. Verify validate_packet returns 0 for a known-good header
+// ============================================================================
+
+let validate_packet_good_spec : LLVMSetup () = do {
+    header_ptr <- llvm_alloc_readonly (llvm_alias "struct.PacketHeader");
+    
+    // version=1, timestamp=100, payload_len=256 -- should be valid
+    llvm_points_to header_ptr (llvm_struct_value
+        [ llvm_term {{ 1 : [32] }}
+        , llvm_term {{ 100 : [64] }}
+        , llvm_term {{ 256 : [32] }}
+        ]);
+    
+    llvm_execute_func [header_ptr];
+    
+    llvm_return (llvm_term {{ 0 : [32] }});
+};
+
+print "=== Verifying validate_packet({1, 100, 256}) returns 0 ===";
+llvm_verify m "?validate_packet@@YAHPEBUPacketHeader@@@Z" [] false
+    validate_packet_good_spec
+    z3;
+print "PASS: valid header returns 0";
+
+// ============================================================================
+// 4. Verify validate_packet returns 1 for bad version
+// ============================================================================
+
+let validate_packet_bad_version_spec : LLVMSetup () = do {
+    header_ptr <- llvm_alloc_readonly (llvm_alias "struct.PacketHeader");
+    
+    // version=0 is invalid
+    llvm_points_to header_ptr (llvm_struct_value
+        [ llvm_term {{ 0 : [32] }}
+        , llvm_term {{ 100 : [64] }}
+        , llvm_term {{ 256 : [32] }}
+        ]);
+    
+    llvm_execute_func [header_ptr];
+    
+    llvm_return (llvm_term {{ 1 : [32] }});
+};
+
+print "=== Verifying validate_packet({0, ...}) returns 1 (bad version) ===";
+llvm_verify m "?validate_packet@@YAHPEBUPacketHeader@@@Z" [] false
+    validate_packet_bad_version_spec
+    z3;
+print "PASS: version=0 returns error code 1";
+
+// ============================================================================
+// 5. Verify validate_packet returns 2 for oversized payload
+// ============================================================================
+
+let validate_packet_big_payload_spec : LLVMSetup () = do {
+    header_ptr <- llvm_alloc_readonly (llvm_alias "struct.PacketHeader");
+    
+    // version=1 (valid), but payload_len=100000 > 65536
+    llvm_points_to header_ptr (llvm_struct_value
+        [ llvm_term {{ 1 : [32] }}
+        , llvm_term {{ 100 : [64] }}
+        , llvm_term {{ 100000 : [32] }}
+        ]);
+    
+    llvm_execute_func [header_ptr];
+    
+    llvm_return (llvm_term {{ 2 : [32] }});
+};
+
+print "=== Verifying validate_packet({1, _, 100000}) returns 2 ===";
+llvm_verify m "?validate_packet@@YAHPEBUPacketHeader@@@Z" [] false
+    validate_packet_big_payload_spec
+    z3;
+print "PASS: payload_len > 65536 returns error code 2";
+
+// ============================================================================
+// 6. Verify copy_payload preserves source buffer
+// ============================================================================
+
+let copy_payload_src_unchanged_spec : LLVMSetup () = do {
+    // Allocate a 4-byte source and destination
+    let ty = llvm_array 4 (llvm_int 8);
+    
+    dst_ptr <- llvm_alloc ty;
+    src_ptr <- llvm_alloc_readonly ty;
+    
+    src_val <- llvm_fresh_var "src" ty;
+    dst_val <- llvm_fresh_var "dst" ty;
+    
+    llvm_points_to src_ptr (llvm_term src_val);
+    llvm_points_to dst_ptr (llvm_term dst_val);
+    
+    llvm_execute_func [dst_ptr, src_ptr, llvm_term {{ 4 : [64] }}];
+    
+    // After the call, source is unchanged and dest equals source
+    llvm_points_to src_ptr (llvm_term src_val);
+    llvm_points_to dst_ptr (llvm_term src_val);
+};
+
+print "=== Verifying copy_payload (4 bytes): src unchanged, dst == src ===";
+llvm_verify m "?copy_payload@@YAXPEAEPEBE_K@Z" [] false
+    copy_payload_src_unchanged_spec
+    z3;
+print "PASS: copy_payload correctly copies 4 bytes and preserves source";
+
+print "";
+print "======================================";
+print " ALL 6 VERIFICATIONS PASSED";
+print "======================================";

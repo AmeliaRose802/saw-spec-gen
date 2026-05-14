@@ -1,0 +1,12 @@
+// Cryptol spec for validate_packet return values
+module ChecksumSpec where
+
+// validate_packet can only return: -1, 0, 1, or 2
+valid_return : [32] -> Bit
+valid_return r = r == 0 \/ r == 1 \/ r == 2 \/ r == (0 - 1 : [32])
+
+// If version is in [1..3] and payload_len <= 65536 and
+// expires_at >= issued_at, then result should be 0 (success)
+//
+// PacketHeader layout in LLVM: { i32 version, i64 timestamp, i32 payload_len }
+// But with padding it's actually bytes [0..3]=version, [8..15]=timestamp, [16..19]=payload_len

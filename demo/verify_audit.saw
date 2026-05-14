@@ -1,0 +1,123 @@
+// SAW verification of audit_token
+//
+// validator_validate() and validator_error_code() are UNDEFINED.
+// We model them with havoc specs: the solver chooses ANY behavior
+// consistent with the type system. If the property holds for ALL
+// possible implementations, it's proven universally.
+
+m <- llvm_load_module "audit.bc";
+
+// ============================================================================
+// HAVOC SPEC: validator_validate(const SessionToken *token) -> bool
+//
+// Type-system constraints:
+//   - token is const pointer → memory must be preserved
+//   - return is bool → i1, unconstrained (solver picks any value)
+//   - no mutable pointer args → no side effects on pointed-to memory
+//
+// The solver will explore BOTH return values (true and false).
+// ============================================================================
+
+let validator_validate_havoc : LLVMSetup () = do {
+    token_ptr <- llvm_alloc_readonly (llvm_alias "struct.SessionToken");
+    token_val <- llvm_fresh_var "token" (llvm_alias "struct.SessionToken");
+    llvm_points_to token_ptr (llvm_term token_val);
+
+    llvm_execute_func [token_ptr];
+
+    // Return: solver chooses ANY bool — models all implementations
+    ret <- llvm_fresh_var "validate_ret" (llvm_int 1);
+    llvm_return (llvm_term ret);
+
+    // const pointer → token unchanged after call
+    llvm_points_to token_ptr (llvm_term token_val);
+};
+
+// ============================================================================
+// HAVOC SPEC: validator_error_code() -> int
+//
+// No pointer args. Return is unconstrained i32.
+// Models any function that returns an arbitrary error code.
+// ============================================================================
+
+let validator_error_code_havoc : LLVMSetup () = do {
+    llvm_execute_func [];
+
+    ret <- llvm_fresh_var "error_ret" (llvm_int 32);
+    llvm_return (llvm_term ret);
+};
+
+// ============================================================================
+// Assume the havoc specs (no implementation to prove against)
+// ============================================================================
+
+print "=== Setting up havoc overrides ===";
+ov_validate <- llvm_unsafe_assume_spec m "validator_validate" validator_validate_havoc;
+print "  validator_validate: ANY bool return, token preserved";
+ov_error    <- llvm_unsafe_assume_spec m "validator_error_code" validator_error_code_havoc;
+print "  validator_error_code: ANY i32 return";
+
+// ============================================================================
+// VERIFY: audit_token preserves the token and copies version correctly
+//
+// We prove that for ALL possible implementations of the validator:
+//   1. The const token is not modified
+//   2. result.token_version == token.version
+// ============================================================================
+
+let audit_token_spec : LLVMSetup () = do {
+    // sret: AuditResult returned via pointer
+    result_ptr <- llvm_alloc (llvm_alias "struct.AuditResult");
+
+    // token: const SessionToken*
+    token_ptr <- llvm_alloc_readonly (llvm_alias "struct.SessionToken");
+    version     <- llvm_fresh_var "version"     (llvm_int 32);
+    issued_at   <- llvm_fresh_var "issued_at"   (llvm_int 64);
+    expires_at  <- llvm_fresh_var "expires_at"  (llvm_int 64);
+    hmac        <- llvm_fresh_var "hmac"         (llvm_array 32 (llvm_int 8));
+    llvm_points_to token_ptr (llvm_struct_value
+        [ llvm_term version
+        , llvm_term issued_at
+        , llvm_term expires_at
+        , llvm_term hmac
+        ]);
+
+    llvm_execute_func [result_ptr, token_ptr];
+
+    // PROPERTY 1: token is unchanged (const correctness)
+    llvm_points_to token_ptr (llvm_struct_value
+        [ llvm_term version
+        , llvm_term issued_at
+        , llvm_term expires_at
+        , llvm_term hmac
+        ]);
+
+    // PROPERTY 2: result.token_version == token.version
+    // AuditResult = { i8 valid, i32 error, i32 token_version }
+    result_valid <- llvm_fresh_var "result_valid" (llvm_int 8);
+    result_error <- llvm_fresh_var "result_error" (llvm_int 32);
+    llvm_points_to result_ptr (llvm_struct_value
+        [ llvm_term result_valid
+        , llvm_term result_error
+        , llvm_term version        // token_version == input version
+        ]);
+};
+
+print "";
+print "=== Verifying audit_token ===";
+print "  Proving for ALL possible validator implementations:";
+print "    1. const token is not modified";
+print "    2. result.token_version == token.version";
+
+llvm_verify m "audit_token"
+    [ov_validate, ov_error]
+    false
+    audit_token_spec
+    z3;
+
+print "";
+print "========================================";
+print "  VERIFIED — properties hold for ANY";
+print "  implementation of validator_validate()";
+print "  and validator_error_code()";
+print "========================================";

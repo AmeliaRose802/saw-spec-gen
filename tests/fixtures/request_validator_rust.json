@@ -1,0 +1,135 @@
+{
+    "adts": [
+        {
+            "name": "LatchState",
+            "kind": "enum",
+            "variants": [
+                { "name": "Unlatched", "fields": [] },
+                { "name": "Latched", "fields": [] }
+            ],
+            "discriminant_bits": 64
+        },
+        {
+            "name": "ValidationError",
+            "kind": "enum",
+            "variants": [
+                { "name": "InvalidHeader", "fields": [] },
+                { "name": "ExpiredTimestamp", "fields": [] },
+                { "name": "InvalidSignature", "fields": [] },
+                { "name": "AlreadyLatched", "fields": [] }
+            ],
+            "discriminant_bits": 64
+        },
+        {
+            "name": "MetadataHeader",
+            "kind": "struct",
+            "size": 32,
+            "variants": [{
+                "name": "MetadataHeader",
+                "fields": [
+                    { "name": "version", "ty": "ty::Uint::U32" },
+                    { "name": "timestamp", "ty": "ty::Uint::U64" },
+                    { "name": "content_length", "ty": "ty::Uint::U64" },
+                    { "name": "flags", "ty": "ty::Uint::U32" }
+                ]
+            }]
+        },
+        {
+            "name": "ClaimsHeader",
+            "kind": "struct",
+            "size": 16,
+            "variants": [{
+                "name": "ClaimsHeader",
+                "fields": [
+                    { "name": "issuer_id", "ty": "ty::Uint::U64" },
+                    { "name": "claim_type", "ty": "ty::Uint::U32" },
+                    { "name": "reserved", "ty": "ty::Uint::U32" }
+                ]
+            }]
+        }
+    ],
+    "fns": [
+        {
+            "name": "is_valid_metadata_header",
+            "args": [
+                {
+                    "name": "header",
+                    "ty": "ty::Ref<'_, MetadataHeader, Shared>",
+                    "mut": { "kind": "Not" }
+                }
+            ],
+            "return_ty": "ty::Bool"
+        },
+        {
+            "name": "is_valid_request_date",
+            "args": [
+                {
+                    "name": "timestamp",
+                    "ty": "ty::Uint::U64",
+                    "mut": { "kind": "Not" }
+                },
+                {
+                    "name": "max_age_secs",
+                    "ty": "ty::Uint::U64",
+                    "mut": { "kind": "Not" }
+                }
+            ],
+            "return_ty": "ty::Bool"
+        },
+        {
+            "name": "is_valid_claims_header",
+            "args": [
+                {
+                    "name": "claims",
+                    "ty": "ty::Ref<'_, ClaimsHeader, Shared>",
+                    "mut": { "kind": "Not" }
+                }
+            ],
+            "return_ty": "ty::Bool"
+        },
+        {
+            "name": "latch_local",
+            "args": [
+                {
+                    "name": "state",
+                    "ty": "ty::Ref<'_, LatchState, Mutable>",
+                    "mut": { "kind": "Mut" }
+                }
+            ],
+            "return_ty": "Result<LatchState, ValidationError>"
+        },
+        {
+            "name": "latch_key_local",
+            "args": [
+                {
+                    "name": "state",
+                    "ty": "ty::Ref<'_, LatchState, Mutable>",
+                    "mut": { "kind": "Mut" }
+                },
+                {
+                    "name": "key_data",
+                    "ty": "ty::Ref<'_, [ty::Uint::U8], Shared>",
+                    "mut": { "kind": "Not" }
+                }
+            ],
+            "return_ty": "Result<LatchState, ValidationError>"
+        },
+        {
+            "name": "validate_request",
+            "is_async": true,
+            "args": [
+                {
+                    "name": "header",
+                    "ty": "ty::Ref<'_, MetadataHeader, Shared>",
+                    "mut": { "kind": "Not" }
+                },
+                {
+                    "name": "claims",
+                    "ty": "ty::Ref<'_, ClaimsHeader, Shared>",
+                    "mut": { "kind": "Not" }
+                }
+            ],
+            "return_ty": "impl Future<Output = Result<(), ValidationError>>"
+        }
+    ]
+}

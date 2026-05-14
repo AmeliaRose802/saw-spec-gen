@@ -3,3 +3,14 @@ Cargo.lock
 *.sw?
 .idea/
 .vscode/
+
+# Build artifacts
+*.bc
+demo/*.ll
+demo/*_ast.json
+demo/specs/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
