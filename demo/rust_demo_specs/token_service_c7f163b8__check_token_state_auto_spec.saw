@@ -1,0 +1,26 @@
+// Auto-generated spec for: token_service/c7f163b8::check_token_state
+// Constraints derived from type system and annotations
+
+let token_service_c7f163b8__check_token_state_auto_spec : LLVMSetup () = do {
+
+    // Parameter: _1
+    _1_ptr <- llvm_alloc_readonly (llvm_alias "ty::Ref::336bccb85cd11b0e");
+    _1_before <- llvm_fresh_var "_1" (llvm_alias "ty::Ref::336bccb85cd11b0e");
+    llvm_points_to _1_ptr (llvm_term _1_before);
+
+    // Parameter: _2
+    _2_ptr <- llvm_alloc_readonly (llvm_alias "ty::u64");
+    _2_before <- llvm_fresh_var "_2" (llvm_alias "ty::u64");
+    llvm_points_to _2_ptr (llvm_term _2_before);
+
+    llvm_execute_func [_1_ptr, _2_ptr];
+
+    ret <- llvm_fresh_var "ret" (llvm_alias "ty::Adt::ee4837f2cd293b8e");
+    llvm_return (llvm_term ret);
+
+    // Postconditions
+    llvm_points_to _1_ptr (llvm_term _1_before);
+    llvm_points_to _2_ptr (llvm_term _2_before);
+};
+
+// Usage: ov_token_service_c7f163b8__check_token_state <- llvm_unsafe_assume_spec m "token_service/c7f163b8::check_token_state" token_service_c7f163b8__check_token_state_auto_spec;

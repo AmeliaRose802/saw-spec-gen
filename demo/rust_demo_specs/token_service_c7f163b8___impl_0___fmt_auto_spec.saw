@@ -1,0 +1,26 @@
+// Auto-generated spec for: token_service/c7f163b8::{impl#0}::fmt
+// Constraints derived from type system and annotations
+
+let token_service_c7f163b8___impl_0___fmt_auto_spec : LLVMSetup () = do {
+
+    // Parameter: _1
+    _1_ptr <- llvm_alloc_readonly (llvm_alias "ty::Ref::57020a18c0abfb17");
+    _1_before <- llvm_fresh_var "_1" (llvm_alias "ty::Ref::57020a18c0abfb17");
+    llvm_points_to _1_ptr (llvm_term _1_before);
+
+    // Parameter: _2
+    _2_ptr <- llvm_alloc_readonly (llvm_alias "ty::Ref::2e38315dcf2ffe8f");
+    _2_before <- llvm_fresh_var "_2" (llvm_alias "ty::Ref::2e38315dcf2ffe8f");
+    llvm_points_to _2_ptr (llvm_term _2_before);
+
+    llvm_execute_func [_1_ptr, _2_ptr];
+
+    ret <- llvm_fresh_var "ret" (llvm_alias "ty::Adt::a2830b0d2f9fc058");
+    llvm_return (llvm_term ret);
+
+    // Postconditions
+    llvm_points_to _1_ptr (llvm_term _1_before);
+    llvm_points_to _2_ptr (llvm_term _2_before);
+};
+
+// Usage: ov_token_service_c7f163b8___impl_0___fmt <- llvm_unsafe_assume_spec m "token_service/c7f163b8::{impl#0}::fmt" token_service_c7f163b8___impl_0___fmt_auto_spec;
