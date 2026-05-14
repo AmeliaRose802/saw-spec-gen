@@ -1,0 +1,20 @@
+// Auto-generated spec for: refresh_token
+// Constraints derived from type system and annotations
+
+let refresh_token_auto_spec : LLVMSetup () = do {
+
+    // Parameter: token
+    token_ptr <- llvm_alloc (llvm_array 32 (llvm_int 8));
+    token_val <- llvm_fresh_var "token" (llvm_array 32 (llvm_int 8));
+    llvm_points_to token_ptr (llvm_term token_val);
+
+    // Parameter: new_expiry
+    new_expiry <- llvm_fresh_var "new_expiry" (llvm_int 64);
+
+    llvm_execute_func [token_ptr, llvm_term new_expiry];
+
+    ret <- llvm_fresh_var "ret" (llvm_int 1);
+    llvm_return (llvm_term ret);
+};
+
+// Usage: ov_refresh_token <- llvm_unsafe_assume_spec m "refresh_token" refresh_token_auto_spec;

@@ -1,0 +1,93 @@
+{
+  "adts": [
+    {
+      "name": "TokenState",
+      "kind": "enum",
+      "variants": [
+        { "name": "Valid", "fields": [] },
+        { "name": "Expired", "fields": [] },
+        { "name": "Revoked", "fields": [] }
+      ],
+      "discriminant_bits": 64
+    },
+    {
+      "name": "AuthError",
+      "kind": "enum",
+      "variants": [
+        { "name": "InvalidToken", "fields": [] },
+        { "name": "Expired", "fields": [] },
+        { "name": "InsufficientPermissions", "fields": [] },
+        { "name": "RateLimited", "fields": [] }
+      ],
+      "discriminant_bits": 64
+    },
+    {
+      "name": "SessionToken",
+      "kind": "struct",
+      "size": 32,
+      "variants": [{
+        "name": "SessionToken",
+        "fields": [
+          { "name": "user_id", "ty": "ty::Uint::U64" },
+          { "name": "issued_at", "ty": "ty::Uint::U64" },
+          { "name": "expires_at", "ty": "ty::Uint::U64" },
+          { "name": "permissions", "ty": "ty::Uint::U32" }
+        ]
+      }]
+    },
+    {
+      "name": "ValidationResult",
+      "kind": "struct",
+      "size": 16,
+      "variants": [{
+        "name": "ValidationResult",
+        "fields": [
+          { "name": "state", "ty": "TokenState" },
+          { "name": "remaining_ttl", "ty": "ty::Uint::U64" }
+        ]
+      }]
+    }
+  ],
+  "fns": [
+    {
+      "name": "check_token_state",
+      "args": [
+        { "name": "token", "ty": "ty::Ref<'_, SessionToken, Shared>", "mut": { "kind": "Not" } },
+        { "name": "now", "ty": "ty::Uint::U64", "mut": { "kind": "Not" } }
+      ],
+      "return_ty": "TokenState"
+    },
+    {
+      "name": "refresh_token",
+      "args": [
+        { "name": "token", "ty": "ty::Ref<'_, SessionToken, Mut>", "mut": { "kind": "Mut" } },
+        { "name": "new_expiry", "ty": "ty::Uint::U64", "mut": { "kind": "Not" } }
+      ],
+      "return_ty": "ty::Bool"
+    },
+    {
+      "name": "validate_token",
+      "args": [
+        { "name": "token", "ty": "ty::Ref<'_, SessionToken, Shared>", "mut": { "kind": "Not" } },
+        { "name": "now", "ty": "ty::Uint::U64", "mut": { "kind": "Not" } }
+      ],
+      "return_ty": "Result<ValidationResult, AuthError>"
+    },
+    {
+      "name": "get_remaining_ttl",
+      "args": [
+        { "name": "token", "ty": "ty::Ref<'_, SessionToken, Shared>", "mut": { "kind": "Not" } },
+        { "name": "now", "ty": "ty::Uint::U64", "mut": { "kind": "Not" } }
+      ],
+      "return_ty": "Option<ty::Uint::U64>"
+    },
+    {
+      "name": "validate_remote",
+      "is_async": true,
+      "args": [
+        { "name": "token", "ty": "ty::Ref<'_, SessionToken, Shared>", "mut": { "kind": "Not" } }
+      ],
+      "return_ty": "impl Future"
+    }
+  ]
+}

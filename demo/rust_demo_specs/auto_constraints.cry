@@ -1,0 +1,22 @@
+// Auto-generated Cryptol type constraints
+module AutoConstraints where
+
+// Enum: TokenState (3 variants)
+//   0 = Valid
+//   1 = Expired
+//   2 = Revoked
+valid_TokenState_disc : [64] -> Bit
+valid_TokenState_disc x = x <= 2
+
+// Boolean constraint
+valid_bool : [1] -> Bit
+valid_bool x = x <= 1
+
+// Result<ValidationResult, AuthError>
+valid_result_ValidationResult_AuthError_disc : [8] -> Bit
+valid_result_ValidationResult_AuthError_disc x = x <= 1
+
+// Option<u64>
+valid_option_u64_disc : [8] -> Bit
+valid_option_u64_disc x = x <= 1
+
