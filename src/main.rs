@@ -1,3 +1,5 @@
+mod alias_fallbacks;
+mod alias_fallbacks_ir;
 mod clang_ast;
 mod constraints;
 mod cryptol_emit;

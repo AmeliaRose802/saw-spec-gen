@@ -14,8 +14,7 @@ use std::path::Path;
 const MAX_IR_FILE_SIZE: u64 = 200 * 1024 * 1024;
 
 /// Parse LLVM IR text file and extract function declarations/definitions.
-pub fn parse_llvm_ir(path: &Path) -> Result<String> {
-    // Check file size before loading to avoid OOM
+pub fn parse_llvm_ir(path: &Path) -> Result<String> {    // Check file size before loading to avoid OOM
     let metadata = std::fs::metadata(path)
         .with_context(|| format!("Failed to stat {}", path.display()))?;
     let file_size = metadata.len();
@@ -35,6 +34,25 @@ pub fn parse_llvm_ir(path: &Path) -> Result<String> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("Failed to read {}", path.display()))?;
     Ok(content)
+}
+
+/// Convenience helper that loads optional LLVM IR text and returns both
+/// the struct-size table and parsed function signatures.  Returns empty
+/// values when `path` is None.  Used by `gen-verify` to centralise the
+/// optional-IR plumbing.
+pub fn load_optional(
+    path: Option<&Path>,
+) -> Result<(HashMap<String, usize>, Vec<FunctionInfo>)> {
+    let Some(p) = path else {
+        return Ok((HashMap::new(), Vec::new()));
+    };
+    eprintln!("Reading LLVM IR for struct sizes: {}", p.display());
+    let ir_text = parse_llvm_ir(p)?;
+    let sizes = struct_sizes(&ir_text);
+    eprintln!("  parsed {} struct type definitions", sizes.len());
+    let funcs = extract_functions(&ir_text, None).unwrap_or_default();
+    eprintln!("  parsed {} function signatures (for deref sizes)", funcs.len());
+    Ok((sizes, funcs))
 }
 
 /// Extract function info from LLVM IR text.

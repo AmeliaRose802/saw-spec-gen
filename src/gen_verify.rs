@@ -9,7 +9,7 @@
 
 use crate::spec_rewrite::{apply_alias_rewrites, collect_type_sizes};
 use crate::type_resolve::{needs_resolution, resolve_saw_type};
-use crate::{clang_ast, constraints, llvm_ir, saw_emit};
+use crate::{alias_fallbacks_ir, clang_ast, constraints, llvm_ir, saw_emit};
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -41,22 +41,13 @@ pub fn run(
     let all_functions = clang_ast::extract_functions(&parsed_ast, None)?;
     eprintln!("Found {} functions", all_functions.len());
 
-    // Optional LLVM IR for struct-size resolution.  MSVC-clang fully qualifies
-    // struct symbols (`%"struct.Foo::Bar::Baz"`), so when the AST contains an
-    // incomplete forward decl of `Baz` we can't pick a matching `llvm_alias`
-    // unless we know the IR-side name.  When `--llvm-ir` is supplied we parse
-    // the .ll for every `%struct.X = type {...}` and replace any unsized
-    // `llvm_alias` parameter type with `llvm_array N (llvm_int 8)`.
-    let ir_struct_sizes: HashMap<String, usize> = match llvm_ir_path {
-        Some(p) => {
-            eprintln!("Reading LLVM IR for struct sizes: {}", p.display());
-            let ir_text = llvm_ir::parse_llvm_ir(p)?;
-            let sizes = llvm_ir::struct_sizes(&ir_text);
-            eprintln!("  parsed {} struct type definitions", sizes.len());
-            sizes
-        }
-        None => HashMap::new(),
-    };
+    // Optional LLVM IR for struct-size resolution and parameter-level
+    // `dereferenceable(N)` attributes.  MSVC-clang fully qualifies struct
+    // symbols, so when the AST has an incomplete forward decl of `Baz`
+    // we can't pick a matching `llvm_alias` unless we know the IR-side
+    // name; the IR also carries deref sizes for forward-declared types
+    // (e.g. `HttpRequest`) and `std::tuple<…>` sret return slots.
+    let (ir_struct_sizes, ir_funcs) = llvm_ir::load_optional(llvm_ir_path)?;
 
     // Find the target function (FunctionInfo with call graph)
     let target_fn = all_functions
@@ -506,18 +497,22 @@ pub fn run(
     )?;
 
     // Post-processing: rewrite any `llvm_alias "X"` reference SAW can't
-    // resolve into a sized byte array.  Without this, emitters that go
-    // straight through `type_to_saw` (havoc specs, vtable stub setups,
+    // resolve into a concrete SAW type.  Emitters that go straight
+    // through `type_to_saw` (havoc specs, vtable stub setups,
     // experimental override specs) leave short C++ names like
     // `HttpRequest`, `std::tuple<…>`, `SessionState`, or `LatchResult`
-    // in the output — none of which exist in the bitcode's struct
-    // table (clang fully namespace-qualifies them), so SAW aborts on
-    // the first load with "alias not found".  The byte-array fallback
-    // is sound for override specs because SAW only needs the
-    // allocation size, not the field layout, when the memory is
-    // havoced symbolically.
-    let extra_sizes = collect_type_sizes(&all_functions);
-    apply_alias_rewrites(output, &ir_struct_sizes, &extra_sizes);
+    // in the output — none of which exist in the bitcode's struct table.
+    // Structs fall back to `llvm_array N (llvm_int 8)`; enums fall back
+    // to `llvm_int <bits>` to match the ABI lowering.
+    let mut fallbacks = collect_type_sizes(&all_functions);
+    if !ir_funcs.is_empty() {
+        alias_fallbacks_ir::add_ir_deref_fallbacks(
+            &mut fallbacks,
+            &all_functions,
+            &ir_funcs,
+        );
+    }
+    apply_alias_rewrites(output, &ir_struct_sizes, &fallbacks);
 
     eprintln!("Generated verification script in {}", output.display());
     eprintln!("Run with: saw {}/verify.saw", output.display());
