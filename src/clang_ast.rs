@@ -1460,9 +1460,47 @@ fn compute_class_layout(
     Some((format!("class.{}", layout_name), all_fields))
 }
 
+/// Walk the entire AST and return every `EnumDecl` definition as a
+/// `name → bit width` map.  Used by the post-processing pass to fall
+/// back unresolved `llvm_alias "EnumName"` references to `llvm_int N`
+/// regardless of whether any collected function references the enum
+/// (handles forward-declared enums whose `EnumDecl` lives in a header
+/// outside the call graph reach).
+pub fn collect_all_enum_bits(ast: &Value) -> HashMap<String, u32> {
+    let mut out: HashMap<String, u32> = HashMap::new();
+    walk_enum_decls(ast, &mut out);
+    out
+}
+
+fn walk_enum_decls(node: &Value, out: &mut HashMap<String, u32>) {
+    if node.get("kind").and_then(|v| v.as_str()) == Some("EnumDecl") {
+        if let Some(name) = node.get("name").and_then(|v| v.as_str()) {
+            let bits = node
+                .get("fixedUnderlyingType")
+                .and_then(|v| v.get("qualType"))
+                .and_then(|v| v.as_str())
+                .map(|qt| match qt {
+                    "uint8_t" | "int8_t" | "char" | "unsigned char" | "signed char" => 8u32,
+                    "uint16_t" | "int16_t" | "short" | "unsigned short" => 16,
+                    "uint64_t" | "int64_t" | "long long" | "unsigned long long" => 64,
+                    _ => 32,
+                })
+                .unwrap_or(32);
+            let entry = out.entry(name.to_string()).or_insert(bits);
+            if bits > *entry {
+                *entry = bits;
+            }
+        }
+    }
+    if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
+        for child in inner {
+            walk_enum_decls(child, out);
+        }
+    }
+}
+
 /// Recursively collect enum definitions from EnumDecl nodes.
-fn collect_enum_defs(node: &Value, ctx: &mut TypeContext) {
-    if let Some(kind) = node.get("kind").and_then(|v| v.as_str()) {
+fn collect_enum_defs(node: &Value, ctx: &mut TypeContext) {    if let Some(kind) = node.get("kind").and_then(|v| v.as_str()) {
         if kind == "EnumDecl" {
             if let Some(name) = node.get("name").and_then(|v| v.as_str()) {
                 // Determine bit width from fixedUnderlyingType or default to 32

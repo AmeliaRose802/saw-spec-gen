@@ -505,6 +505,11 @@ pub fn run(
     // Structs fall back to `llvm_array N (llvm_int 8)`; enums fall back
     // to `llvm_int <bits>` to match the ABI lowering.
     let mut fallbacks = collect_type_sizes(&all_functions);
+    // Seed enum_bits from every EnumDecl in the AST so forward-declared
+    // enums like `LatchResult` still get the `llvm_int <bits>` fallback.
+    for (name, bits) in clang_ast::collect_all_enum_bits(&parsed_ast) {
+        fallbacks.enum_bits.entry(name).or_insert(bits);
+    }
     if !ir_funcs.is_empty() {
         alias_fallbacks_ir::add_ir_deref_fallbacks(
             &mut fallbacks,

@@ -8,27 +8,42 @@
 //! that the rewriter looks up.
 
 use crate::alias_fallbacks::{deref_annotation, pointee_name, AliasFallbacks};
-use crate::constraints::{Annotation, FunctionInfo};
+use crate::constraints::{Annotation, FunctionInfo, TypeInfo};
 use std::collections::HashMap;
 
 /// Merge LLVM IR-derived `dereferenceable(N)` annotations into `fb`.
 ///
-/// For each AST function we look up the matching IR function by mangled
-/// name, then:
+/// Runs two passes:
 ///
-///   1. If the IR has an `sret` hidden parameter at position 0,
-///      attribute its deref size to the AST's return type's name.
-///      This is the only reliable source of size for `std::tuple<…>`
-///      returned by value — the ABI rewrites the C++ source's
-///      `tuple foo()` into
-///      `void foo(sret(%struct.…tuple…) dereferenceable(N) ptr %ret, …)`.
-///   2. For each remaining AST parameter, copy the IR parameter's
-///      deref size (at the same position, offset by the sret slot if
-///      present) onto the AST param's pointee type name.  Covers
-///      forward-declared types like `HttpRequest` (size known from the
-///      IR's `dereferenceable(112)` attribute but not from the AST's
-///      empty field layout).
+///   1. **AST-matched merge** — for each AST function we look up the
+///      matching IR function by mangled name and copy each IR
+///      parameter's deref size onto the AST param's pointee type name.
+///      Sret slot deref → AST return type's name.  This is the most
+///      precise mapping (one AST type name per IR param).
+///   2. **IR-only fallback** — for every IR parameter whose pointee
+///      type is itself a known struct in the IR struct table, we
+///      attribute the deref directly to the struct's short name (the
+///      C++ class name, stripped of namespaces).  Catches:
+///        - Virtual interface methods that the AST records under a
+///          different mangled name than the IR uses for the same
+///          symbol (rare but happens with MSVC vtable thunks).
+///        - Functions where the AST's `parentDeclContextId` resolution
+///          failed and the mangled name on the AST node doesn't match
+///          the IR's `define`/`declare` line exactly.
+///        - sret return slots of `std::tuple<…>` whose IR struct name
+///          gets sufficient size info via the deref attribute even when
+///          the AST function isn't found.
 pub fn add_ir_deref_fallbacks(
+    fb: &mut AliasFallbacks,
+    ast_funcs: &[FunctionInfo],
+    ir_funcs: &[FunctionInfo],
+) {
+    merge_via_ast_match(fb, ast_funcs, ir_funcs);
+    merge_via_ir_only(fb, ir_funcs);
+}
+
+/// Pass 1: precise AST↔IR match by mangled name.
+fn merge_via_ast_match(
     fb: &mut AliasFallbacks,
     ast_funcs: &[FunctionInfo],
     ir_funcs: &[FunctionInfo],
@@ -38,26 +53,15 @@ pub fn add_ir_deref_fallbacks(
         ir_by_name.insert(f.name.as_str(), f);
     }
     for ast in ast_funcs {
-        // Match by mangled name; the IR's function name *is* the
-        // mangled symbol.  Functions whose AST entry lacks a mangled
-        // name (e.g. `extern "C"` decls) won't merge — but they also
-        // wouldn't appear under an `llvm_alias` reference because
-        // there's no C++ class involved.
-        let Some(mangled) = ast.mangled_name.as_deref() else {
-            continue;
-        };
-        let Some(ir) = ir_by_name.get(mangled).copied() else {
+        let Some(ir) = find_ir_match(ast, &ir_by_name, ir_funcs) else {
             continue;
         };
 
-        // Detect IR sret offset.  The IR parser tags the hidden return
-        // pointer with `Annotation::Custom("sret")` on the first param.
         let sret_offset = match ir.params.first() {
             Some(p) if is_sret_param(&p.annotations) => 1,
             _ => 0,
         };
 
-        // Sret deref size → AST return type's name.
         if sret_offset == 1 {
             if let (Some(sret), Some(name)) =
                 (ir.params.first(), pointee_name(&ast.return_type))
@@ -68,7 +72,6 @@ pub fn add_ir_deref_fallbacks(
             }
         }
 
-        // Per-param deref size → AST param's pointee name.
         for (i, ast_p) in ast.params.iter().enumerate() {
             let Some(ir_p) = ir.params.get(i + sret_offset) else {
                 continue;
@@ -80,6 +83,100 @@ pub fn add_ir_deref_fallbacks(
                 fb.insert_bytes(name, n);
             }
         }
+    }
+}
+
+/// Locate an IR function that corresponds to `ast`.
+///
+///   1. Exact match on the AST's mangled name (the canonical path).
+///   2. Failing that, if the AST function's name appears as a unique
+///      *suffix* of exactly one IR mangled name, accept that match.
+///      Catches the case where the AST node has no `mangledName`
+///      (rare — happens for some virtual / abstract methods clang
+///      dumps without mangling) but the IR symbol is unambiguous.
+fn find_ir_match<'a>(
+    ast: &FunctionInfo,
+    ir_by_name: &HashMap<&str, &'a FunctionInfo>,
+    ir_funcs: &'a [FunctionInfo],
+) -> Option<&'a FunctionInfo> {
+    if let Some(mangled) = ast.mangled_name.as_deref() {
+        if let Some(ir) = ir_by_name.get(mangled).copied() {
+            return Some(ir);
+        }
+    }
+    // Fallback: unique unmangled-name match.  C++ method names appear
+    // as substrings of their mangled form (e.g. `HandleRequest` →
+    // `?HandleRequest@MyClass@@…`).  Only accept when exactly one IR
+    // function contains the name to avoid attributing deref sizes to
+    // the wrong overload.
+    let needle = ast.name.as_str();
+    if needle.is_empty() {
+        return None;
+    }
+    let matches: Vec<&FunctionInfo> = ir_funcs
+        .iter()
+        .filter(|f| f.name.contains(needle))
+        .collect();
+    if matches.len() == 1 {
+        Some(matches[0])
+    } else {
+        None
+    }
+}
+
+/// Pass 2: attribute IR deref sizes to the IR pointee's short name
+/// directly, ignoring AST matching entirely.
+///
+/// LLVM IR carries the struct name on `sret(%struct.Foo::Bar::X)`
+/// attributes and (when not lowered to opaque `ptr`) on the type-string
+/// of struct-typed parameters.  We record the deref size under both
+/// the *fully-qualified* C++ name (with namespaces, matching e.g.
+/// `std::tuple<…>`) and the short last-component name (matching e.g.
+/// `HttpRequest` after the rewriter's suffix-strip) — the rewriter
+/// looks up whichever form `type_to_saw` happened to emit.
+fn merge_via_ir_only(fb: &mut AliasFallbacks, ir_funcs: &[FunctionInfo]) {
+    for ir in ir_funcs {
+        for p in &ir.params {
+            let Some(n) = deref_annotation(&p.annotations) else {
+                continue;
+            };
+            for key in ir_pointee_name_variants(&p.ty) {
+                fb.insert_bytes(key, n);
+            }
+        }
+    }
+}
+
+/// Extract the candidate C++ name keys from an IR-side `TypeInfo`.
+///
+/// Returns up to two keys:
+///   1. The fully-qualified C++ name (`std::tuple<…>` once
+///      `struct.`/`class.` is stripped).
+///   2. The short last-component name (`HttpRequest` after the final
+///      `::`).  Only emitted when it differs from the fully-qualified
+///      form and is non-empty.
+fn ir_pointee_name_variants(ty: &TypeInfo) -> Vec<&str> {
+    let target = match ty {
+        TypeInfo::Pointer(inner) => inner.as_ref(),
+        other => other,
+    };
+    let name = match target {
+        TypeInfo::Struct { name, .. } | TypeInfo::Opaque { name, .. } => name.as_str(),
+        _ => return Vec::new(),
+    };
+    let full = name
+        .strip_prefix("struct.")
+        .or_else(|| name.strip_prefix("class."))
+        .or_else(|| name.strip_prefix("union."))
+        .unwrap_or(name);
+    if full.is_empty() {
+        return Vec::new();
+    }
+    let short = full.rsplit("::").next().unwrap_or(full);
+    if short.is_empty() || short == full {
+        vec![full]
+    } else {
+        vec![full, short]
     }
 }
 
@@ -261,6 +358,8 @@ mod tests {
 
     #[test]
     fn ir_deref_skips_when_no_matching_mangled_name() {
+        // No AST match AND IR pointee is a raw i8 pointer (no struct
+        // name) — neither pass should record anything for "X".
         let ast = ast_func(
             "?a@@",
             vec![param(
@@ -284,5 +383,61 @@ mod tests {
         let mut fb = AliasFallbacks::default();
         add_ir_deref_fallbacks(&mut fb, &[ast], &[ir]);
         assert!(fb.bytes.get("X").is_none());
+    }
+
+    #[test]
+    fn ir_only_fallback_picks_up_qualified_struct_short_name() {
+        // No AST function provided.  IR has a function whose param
+        // pointee is a fully-qualified struct name with deref(112).
+        // The IR-only pass must record BOTH the full name and the
+        // short tail under the deref size.
+        let ir = ir_func(
+            "?unknown_mangling@@",
+            vec![ir_param(
+                TypeInfo::Pointer(Box::new(TypeInfo::Opaque {
+                    name: "struct.Microsoft::Azure::Host::HttpRequest".into(),
+                    size_bytes: 0,
+                })),
+                Some(112),
+                false,
+            )],
+            TypeInfo::Void,
+        );
+        let mut fb = AliasFallbacks::default();
+        add_ir_deref_fallbacks(&mut fb, &[], &[ir]);
+        assert_eq!(fb.bytes.get("HttpRequest").copied(), Some(112));
+        assert_eq!(
+            fb.bytes
+                .get("Microsoft::Azure::Host::HttpRequest")
+                .copied(),
+            Some(112)
+        );
+    }
+
+    #[test]
+    fn ir_only_fallback_keeps_template_name_intact() {
+        // `std::tuple<...>` should be recorded under its full
+        // C++-namespaced form so the rewriter's exact-match on
+        // `llvm_alias "std::tuple<...>"` finds it.  We also record the
+        // short tail (`tuple<...>`) but it's irrelevant for the
+        // rewriter's purposes — the test is mostly to catch
+        // regressions in name parsing.
+        let full = "struct.std::tuple<KeyStoreOperationResult, LatchableKey>";
+        let ir = ir_func(
+            "?some_func@@",
+            vec![ir_param(
+                TypeInfo::Pointer(Box::new(TypeInfo::Opaque {
+                    name: full.into(),
+                    size_bytes: 0,
+                })),
+                Some(48),
+                true,
+            )],
+            TypeInfo::Void,
+        );
+        let mut fb = AliasFallbacks::default();
+        add_ir_deref_fallbacks(&mut fb, &[], &[ir]);
+        let expected = "std::tuple<KeyStoreOperationResult, LatchableKey>";
+        assert_eq!(fb.bytes.get(expected).copied(), Some(48));
     }
 }
