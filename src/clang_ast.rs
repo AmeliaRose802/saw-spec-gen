@@ -9,9 +9,84 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Mutex;
+use std::sync::OnceLock;
 
 /// Maximum file size we'll attempt to load into memory (100 MB).
 const MAX_AST_FILE_SIZE: u64 = 100 * 1024 * 1024;
+
+/// Process-wide cache of source-file contents, keyed by absolute path.
+///
+/// Clang's JSON AST dump emits the *kind* of an `AnnotateAttr` but drops
+/// the string argument. To recover SAL macro names like `_Out_` we read
+/// the original source file at the attribute's `expansionLoc` and extract
+/// the token. Caching avoids re-reading the same .cpp/.h files for every
+/// annotation in large translation units.
+fn source_cache() -> &'static Mutex<HashMap<String, String>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Read `len` bytes starting at byte `offset` from `path`. Returns `None`
+/// if the file cannot be opened, the slice is out of range, or the bytes
+/// are not valid UTF-8. The file contents are cached for subsequent
+/// lookups within the same process.
+fn read_source_token(path: &str, offset: usize, len: usize) -> Option<String> {
+    let mut cache = source_cache().lock().ok()?;
+    let contents = if let Some(c) = cache.get(path) {
+        c.clone()
+    } else {
+        let c = std::fs::read_to_string(path).ok()?;
+        cache.insert(path.to_string(), c.clone());
+        c
+    };
+    let bytes = contents.as_bytes();
+    let end = offset.checked_add(len)?;
+    if end > bytes.len() {
+        return None;
+    }
+    std::str::from_utf8(&bytes[offset..end]).ok().map(|s| s.to_string())
+}
+
+/// Bundled type resolution context: struct/class definitions + enum definitions.
+struct TypeContext {
+    /// Struct/class name → list of (field_name, field_type) pairs
+    structs: HashMap<String, Vec<(String, TypeInfo)>>,
+    /// Set of class names that contain at least one `mutable`-qualified data
+    /// member (directly or in a base class). Used to detect the
+    /// `mutable`-keyword hole in the const-method havoc model: when a class
+    /// has any `mutable` field, a `const` method can still legally modify
+    /// it, so `this` cannot be treated as fully read-only.
+    classes_with_mutable_field: std::collections::HashSet<String>,
+    /// Class name → list of immediate base-class names (in declaration order).
+    /// Populated by `collect_struct_defs`.
+    class_bases: HashMap<String, Vec<String>>,
+    /// Class name → list of own data members in declaration order
+    /// (excluding the implicit vptr). Each entry is
+    /// `(field_name, TypeInfo, default_value_literal)`.
+    /// `default_value_literal` is a Cryptol/integer literal string (e.g.
+    /// "0") when the AST has an in-class initializer; otherwise empty.
+    class_own_fields: HashMap<String, Vec<(String, TypeInfo, String)>>,
+    /// Set of polymorphic class names (i.e. classes whose hierarchy contains
+    /// at least one `virtual` method). These are the classes whose layout
+    /// begins with a vptr.
+    polymorphic_classes: std::collections::HashSet<String>,
+    /// Enum name → (variant_names, discriminant_bits)
+    enums: HashMap<String, (Vec<String>, u32)>,
+}
+
+impl TypeContext {
+    fn new() -> Self {
+        TypeContext {
+            structs: HashMap::new(),
+            classes_with_mutable_field: std::collections::HashSet::new(),
+            class_bases: HashMap::new(),
+            class_own_fields: HashMap::new(),
+            polymorphic_classes: std::collections::HashSet::new(),
+            enums: HashMap::new(),
+        }
+    }
+}
 
 /// Parse a clang AST JSON dump.
 ///
@@ -40,6 +115,40 @@ pub fn parse_ast(path: &Path) -> Result<Value> {
         .with_context(|| format!("Failed to read {}", path.display()))?;
     parse_ast_str(&content)
         .with_context(|| format!("Failed to parse JSON from {}", path.display()))
+}
+
+/// Merge multiple parsed ASTs into a single synthetic `TranslationUnitDecl`.
+///
+/// Each input's top-level `inner` array is concatenated **only when the
+/// input is itself a `TranslationUnitDecl`**.  Any other kind of node (e.g.
+/// a single filtered `CXXRecordDecl` from `clang -ast-dump-filter`) is
+/// appended as a top-level child of the synthetic TU instead.  This is
+/// critical: a `CXXRecordDecl` *also* has an `inner` array (its members),
+/// so unwrapping based solely on the presence of `inner` would flatten a
+/// filtered class dump's methods into the TU root — stripping the
+/// enclosing-class context and causing `extract_virtual_methods` to fall
+/// back to `"Unknown"` for every virtual method (collapsing all interfaces
+/// into a single `@unknown_vtable`).
+///
+/// No deduplication is performed — clang emits stable IDs per file, so
+/// callers should pass ASTs from distinct files (e.g. the consumer + each
+/// interface header) rather than overlapping dumps.
+pub fn merge_asts(asts: Vec<Value>) -> Value {
+    let mut combined_inner = Vec::new();
+    for ast in asts {
+        let is_tu = ast.get("kind").and_then(|v| v.as_str()) == Some("TranslationUnitDecl");
+        if is_tu {
+            if let Some(arr) = ast.get("inner").and_then(|v| v.as_array()) {
+                combined_inner.extend(arr.iter().cloned());
+            }
+        } else {
+            combined_inner.push(ast);
+        }
+    }
+    serde_json::json!({
+        "kind": "TranslationUnitDecl",
+        "inner": combined_inner,
+    })
 }
 
 /// Parse AST from string, handling concatenated JSON objects.
@@ -129,22 +238,172 @@ pub struct InterfaceMethod {
     pub method: FunctionInfo,
     /// Whether this is a pure virtual (= 0)
     pub is_pure: bool,
+    /// Whether this method overrides a base-class method (carries
+    /// `OverrideAttr`). True for derived-class overrides; false for
+    /// methods first declared on the class itself.
+    pub is_override: bool,
+    /// Source-location offset of the method's declaration, used to order
+    /// methods by their appearance in the class definition (which is the
+    /// order MSVC assigns vtable slots). Falls back to 0 when the AST
+    /// node has no offset (e.g. implicit/synthesized methods).
+    pub source_offset: u64,
+}
+
+/// Check which classes have a virtual destructor in the AST.
+///
+/// A class is considered to have a virtual dtor when either:
+///   - it declares an explicit `virtual ~T()` (clang sets `"virtual": true`
+///     on the `CXXDestructorDecl`); OR
+///   - it declares `~T() override` (clang attaches an `OverrideAttr` but
+///     does NOT set `"virtual": true` — same quirk as for override methods);
+///     OR
+///   - any of its base classes (transitively) has a virtual dtor — the
+///     derived class inherits the vtable slot even if it doesn't redeclare
+///     the destructor.
+pub fn classes_with_virtual_dtor(ast: &Value) -> std::collections::HashSet<String> {
+    let mut result = std::collections::HashSet::new();
+    let mut bases: HashMap<String, Vec<String>> = HashMap::new();
+    collect_virtual_dtors(ast, &mut result, &mut bases, None);
+    propagate_vdtor_through_bases(&mut result, &bases);
+    result
+}
+
+fn collect_virtual_dtors(
+    node: &Value,
+    out: &mut std::collections::HashSet<String>,
+    bases: &mut HashMap<String, Vec<String>>,
+    enclosing_class: Option<&str>,
+) {
+    let kind = node.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+
+    let class_for_children = if kind == "CXXRecordDecl"
+        || kind == "ClassTemplateSpecializationDecl"
+    {
+        node.get("name").and_then(|v| v.as_str())
+    } else {
+        None
+    };
+
+    // Track base classes so we can propagate virtual-dtor-ness through
+    // inheritance after the first pass.
+    if let Some(class_name) = class_for_children {
+        if let Some(base_arr) = node.get("bases").and_then(|v| v.as_array()) {
+            let mut base_names = Vec::new();
+            for b in base_arr {
+                if let Some(bn) = b
+                    .get("type")
+                    .and_then(|t| t.get("qualType"))
+                    .and_then(|q| q.as_str())
+                {
+                    // Strip any "class "/"struct " prefix and access
+                    // specifier noise — we want bare class names that
+                    // match keys produced elsewhere in the walker.
+                    let bn = bn
+                        .trim_start_matches("class ")
+                        .trim_start_matches("struct ")
+                        .to_string();
+                    base_names.push(bn);
+                }
+            }
+            if !base_names.is_empty() {
+                bases.insert(class_name.to_string(), base_names);
+            }
+        }
+    }
+
+    if kind == "CXXDestructorDecl" {
+        let is_virtual = node.get("virtual").and_then(|v| v.as_bool()).unwrap_or(false);
+        let is_implicit = node.get("isImplicit").and_then(|v| v.as_bool()).unwrap_or(false);
+        // `~T() override` is also virtual via the vtable, but clang does
+        // NOT set `"virtual": true` on it — it attaches an `OverrideAttr`
+        // instead. Detect that case so derived classes don't get a
+        // truncated vtable.
+        let has_override_attr = node
+            .get("inner")
+            .and_then(|v| v.as_array())
+            .map(|inner| {
+                inner.iter().any(|c| {
+                    c.get("kind").and_then(|v| v.as_str()) == Some("OverrideAttr")
+                })
+            })
+            .unwrap_or(false);
+        if (is_virtual || has_override_attr) && !is_implicit {
+            if let Some(class) = enclosing_class {
+                out.insert(class.to_string());
+            }
+        }
+    }
+
+    let next_class = class_for_children.or(enclosing_class);
+    if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
+        for child in inner {
+            collect_virtual_dtors(child, out, bases, next_class);
+        }
+    }
+}
+
+/// Once direct virtual-dtor declarations are collected, walk the
+/// inheritance graph to fixpoint and mark any class whose base (transitively)
+/// has a virtual dtor. Without this, a derived class that doesn't redeclare
+/// `~T()` would get a vtable with no dtor slot — shifting every method by
+/// one relative to the base layout.
+fn propagate_vdtor_through_bases(
+    set: &mut std::collections::HashSet<String>,
+    bases: &HashMap<String, Vec<String>>,
+) {
+    loop {
+        let mut changed = false;
+        let derived: Vec<String> = bases.keys().cloned().collect();
+        for cls in derived {
+            if set.contains(&cls) {
+                continue;
+            }
+            if let Some(bs) = bases.get(&cls) {
+                if bs.iter().any(|b| set.contains(b)) {
+                    set.insert(cls);
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
 }
 
 /// Extract function info from the clang AST.
 pub fn extract_functions(ast: &Value, filter: Option<&str>) -> Result<Vec<FunctionInfo>> {
-    // First pass: collect struct/class definitions for type resolution
-    let mut struct_map: HashMap<String, Vec<(String, TypeInfo)>> = HashMap::new();
-    collect_struct_defs(ast, &mut struct_map);
+    // First pass: collect struct/class + enum definitions for type resolution
+    let mut ctx = TypeContext::new();
+    collect_struct_defs(ast, &mut ctx);
+    collect_enum_defs(ast, &mut ctx);
+    // After collecting per-class fields, propagate `mutable`-field flags
+    // through inheritance so derived classes inherit the property. This
+    // closes the const-method havoc hole: a `const` method on a class with
+    // a `mutable` field (own or inherited) must still treat `this` as
+    // writable for that field.
+    propagate_mutable_through_bases(&mut ctx);
 
     // Also build a map from clang node IDs (hex strings like "0x1ffd7063098")
     // to class/struct names, so we can resolve parentDeclContextId on methods.
     let mut id_to_name: HashMap<String, String> = HashMap::new();
     collect_node_ids(ast, &mut id_to_name);
 
+    // Collect global variables (top-level VarDecl with mangledName)
+    let globals = collect_globals(ast, &ctx);
+
     // Second pass: collect function declarations
     let mut functions = Vec::new();
-    collect_functions(ast, &mut functions, filter, &struct_map, &id_to_name);
+    collect_functions(ast, &mut functions, filter, &ctx, &id_to_name);
+
+    // Third pass: resolve referenced globals for each function
+    resolve_referenced_globals(ast, &mut functions, &globals);
+
+    // Fourth pass: resolve called functions for each function
+    let mut id_to_fn: HashMap<String, (String, String)> = HashMap::new();
+    collect_function_decl_ids(ast, &mut id_to_fn);
+    resolve_called_functions(ast, &mut functions, &id_to_fn);
+
     Ok(functions)
 }
 
@@ -152,33 +411,296 @@ pub fn extract_functions(ast: &Value, filter: Option<&str>) -> Result<Vec<Functi
 ///
 /// Returns `InterfaceMethod` entries for each virtual method found.
 /// These can be used to generate vtable resolution stubs and havoc specs.
+/// A constructor from a C++ class, used for generating constructor overrides.
+#[derive(Debug, Clone)]
+pub struct ClassConstructor {
+    /// The class name (e.g. "OkLog")
+    pub class_name: String,
+    /// The mangled constructor name (e.g. "??0OkLog@@QEAA@XZ")
+    pub mangled_name: String,
+    /// The LLVM struct type name to use when allocating `this` in the
+    /// constructor override (e.g. "class.ILogger"). Picked as the topmost
+    /// polymorphic ancestor that owns the class's data layout — clang emits
+    /// only that name when a derived class adds no new fields.
+    pub layout_type_name: String,
+    /// Non-vptr data members in the order they appear in the layout class.
+    /// Each entry: (field_name, TypeInfo, default_value_literal). Empty
+    /// `default_value_literal` means "no in-class initializer" (treat as 0
+    /// for POD types).
+    pub layout_fields: Vec<(String, TypeInfo, String)>,
+}
+
 pub fn extract_virtual_methods(ast: &Value, filter: Option<&str>) -> Result<Vec<InterfaceMethod>> {
-    let mut struct_map: HashMap<String, Vec<(String, TypeInfo)>> = HashMap::new();
-    collect_struct_defs(ast, &mut struct_map);
+    
+    let mut ctx = TypeContext::new();
+    collect_struct_defs(ast, &mut ctx);
+    collect_enum_defs(ast, &mut ctx);
+    propagate_mutable_through_bases(&mut ctx);
 
     let mut id_to_name: HashMap<String, String> = HashMap::new();
     collect_node_ids(ast, &mut id_to_name);
 
     let mut methods = Vec::new();
-    collect_virtual_methods(ast, &mut methods, filter, &struct_map, &id_to_name);
+    collect_virtual_methods(ast, &mut methods, filter, &ctx, &id_to_name);
     Ok(methods)
+}
+
+/// Extract constructors for classes that have virtual methods.
+///
+/// Given the set of class names from `extract_virtual_methods`, finds
+/// their `CXXConstructorDecl` nodes and returns their mangled names.
+pub fn extract_constructors(ast: &Value, class_names: &[String]) -> Result<Vec<ClassConstructor>> {
+    // Build a type context so we can resolve each ctor's class layout
+    // (LLVM struct name + ordered fields with default-init literals).
+    let mut ctx = TypeContext::new();
+    collect_struct_defs(ast, &mut ctx);
+    collect_enum_defs(ast, &mut ctx);
+    propagate_mutable_through_bases(&mut ctx);
+
+    let mut ctors = Vec::new();
+    collect_constructors(ast, &mut ctors, class_names, None, &ctx);
+    Ok(ctors)
+}
+
+/// A reference to an interface type that is missing from the AST.
+#[derive(Debug, Clone)]
+pub struct MissingInterfaceRef {
+    /// The class that holds the reference (e.g. "KeyExchangeSession")
+    pub owning_class: String,
+    /// The field name (e.g. "KeyStore")
+    pub field_name: String,
+    /// The wrapper type (e.g. "std::unique_ptr")
+    pub wrapper: String,
+    /// The interface type name (e.g. "IKeyStore")
+    pub interface_name: String,
+}
+
+/// Detect interface types referenced by class fields but missing from the AST.
+///
+/// Scans `CXXRecordDecl` nodes for fields of type `unique_ptr<T>`, `shared_ptr<T>`,
+/// or `T*` where `T` starts with "I" (common C++ interface naming convention) and
+/// `T` has no `CXXRecordDecl` with virtual methods in the current AST.
+pub fn detect_missing_interfaces(ast: &Value) -> Vec<MissingInterfaceRef> {
+    // Collect all class names that ARE present in the AST
+    let mut known_classes: std::collections::HashSet<String> = std::collections::HashSet::new();
+    collect_known_classes(ast, &mut known_classes);
+
+    // Walk all record decls and check field types
+    let mut missing = Vec::new();
+    collect_missing_interface_refs(ast, &mut missing, &known_classes, None);
+
+    // Deduplicate by interface_name
+    missing.sort_by(|a, b| a.interface_name.cmp(&b.interface_name));
+    missing.dedup_by(|a, b| a.interface_name == b.interface_name && a.owning_class == b.owning_class);
+    missing
+}
+
+fn collect_known_classes(node: &Value, out: &mut std::collections::HashSet<String>) {
+    let kind = node.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+    if kind == "CXXRecordDecl" || kind == "ClassTemplateSpecializationDecl" {
+        if let Some(name) = node.get("name").and_then(|v| v.as_str()) {
+            out.insert(name.to_string());
+        }
+    }
+    if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
+        for child in inner {
+            collect_known_classes(child, out);
+        }
+    }
+}
+
+fn collect_missing_interface_refs(
+    node: &Value,
+    out: &mut Vec<MissingInterfaceRef>,
+    known_classes: &std::collections::HashSet<String>,
+    enclosing_class: Option<&str>,
+) {
+    let kind = node.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+
+    let class_for_children = if kind == "CXXRecordDecl"
+        || kind == "ClassTemplateSpecializationDecl"
+    {
+        node.get("name").and_then(|v| v.as_str())
+    } else {
+        None
+    };
+
+    // Check fields for interface references
+    if kind == "FieldDecl" {
+        if let Some(owning) = enclosing_class {
+            if let Some(qual_type) = node
+                .get("type")
+                .and_then(|t| t.get("qualType"))
+                .and_then(|q| q.as_str())
+            {
+                let field_name = node
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unnamed");
+
+                // Extract interface type from smart pointers or raw pointers
+                if let Some((wrapper, iface)) = extract_interface_from_type(qual_type) {
+                    if !known_classes.contains(&iface) {
+                        out.push(MissingInterfaceRef {
+                            owning_class: owning.to_string(),
+                            field_name: field_name.to_string(),
+                            wrapper,
+                            interface_name: iface,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    let next_class = class_for_children.or(enclosing_class);
+    if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
+        for child in inner {
+            collect_missing_interface_refs(child, out, known_classes, next_class);
+        }
+    }
+}
+
+/// Extract a potential interface type name from a field type string.
+///
+/// Recognizes:
+///   - `std::unique_ptr<IFoo>` / `unique_ptr<IFoo>`
+///   - `std::shared_ptr<IFoo>` / `shared_ptr<IFoo>`
+///   - `IFoo *` (raw pointer to interface)
+///
+/// Returns `(wrapper_description, interface_name)` if a candidate is found.
+fn extract_interface_from_type(qual_type: &str) -> Option<(String, String)> {
+    let t = qual_type.trim();
+
+    // Smart pointers: unique_ptr<T>, shared_ptr<T>
+    for wrapper in &["unique_ptr", "shared_ptr"] {
+        if let Some(pos) = t.find(wrapper) {
+            let after = &t[pos + wrapper.len()..];
+            if let Some(start) = after.find('<') {
+                let inner = &after[start + 1..];
+                if let Some(end) = inner.find('>') {
+                    let inner_type = inner[..end].trim();
+                    // Strip any trailing qualifiers/pointers
+                    let clean = inner_type
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or(inner_type)
+                        .trim_end_matches('*');
+                    if looks_like_interface(clean) {
+                        return Some((
+                            format!("std::{wrapper}"),
+                            clean.to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    // Raw pointer: IFoo *
+    if t.ends_with('*') {
+        let pointee = t.trim_end_matches('*').trim();
+        let clean = pointee
+            .trim_start_matches("const ")
+            .trim_start_matches("struct ")
+            .trim_start_matches("class ")
+            .split_whitespace()
+            .next()
+            .unwrap_or(pointee);
+        if looks_like_interface(clean) {
+            return Some(("raw pointer".to_string(), clean.to_string()));
+        }
+    }
+
+    None
+}
+
+/// Heuristic: does this name look like a C++ interface?
+/// Matches names starting with "I" followed by an uppercase letter (e.g. IKeyStore, IValidator).
+fn looks_like_interface(name: &str) -> bool {
+    let chars: Vec<char> = name.chars().collect();
+    chars.len() >= 2 && chars[0] == 'I' && chars[1].is_uppercase()
+}
+
+fn collect_constructors(
+    node: &Value,
+    out: &mut Vec<ClassConstructor>,
+    class_names: &[String],
+    enclosing_class: Option<&str>,
+    ctx: &TypeContext,
+) {
+    let kind = node.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+
+    // Track the enclosing class
+    let class_for_children = if kind == "CXXRecordDecl"
+        || kind == "ClassTemplateSpecializationDecl"
+    {
+        node.get("name").and_then(|v| v.as_str())
+    } else {
+        None
+    };
+
+    if kind == "CXXConstructorDecl" {
+        if let Some(mangled) = node.get("mangledName").and_then(|v| v.as_str()) {
+            // Resolve class name from enclosing scope
+            if let Some(class_name) = enclosing_class {
+                if class_names.iter().any(|cn| cn == class_name) {
+                    // Only collect default/simple constructors (no complex params)
+                    let param_count = node
+                        .get("inner")
+                        .and_then(|v| v.as_array())
+                        .map(|inner| {
+                            inner
+                                .iter()
+                                .filter(|c| {
+                                    c.get("kind").and_then(|v| v.as_str())
+                                        == Some("ParmVarDecl")
+                                })
+                                .count()
+                        })
+                        .unwrap_or(0);
+                    // Default constructor or single-param (copy/move) — we want the default
+                    if param_count == 0 {
+                        let (layout_type_name, layout_fields) =
+                            compute_class_layout(class_name, ctx)
+                                .unwrap_or_else(|| {
+                                    (format!("class.{class_name}"), Vec::new())
+                                });
+                        out.push(ClassConstructor {
+                            class_name: class_name.to_string(),
+                            mangled_name: mangled.to_string(),
+                            layout_type_name,
+                            layout_fields,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    let next_class = class_for_children.or(enclosing_class);
+    if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
+        for child in inner {
+            collect_constructors(child, out, class_names, next_class, ctx);
+        }
+    }
 }
 
 fn collect_virtual_methods(
     node: &Value,
     out: &mut Vec<InterfaceMethod>,
     filter: Option<&str>,
-    struct_map: &HashMap<String, Vec<(String, TypeInfo)>>,
+    ctx: &TypeContext,
     id_to_name: &HashMap<String, String>,
 ) {
-    collect_virtual_methods_inner(node, out, filter, struct_map, id_to_name, None);
+    collect_virtual_methods_inner(node, out, filter, ctx, id_to_name, None);
 }
 
 fn collect_virtual_methods_inner(
     node: &Value,
     out: &mut Vec<InterfaceMethod>,
     filter: Option<&str>,
-    struct_map: &HashMap<String, Vec<(String, TypeInfo)>>,
+    ctx: &TypeContext,
     id_to_name: &HashMap<String, String>,
     enclosing_class: Option<&str>,
 ) {
@@ -194,11 +716,25 @@ fn collect_virtual_methods_inner(
     };
 
     if kind == "CXXMethodDecl" {
+        // A method is virtual if clang marks it `virtual: true` (base/pure
+        // declarations) OR it carries an `OverrideAttr` (derived overrides
+        // and methods using the `override` keyword — clang does NOT set
+        // `virtual: true` on these, even though they participate in vtable
+        // dispatch).
         let is_virtual = node.get("virtual").and_then(|v| v.as_bool()).unwrap_or(false);
-        if is_virtual {
+        let has_override_attr = node
+            .get("inner")
+            .and_then(|v| v.as_array())
+            .map(|inner| {
+                inner.iter().any(|c| {
+                    c.get("kind").and_then(|v| v.as_str()) == Some("OverrideAttr")
+                })
+            })
+            .unwrap_or(false);
+        if is_virtual || has_override_attr {
             let is_pure = node.get("pure").and_then(|v| v.as_bool()).unwrap_or(false);
             if let Some(func) =
-                parse_function_decl(node, true, struct_map, id_to_name)
+                parse_function_decl(node, true, ctx, id_to_name, enclosing_class)
             {
                 let matches = filter.map(|f| func.name.contains(f)).unwrap_or(true);
                 if matches {
@@ -212,10 +748,28 @@ fn collect_virtual_methods_inner(
                         .unwrap_or("Unknown")
                         .to_string();
 
+                    // Extract source offset for stable, declaration-order
+                    // sorting. Clang stores this on `loc.offset` (always
+                    // present) and falls back through `range.begin.offset`
+                    // when `loc` is missing (e.g. for implicit decls).
+                    let source_offset = node
+                        .get("loc")
+                        .and_then(|v| v.get("offset"))
+                        .and_then(|v| v.as_u64())
+                        .or_else(|| {
+                            node.get("range")
+                                .and_then(|v| v.get("begin"))
+                                .and_then(|v| v.get("offset"))
+                                .and_then(|v| v.as_u64())
+                        })
+                        .unwrap_or(0);
+
                     out.push(InterfaceMethod {
                         class_name,
                         method: func,
                         is_pure,
+                        is_override: has_override_attr,
+                        source_offset,
                     });
                 }
             }
@@ -226,9 +780,32 @@ fn collect_virtual_methods_inner(
     let next_class = class_name_for_children.or(enclosing_class);
     if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
         for child in inner {
-            collect_virtual_methods_inner(child, out, filter, struct_map, id_to_name, next_class);
+            collect_virtual_methods_inner(child, out, filter, ctx, id_to_name, next_class);
         }
     }
+}
+
+/// Check whether a file path points to a system include (compiler / platform
+/// headers like `<cstdio>`, `<vector>`, Windows SDK, glibc, etc.).
+/// Matching is conservative: any path under a recognized vendor/SDK root
+/// counts as system.
+fn is_system_include_path(path: &str) -> bool {
+    // Normalize backslashes for cross-platform matching
+    let p = path.replace('\\', "/").to_ascii_lowercase();
+    // Common system-include path fragments
+    const PATTERNS: &[&str] = &[
+        "/microsoft visual studio/", // MSVC headers
+        "/windows kits/",            // Windows SDK / UCRT
+        "/program files/llvm/",      // Clang/LLVM install
+        "/program files (x86)/llvm/",
+        "/clang+llvm-",         // LLVM dist (e.g. clang+llvm-20.1.6)
+        "/include/c++/",        // libstdc++
+        "/usr/include/",        // glibc on POSIX
+        "/usr/local/include/",
+        "<built-in>",
+        "<command line>",
+    ];
+    PATTERNS.iter().any(|pat| p.contains(pat))
 }
 
 /// Recursively collect node ID → name mappings for CXXRecordDecl/RecordDecl nodes.
@@ -253,18 +830,445 @@ fn collect_node_ids(node: &Value, id_to_name: &mut HashMap<String, String>) {
     }
 }
 
+/// Recursively collect AST node ID -> (name, mangled_name) for FunctionDecl/
+/// CXXMethodDecl/CXXConstructorDecl/CXXDestructorDecl nodes.  Used to resolve
+/// `referencedMemberDecl` (and similar) ID-only references in CallExpr children.
+fn collect_function_decl_ids(
+    node: &Value,
+    id_to_fn: &mut HashMap<String, (String, String)>,
+) {
+    if let Some(kind) = node.get("kind").and_then(|v| v.as_str()) {
+        let is_fn = kind == "FunctionDecl"
+            || kind == "CXXMethodDecl"
+            || kind == "CXXConstructorDecl"
+            || kind == "CXXDestructorDecl"
+            || kind == "CXXConversionDecl";
+        if is_fn {
+            let id = node.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let name = node.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let mangled = node
+                .get("mangledName")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if !id.is_empty() && (!name.is_empty() || !mangled.is_empty()) {
+                id_to_fn.insert(
+                    id.to_string(),
+                    (
+                        name.to_string(),
+                        if mangled.is_empty() {
+                            name.to_string()
+                        } else {
+                            mangled.to_string()
+                        },
+                    ),
+                );
+            }
+        }
+    }
+    if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
+        for child in inner {
+            collect_function_decl_ids(child, id_to_fn);
+        }
+    }
+}
+
+/// Extract all file-scope global variables from the AST.
+pub fn extract_all_globals(ast: &Value) -> Result<Vec<GlobalVarInfo>> {
+    let mut ctx = TypeContext::new();
+    collect_struct_defs(ast, &mut ctx);
+    collect_enum_defs(ast, &mut ctx);
+    let globals_map = collect_globals(ast, &ctx);
+    Ok(globals_map.into_values().collect())
+}
+
+/// Collect global variables from top-level VarDecl nodes.
+fn collect_globals(
+    ast: &Value,
+    ctx: &TypeContext,
+) -> HashMap<String, GlobalVarInfo> {
+    let mut globals = HashMap::new();
+
+    if let Some(inner) = ast.get("inner").and_then(|v| v.as_array()) {
+        for node in inner {
+            let kind = node.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+            if kind != "VarDecl" {
+                continue;
+            }
+            // Skip extern declarations (no definition)
+            if node.get("storageClass").and_then(|v| v.as_str()) == Some("extern") {
+                continue;
+            }
+            // Skip const-qualified globals — the compiler may inline them,
+            // so they won't appear in bitcode and can't be modified anyway.
+            let qual_type_raw = node
+                .get("type")
+                .and_then(|t| t.get("qualType"))
+                .and_then(|q| q.as_str())
+                .unwrap_or("");
+            if qual_type_raw.starts_with("const ") || qual_type_raw.contains(" const") {
+                continue;
+            }
+            let name = match node.get("name").and_then(|v| v.as_str()) {
+                Some(n) => n,
+                None => continue,
+            };
+            let mangled = match node.get("mangledName").and_then(|v| v.as_str()) {
+                Some(m) => m,
+                None => continue,
+            };
+            let qual_type = if qual_type_raw.is_empty() { "int" } else { qual_type_raw };
+            let ty = parse_cpp_type(qual_type, ctx);
+            let id = node.get("id").and_then(|v| v.as_str()).unwrap_or("");
+
+            // Extract initial value from IntegerLiteral if present
+            let init_value = node
+                .get("inner")
+                .and_then(|v| v.as_array())
+                .and_then(|inner| {
+                    inner.iter().find_map(|child| {
+                        if child.get("kind").and_then(|v| v.as_str()) == Some("IntegerLiteral") {
+                            child.get("value").and_then(|v| v.as_str()).map(String::from)
+                        } else {
+                            None
+                        }
+                    })
+                });
+
+            globals.insert(
+                id.to_string(),
+                GlobalVarInfo {
+                    name: name.to_string(),
+                    mangled_name: mangled.to_string(),
+                    ty,
+                    init_value,
+                },
+            );
+        }
+    }
+
+    globals
+}
+
+/// Walk function bodies to find DeclRefExpr nodes that reference globals,
+/// then populate each function's `referenced_globals`.
+fn resolve_referenced_globals(
+    ast: &Value,
+    functions: &mut [FunctionInfo],
+    globals: &HashMap<String, GlobalVarInfo>,
+) {
+    if globals.is_empty() {
+        return;
+    }
+
+    // Walk ALL AST nodes recursively to find function bodies with global refs
+    if let Some(inner) = ast.get("inner").and_then(|v| v.as_array()) {
+        for node in inner {
+            resolve_globals_recursive(node, functions, globals);
+        }
+    }
+}
+
+fn resolve_globals_recursive(
+    node: &Value,
+    functions: &mut [FunctionInfo],
+    globals: &HashMap<String, GlobalVarInfo>,
+) {
+    let kind = node.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+
+    if kind == "FunctionDecl" || kind == "CXXMethodDecl" {
+        let fname = node.get("name").and_then(|v| v.as_str()).unwrap_or("");
+
+        let mut referenced_ids = Vec::new();
+        collect_global_refs(node, &mut referenced_ids, globals);
+
+        // Find matching function(s) in our list — match on mangled name for precision
+        let mangled = node.get("mangledName").and_then(|v| v.as_str());
+        if let Some(func) = functions.iter_mut().find(|f| {
+            if let (Some(m), Some(fm)) = (mangled, f.mangled_name.as_deref()) {
+                m == fm
+            } else {
+                f.name == fname
+            }
+        }) {
+            let mut referenced_ids = Vec::new();
+            collect_global_refs(node, &mut referenced_ids, globals);
+
+            referenced_ids.sort();
+            referenced_ids.dedup();
+            for id in referenced_ids {
+                if let Some(g) = globals.get(&id) {
+                    if !func.referenced_globals.iter().any(|rg| rg.mangled_name == g.mangled_name) {
+                        func.referenced_globals.push(g.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    // Recurse into children (classes contain methods)
+    if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
+        for child in inner {
+            resolve_globals_recursive(child, functions, globals);
+        }
+    }
+}
+
+/// Recursively collect global variable reference IDs from DeclRefExpr nodes.
+fn collect_global_refs(
+    node: &Value,
+    out: &mut Vec<String>,
+    globals: &HashMap<String, GlobalVarInfo>,
+) {
+    if let Some(kind) = node.get("kind").and_then(|v| v.as_str()) {
+        if kind == "DeclRefExpr" {
+            if let Some(ref_decl) = node.get("referencedDecl") {
+                if ref_decl.get("kind").and_then(|v| v.as_str()) == Some("VarDecl") {
+                    if let Some(id) = ref_decl.get("id").and_then(|v| v.as_str()) {
+                        if globals.contains_key(id) {
+                            out.push(id.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
+        for child in inner {
+            collect_global_refs(child, out, globals);
+        }
+    }
+}
+
+/// Resolve which functions are called from each function's body.
+fn resolve_called_functions(
+    ast: &Value,
+    functions: &mut [FunctionInfo],
+    id_to_fn: &HashMap<String, (String, String)>,
+) {
+    if let Some(inner) = ast.get("inner").and_then(|v| v.as_array()) {
+        for node in inner {
+            resolve_calls_recursive(node, functions, id_to_fn);
+        }
+    }
+}
+
+fn resolve_calls_recursive(
+    node: &Value,
+    functions: &mut [FunctionInfo],
+    id_to_fn: &HashMap<String, (String, String)>,
+) {
+    let kind = node.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+
+    if kind == "FunctionDecl" || kind == "CXXMethodDecl"
+        || kind == "CXXConstructorDecl" || kind == "CXXDestructorDecl"
+    {
+        let mangled = node.get("mangledName").and_then(|v| v.as_str());
+        let fname = node.get("name").and_then(|v| v.as_str()).unwrap_or("");
+
+        let mut calls = Vec::new();
+        collect_call_refs(node, &mut calls, id_to_fn);
+
+        // Dedup by mangled name
+        calls.sort_by(|a, b| a.mangled_name.cmp(&b.mangled_name));
+        calls.dedup_by(|a, b| a.mangled_name == b.mangled_name);
+
+        if let Some(func) = functions.iter_mut().find(|f| {
+            if let (Some(m), Some(fm)) = (mangled, f.mangled_name.as_deref()) {
+                m == fm
+            } else {
+                f.name == fname
+            }
+        }) {
+            func.called_functions = calls;
+        }
+    }
+
+    // Recurse into children (classes contain methods)
+    if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
+        for child in inner {
+            resolve_calls_recursive(child, functions, id_to_fn);
+        }
+    }
+}
+
+/// Recursively collect function calls from CallExpr and CXXMemberCallExpr nodes.
+fn collect_call_refs(
+    node: &Value,
+    out: &mut Vec<CalledFunction>,
+    id_to_fn: &HashMap<String, (String, String)>,
+) {
+    if let Some(kind) = node.get("kind").and_then(|v| v.as_str()) {
+        // CallExpr for free functions, CXXMemberCallExpr for methods,
+        // CXXOperatorCallExpr for operator overloads, CXXConstructExpr for constructors
+        if kind == "CallExpr" || kind == "CXXMemberCallExpr"
+            || kind == "CXXOperatorCallExpr" || kind == "CXXConstructExpr"
+        {
+            if let Some(ref_decl) = node.get("referencedDecl") {
+                extract_called_decl(ref_decl, out, id_to_fn);
+            }
+            // Resolve ID-only callee references (e.g. CXXMemberCallExpr →
+            // MemberExpr.referencedMemberDecl is just an AST node ID string).
+            collect_callee_ids(node, out, id_to_fn);
+            // For CallExpr, the callee decl can also be nested in the first child
+            // (ImplicitCastExpr → DeclRefExpr → referencedDecl)
+            if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
+                for child in inner {
+                    if child.get("kind").and_then(|v| v.as_str()) == Some("DeclRefExpr")
+                        || child.get("kind").and_then(|v| v.as_str()) == Some("ImplicitCastExpr")
+                        || child.get("kind").and_then(|v| v.as_str()) == Some("MemberExpr")
+                    {
+                        extract_callee_from_expr(child, out, id_to_fn);
+                    }
+                }
+            }
+        }
+        // CXXNewExpr has operatorNewDecl (not a CallExpr child)
+        if kind == "CXXNewExpr" {
+            if let Some(op_decl) = node.get("operatorNewDecl") {
+                extract_called_decl(op_decl, out, id_to_fn);
+            }
+        }
+        // CXXDeleteExpr has operatorDeleteDecl
+        if kind == "CXXDeleteExpr" {
+            if let Some(op_decl) = node.get("operatorDeleteDecl") {
+                extract_called_decl(op_decl, out, id_to_fn);
+            }
+        }
+    }
+
+    if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
+        for child in inner {
+            collect_call_refs(child, out, id_to_fn);
+        }
+    }
+}
+
+/// Walk a call/construct expression looking for any "ID-only" callee references,
+/// which appear in fields like `referencedMemberDecl` on MemberExpr nodes.
+/// These are AST IDs that point at a method declaration elsewhere in the AST.
+fn collect_callee_ids(
+    node: &Value,
+    out: &mut Vec<CalledFunction>,
+    id_to_fn: &HashMap<String, (String, String)>,
+) {
+    // Common fields that hold an ID-only callee reference
+    for field in [
+        "referencedMemberDecl",
+        "constructorDecl",
+        "destructorDecl",
+    ] {
+        if let Some(id) = node.get(field).and_then(|v| v.as_str()) {
+            if let Some((name, mangled)) = id_to_fn.get(id) {
+                out.push(CalledFunction {
+                    name: name.clone(),
+                    mangled_name: mangled.clone(),
+                    has_body: false,
+                });
+            }
+        }
+    }
+    if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
+        for child in inner {
+            collect_callee_ids(child, out, id_to_fn);
+        }
+    }
+}
+
+fn extract_called_decl(
+    decl: &Value,
+    out: &mut Vec<CalledFunction>,
+    id_to_fn: &HashMap<String, (String, String)>,
+) {
+    // The inline `referencedDecl` summary often lacks `mangledName`.  Prefer
+    // the canonical mangled name from the id_to_fn map when available.
+    let id = decl.get("id").and_then(|v| v.as_str()).unwrap_or("");
+    let summary_name = decl.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let summary_mangled = decl.get("mangledName").and_then(|v| v.as_str()).unwrap_or("");
+
+    let (name, mangled) = if !id.is_empty() {
+        if let Some((n, m)) = id_to_fn.get(id) {
+            (n.clone(), m.clone())
+        } else {
+            (
+                summary_name.to_string(),
+                if summary_mangled.is_empty() {
+                    summary_name.to_string()
+                } else {
+                    summary_mangled.to_string()
+                },
+            )
+        }
+    } else {
+        (
+            summary_name.to_string(),
+            if summary_mangled.is_empty() {
+                summary_name.to_string()
+            } else {
+                summary_mangled.to_string()
+            },
+        )
+    };
+
+    if name.is_empty() && mangled.is_empty() { return; }
+    out.push(CalledFunction {
+        name,
+        mangled_name: mangled,
+        has_body: false,
+    });
+}
+
+fn extract_callee_from_expr(
+    expr: &Value,
+    out: &mut Vec<CalledFunction>,
+    id_to_fn: &HashMap<String, (String, String)>,
+) {
+    let kind = expr.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+    if kind == "DeclRefExpr" || kind == "MemberExpr" {
+        if let Some(ref_decl) = expr.get("referencedDecl") {
+            extract_called_decl(ref_decl, out, id_to_fn);
+        }
+    }
+    // Recurse through ImplicitCastExpr etc.
+    if let Some(inner) = expr.get("inner").and_then(|v| v.as_array()) {
+        for child in inner {
+            extract_callee_from_expr(child, out, id_to_fn);
+        }
+    }
+}
+
 /// Recursively collect struct/class definitions from RecordDecl and CXXRecordDecl nodes.
-fn collect_struct_defs(node: &Value, struct_map: &mut HashMap<String, Vec<(String, TypeInfo)>>) {
+fn collect_struct_defs(node: &Value, ctx: &mut TypeContext) {
     if let Some(kind) = node.get("kind").and_then(|v| v.as_str()) {
         let is_record = kind == "RecordDecl"
             || kind == "CXXRecordDecl"
             || kind == "ClassTemplateSpecializationDecl";
         if is_record {
             if let Some(name) = node.get("name").and_then(|v| v.as_str()) {
+                // Track immediate base classes (CXXRecordDecl "bases" array).
+                if let Some(bases) = node.get("bases").and_then(|v| v.as_array()) {
+                    let mut base_names = Vec::new();
+                    for b in bases {
+                        if let Some(bn) = b
+                            .get("type")
+                            .and_then(|t| t.get("qualType"))
+                            .and_then(|q| q.as_str())
+                        {
+                            base_names.push(bn.to_string());
+                        }
+                    }
+                    if !base_names.is_empty() {
+                        ctx.class_bases.insert(name.to_string(), base_names);
+                    }
+                }
                 if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
                     let mut fields = Vec::new();
+                    let mut own_fields: Vec<(String, TypeInfo, String)> = Vec::new();
+                    let mut has_mutable_here = false;
+                    let mut has_virtual_here = false;
                     for child in inner {
-                        if child.get("kind").and_then(|v| v.as_str()) == Some("FieldDecl") {
+                        let ck = child.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+                        if ck == "FieldDecl" {
                             let field_name = child
                                 .get("name")
                                 .and_then(|v| v.as_str())
@@ -274,13 +1278,43 @@ fn collect_struct_defs(node: &Value, struct_map: &mut HashMap<String, Vec<(Strin
                                 .get("type")
                                 .and_then(|v| v.get("qualType"))
                                 .and_then(|v| v.as_str())
-                                .map(|qt| parse_cpp_type(qt, struct_map))
+                                .map(|qt| parse_cpp_type(qt, ctx))
                                 .unwrap_or(TypeInfo::Void);
-                            fields.push((field_name, field_type));
+                            if child
+                                .get("mutable")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false)
+                            {
+                                has_mutable_here = true;
+                            }
+                            let default_lit = extract_field_default_literal(child);
+                            fields.push((field_name.clone(), field_type.clone()));
+                            own_fields.push((field_name, field_type, default_lit));
+                        } else if ck == "CXXMethodDecl"
+                            || ck == "CXXConstructorDecl"
+                            || ck == "CXXDestructorDecl"
+                        {
+                            if child
+                                .get("virtual")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false)
+                            {
+                                has_virtual_here = true;
+                            }
                         }
                     }
                     if !fields.is_empty() {
-                        struct_map.insert(name.to_string(), fields);
+                        ctx.structs.insert(name.to_string(), fields);
+                    }
+                    if !own_fields.is_empty() {
+                        ctx.class_own_fields
+                            .insert(name.to_string(), own_fields);
+                    }
+                    if has_mutable_here {
+                        ctx.classes_with_mutable_field.insert(name.to_string());
+                    }
+                    if has_virtual_here {
+                        ctx.polymorphic_classes.insert(name.to_string());
                     }
                 }
             }
@@ -289,7 +1323,183 @@ fn collect_struct_defs(node: &Value, struct_map: &mut HashMap<String, Vec<(Strin
 
     if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
         for child in inner {
-            collect_struct_defs(child, struct_map);
+            collect_struct_defs(child, ctx);
+        }
+    }
+}
+
+/// Extract the in-class initializer value from a FieldDecl node, if present.
+/// Returns the literal as a string (e.g. "0", "42"); empty if not a simple
+/// integer/boolean literal.
+fn extract_field_default_literal(field: &Value) -> String {
+    if !field
+        .get("hasInClassInitializer")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        return String::new();
+    }
+    fn walk(n: &Value) -> Option<String> {
+        let kind = n.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+        match kind {
+            "IntegerLiteral" => n
+                .get("value")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            "CXXBoolLiteralExpr" => n
+                .get("value")
+                .and_then(|v| v.as_bool())
+                .map(|b| if b { "1".to_string() } else { "0".to_string() }),
+            _ => {
+                if let Some(inner) = n.get("inner").and_then(|v| v.as_array()) {
+                    for c in inner {
+                        if let Some(v) = walk(c) {
+                            return Some(v);
+                        }
+                    }
+                }
+                None
+            }
+        }
+    }
+    walk(field).unwrap_or_default()
+}
+
+/// After `collect_struct_defs` has run, propagate base-class mutable-field
+/// flags to derived classes. A derived class inherits the `mutable` field
+/// from any polymorphic base, so a `const` method on the derived class can
+/// still legally modify it.
+fn propagate_mutable_through_bases(ctx: &mut TypeContext) {
+    // Iterate until fixed point. Inheritance chains are short, so a few
+    // passes suffice.
+    loop {
+        let mut changed = false;
+        let derived_classes: Vec<String> = ctx.class_bases.keys().cloned().collect();
+        for cls in derived_classes {
+            if ctx.classes_with_mutable_field.contains(&cls) {
+                continue;
+            }
+            if let Some(bases) = ctx.class_bases.get(&cls).cloned() {
+                if bases
+                    .iter()
+                    .any(|b| ctx.classes_with_mutable_field.contains(b))
+                {
+                    ctx.classes_with_mutable_field.insert(cls);
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+}
+
+/// Compute the LLVM struct-type name and full ordered field list for a
+/// polymorphic class. Clang lays out a derived class either as its own
+/// `%class.<Derived>` (when it adds fields) or reuses the base layout
+/// directly (when it adds nothing). This function picks the right name
+/// and gathers the ordered fields by walking from the topmost polymorphic
+/// ancestor down to the class itself.
+///
+/// Returns `(layout_type_name, ordered_fields)`. Returns `None` only if
+/// the class isn't known to `ctx`.
+fn compute_class_layout(
+    class: &str,
+    ctx: &TypeContext,
+) -> Option<(String, Vec<(String, TypeInfo, String)>)> {
+    // Walk up the chain to build the ordered ancestor list (root → class).
+    let mut chain: Vec<String> = Vec::new();
+    let mut cur = class.to_string();
+    let mut guard = 0u32;
+    loop {
+        guard += 1;
+        if guard > 64 {
+            // Defensive: cyclic inheritance shouldn't happen in valid C++,
+            // but stop walking just in case.
+            break;
+        }
+        chain.push(cur.clone());
+        let bases = match ctx.class_bases.get(&cur) {
+            Some(b) if !b.is_empty() => b.clone(),
+            _ => break,
+        };
+        // Use the first (primary) base for layout purposes — multiple
+        // inheritance is out of scope for this layout heuristic.
+        cur = bases.into_iter().next().unwrap();
+    }
+    chain.reverse(); // now root → ... → class
+
+    // Collect own fields walking root → derived. Order matters: base
+    // fields come before derived fields in clang's layout.
+    let mut all_fields: Vec<(String, TypeInfo, String)> = Vec::new();
+    let mut last_with_fields: Option<String> = None;
+    for c in &chain {
+        if let Some(fs) = ctx.class_own_fields.get(c) {
+            all_fields.extend(fs.iter().cloned());
+            last_with_fields = Some(c.clone());
+        }
+    }
+
+    // Pick layout type name:
+    // - If the derived class adds NO own fields, clang reuses the topmost
+    //   ancestor that owns fields as the layout type (its `%class.<X>`).
+    // - Otherwise, clang emits `%class.<DerivedName>` with the full field
+    //   set.
+    let derived_has_own_fields = ctx
+        .class_own_fields
+        .get(class)
+        .map(|f| !f.is_empty())
+        .unwrap_or(false);
+    let layout_name = if derived_has_own_fields {
+        class.to_string()
+    } else {
+        last_with_fields.unwrap_or_else(|| class.to_string())
+    };
+
+    Some((format!("class.{}", layout_name), all_fields))
+}
+
+/// Recursively collect enum definitions from EnumDecl nodes.
+fn collect_enum_defs(node: &Value, ctx: &mut TypeContext) {
+    if let Some(kind) = node.get("kind").and_then(|v| v.as_str()) {
+        if kind == "EnumDecl" {
+            if let Some(name) = node.get("name").and_then(|v| v.as_str()) {
+                // Determine bit width from fixedUnderlyingType or default to 32
+                let bits = node
+                    .get("fixedUnderlyingType")
+                    .and_then(|v| v.get("qualType"))
+                    .and_then(|v| v.as_str())
+                    .map(|qt| match qt {
+                        "uint8_t" | "int8_t" | "char" | "unsigned char" | "signed char" => 8,
+                        "uint16_t" | "int16_t" | "short" | "unsigned short" => 16,
+                        "uint64_t" | "int64_t" | "long long" | "unsigned long long" => 64,
+                        _ => 32,
+                    })
+                    .unwrap_or(32);
+
+                // Collect variant names from EnumConstantDecl children
+                let mut variants = Vec::new();
+                if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
+                    for child in inner {
+                        if child.get("kind").and_then(|v| v.as_str()) == Some("EnumConstantDecl") {
+                            if let Some(vname) = child.get("name").and_then(|v| v.as_str()) {
+                                variants.push(vname.to_string());
+                            }
+                        }
+                    }
+                }
+
+                if !variants.is_empty() {
+                    ctx.enums.insert(name.to_string(), (variants, bits));
+                }
+            }
+        }
+    }
+
+    if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
+        for child in inner {
+            collect_enum_defs(child, ctx);
         }
     }
 }
@@ -298,15 +1508,43 @@ fn collect_functions(
     node: &Value,
     out: &mut Vec<FunctionInfo>,
     filter: Option<&str>,
-    struct_map: &HashMap<String, Vec<(String, TypeInfo)>>,
+    ctx: &TypeContext,
     id_to_name: &HashMap<String, String>,
 ) {
+    collect_functions_inner(node, out, filter, ctx, id_to_name, None);
+}
+
+fn collect_functions_inner(
+    node: &Value,
+    out: &mut Vec<FunctionInfo>,
+    filter: Option<&str>,
+    ctx: &TypeContext,
+    id_to_name: &HashMap<String, String>,
+    enclosing_class: Option<&str>,
+) {
+    let outer_kind = node.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+    // Track enclosing class for child nodes so `this` mutability lookups
+    // can resolve the parent class even when `parentDeclContextId` is
+    // missing from the AST.
+    let class_for_children = if outer_kind == "CXXRecordDecl"
+        || outer_kind == "ClassTemplateSpecializationDecl"
+    {
+        node.get("name").and_then(|v| v.as_str())
+    } else {
+        None
+    };
+    let next_class = class_for_children.or(enclosing_class);
+
     if let Some(kind) = node.get("kind").and_then(|v| v.as_str()) {
         match kind {
             "FunctionDecl" | "CXXMethodDecl" => {
-                if let Some(func) =
-                    parse_function_decl(node, kind == "CXXMethodDecl", struct_map, id_to_name)
-                {
+                if let Some(func) = parse_function_decl(
+                    node,
+                    kind == "CXXMethodDecl",
+                    ctx,
+                    id_to_name,
+                    enclosing_class,
+                ) {
                     let matches = filter.map(|f| func.name.contains(f)).unwrap_or(true);
                     if matches {
                         out.push(func);
@@ -322,8 +1560,9 @@ fn collect_functions(
                                 if let Some(func) = parse_function_decl(
                                     child,
                                     ck == "CXXMethodDecl",
-                                    struct_map,
+                                    ctx,
                                     id_to_name,
+                                    enclosing_class,
                                 ) {
                                     let matches =
                                         filter.map(|f| func.name.contains(f)).unwrap_or(true);
@@ -345,7 +1584,7 @@ fn collect_functions(
     if kind != "FunctionTemplateDecl" {
         if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
             for child in inner {
-                collect_functions(child, out, filter, struct_map, id_to_name);
+                collect_functions_inner(child, out, filter, ctx, id_to_name, next_class);
             }
         }
     }
@@ -354,8 +1593,9 @@ fn collect_functions(
 fn parse_function_decl(
     node: &Value,
     is_method: bool,
-    struct_map: &HashMap<String, Vec<(String, TypeInfo)>>,
+    ctx: &TypeContext,
     id_to_name: &HashMap<String, String>,
+    enclosing_class: Option<&str>,
 ) -> Option<FunctionInfo> {
     let name = node.get("name")?.as_str()?.to_string();
     let mangled = node
@@ -364,7 +1604,13 @@ fn parse_function_decl(
         .map(String::from);
     let qual_type = node.get("type")?.get("qualType")?.as_str()?;
 
-    let is_const_method = is_method && qual_type.contains("const");
+    // Method constness: in C++, a const method has "const" AFTER the parameter list
+    // e.g. "void (const char *) const" vs "void (const char *)"
+    // We check for "const" after the last closing paren to avoid matching param types.
+    let is_const_method = is_method && {
+        let after_paren = qual_type.rfind(')').map(|pos| &qual_type[pos + 1..]).unwrap_or("");
+        after_paren.contains("const")
+    };
     let mut is_noexcept = qual_type.contains("noexcept");
 
     // Check for noexcept/nothrow attributes in inner nodes
@@ -395,32 +1641,37 @@ fn parse_function_decl(
 
     // If this is a method, add implicit 'this' parameter
     if is_method {
+        // Resolve the parent class name. Clang sometimes omits
+        // `parentDeclContextId`, in which case we fall back to the
+        // enclosing class tracked by the walker. We use this only to
+        // decide `this`'s mutability — the inner type stays `Opaque`
+        // with the legacy "Self" sentinel so existing havoc-spec paths
+        // continue to allocate `this` as a pointer-sized opaque value.
         let parent_id = node
             .get("parentDeclContextId")
             .and_then(|v| v.as_str())
-            .unwrap_or("Self");
-        // Resolve the hex node ID to the actual class name
-        let parent_name = id_to_name
+            .unwrap_or("");
+        let parent_name: &str = id_to_name
             .get(parent_id)
             .map(|s| s.as_str())
-            .unwrap_or(parent_id);
-        let inner_type = if let Some(fields) = struct_map.get(parent_name) {
-            let size = compute_struct_size_from_fields(fields);
-            TypeInfo::Struct {
-                name: parent_name.into(),
-                size_bytes: size,
-                fields: fields.clone(),
-            }
-        } else {
-            TypeInfo::Opaque {
-                name: parent_name.into(),
-                size_bytes: 0,
-            }
+            .or(enclosing_class)
+            .unwrap_or("Self");
+        let inner_type = TypeInfo::Opaque {
+            name: "Self".into(),
+            size_bytes: 0,
         };
         params.push(ParamInfo {
             name: "this".into(),
             ty: TypeInfo::Pointer(Box::new(inner_type)),
-            mutability: if is_const_method {
+            // A `const` method normally promises not to write through
+            // `this` \u2014 modeled as `Readonly`. BUT the C++ `mutable`
+            // keyword (and `const_cast`) lets a `const` method legally
+            // modify specific members. To stay sound, downgrade to
+            // `Mutable` whenever the enclosing class (or any base) has
+            // any `mutable`-qualified data member.
+            mutability: if is_const_method
+                && !ctx.classes_with_mutable_field.contains(parent_name)
+            {
                 Mutability::Readonly
             } else {
                 Mutability::Mutable
@@ -434,14 +1685,43 @@ fn parse_function_decl(
     if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
         for child in inner {
             if child.get("kind").and_then(|v| v.as_str()) == Some("ParmVarDecl") {
-                if let Some(param) = parse_param(child, struct_map) {
+                if let Some(param) = parse_param(child, ctx) {
                     params.push(param);
                 }
             }
         }
     }
 
-    let return_type = parse_return_type(qual_type, struct_map);
+    let return_type = parse_return_type(qual_type, ctx);
+
+    let is_virtual = node.get("virtual").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    // A function has a body if its inner array contains a CompoundStmt
+    let has_body = node
+        .get("inner")
+        .and_then(|v| v.as_array())
+        .map(|inner| {
+            inner.iter().any(|child| {
+                child.get("kind").and_then(|v| v.as_str()) == Some("CompoundStmt")
+            })
+        })
+        .unwrap_or(false);
+
+    // Detect system-header origin: check whether the file from which this
+    // declaration was included matches a known system-include path pattern.
+    // System functions (stdio, ucrt, etc.) often have inline bodies that call
+    // LLVM intrinsics or platform-specific symbols SAW can't resolve, so we
+    // treat them as external for verification.
+    //
+    // NOTE: just checking `loc.includedFrom` is too broad — any header counts,
+    // including the user's own ilog.h.  We need to match the actual file path.
+    let is_system = node
+        .get("loc")
+        .and_then(|loc| loc.get("includedFrom"))
+        .and_then(|inc| inc.get("file"))
+        .and_then(|f| f.as_str())
+        .map(is_system_include_path)
+        .unwrap_or(false);
 
     Some(FunctionInfo {
         name,
@@ -449,20 +1729,29 @@ fn parse_function_decl(
         params,
         return_type,
         can_throw: !is_noexcept,
+        is_virtual,
+        has_body,
+        is_system,
         annotations: func_annotations,
+        referenced_globals: vec![],
+        called_functions: vec![],
     })
 }
 
 fn parse_param(
     node: &Value,
-    struct_map: &HashMap<String, Vec<(String, TypeInfo)>>,
+    ctx: &TypeContext,
 ) -> Option<ParamInfo> {
     let name = node
         .get("name")
         .and_then(|v| v.as_str())
         .unwrap_or("unnamed")
         .to_string();
-    let qual_type = node.get("type")?.get("qualType")?.as_str()?;
+    let qual_type_raw = node.get("type")?.get("qualType")?.as_str()?;
+    // Strip `__restrict` so the trailing-`*` detection below isn't fooled by
+    // pointer types written as `uint32_t *__restrict`.
+    let qual_type_owned = strip_restrict(qual_type_raw);
+    let qual_type = qual_type_owned.as_str();
 
     let is_const = qual_type.contains("const");
     let is_ref = qual_type.contains('&');
@@ -516,7 +1805,7 @@ fn parse_param(
         _ => m,
     });
 
-    let ty = parse_cpp_type(qual_type, struct_map);
+    let ty = parse_cpp_type(qual_type, ctx);
 
     Some(ParamInfo {
         name,
@@ -532,7 +1821,26 @@ fn parse_sal_annotation(attr: &Value) -> Option<Annotation> {
     if kind != "AnnotateAttr" {
         return None;
     }
-    let value = attr.get("value")?.as_str()?;
+    // Clang's text-format AST dump records `__attribute__((annotate("X")))`
+    // with `X` accessible as the `value` field. The JSON dumper, however,
+    // emits the `AnnotateAttr` node WITHOUT the string argument (clang 17+).
+    // Recover the macro name by reading the source file at the attribute's
+    // expansion location.
+    let value_owned: String;
+    let value: &str = match attr.get("value").and_then(|v| v.as_str()) {
+        Some(v) => v,
+        None => {
+            let exp = attr
+                .get("range")?
+                .get("begin")?
+                .get("expansionLoc")?;
+            let file = exp.get("file")?.as_str()?;
+            let offset = exp.get("offset")?.as_u64()? as usize;
+            let tok_len = exp.get("tokLen")?.as_u64()? as usize;
+            value_owned = read_source_token(file, offset, tok_len)?;
+            &value_owned
+        }
+    };
     match value {
         v if v.starts_with("_In_reads_(") => {
             let n: usize = v
@@ -580,19 +1888,54 @@ fn parse_sal_annotation(attr: &Value) -> Option<Annotation> {
 
 fn parse_return_type(
     qual_type: &str,
-    struct_map: &HashMap<String, Vec<(String, TypeInfo)>>,
+    ctx: &TypeContext,
 ) -> TypeInfo {
     // Extract return type from function type string "RetType (ParamTypes)"
     let ret = qual_type.split('(').next().unwrap_or("void").trim();
-    parse_cpp_type(ret, struct_map)
+    parse_cpp_type(ret, ctx)
+}
+
+/// Strip C/C++ `restrict` qualifiers (`__restrict`, `__restrict__`, `restrict`)
+/// from a qualType string. Clang preserves these in `qualType` (e.g.
+/// `"uint32_t *__restrict"`) but they don't affect the underlying SAW type;
+/// leaving them in breaks pointer detection because the string no longer ends
+/// in `*`.
+fn strip_restrict(s: &str) -> String {
+    let mut out = s.replace("__restrict__", "");
+    out = out.replace("__restrict", "");
+    // Whole-word `restrict` (C99 keyword). Avoid clobbering identifiers that
+    // happen to contain the substring by requiring a word boundary on both
+    // sides; cheap implementation via space-padding.
+    let padded = format!(" {out} ");
+    let stripped = padded.replace(" restrict ", " ");
+    stripped.trim().to_string()
 }
 
 fn parse_cpp_type(
     qual_type: &str,
-    struct_map: &HashMap<String, Vec<(String, TypeInfo)>>,
+    ctx: &TypeContext,
 ) -> TypeInfo {
-    let t = qual_type.trim();
+    let stripped = strip_restrict(qual_type);
+    let t = stripped.trim();
     let t = t.trim_start_matches("const ");
+
+    // Detect C array types like "uint8_t[32]" or "int[10]"
+    if let Some(bracket_pos) = t.find('[') {
+        if t.ends_with(']') {
+            let elem_type_str = t[..bracket_pos].trim();
+            let count_str = &t[bracket_pos + 1..t.len() - 1];
+            if let Ok(count) = count_str.parse::<usize>() {
+                let elem_type = parse_cpp_type(elem_type_str, ctx);
+                if matches!(elem_type, TypeInfo::UnsignedInt(8) | TypeInfo::SignedInt(8)) {
+                    return TypeInfo::ByteArray(count);
+                }
+                // For other element types, approximate as byte array of total size
+                if let Some((elem_size, _)) = cpp_type_size_align(&elem_type) {
+                    return TypeInfo::ByteArray(count * elem_size);
+                }
+            }
+        }
+    }
 
     // Detect pointer/reference before stripping — struct field types need wrapping
     let is_ptr = t.ends_with('*');
@@ -608,15 +1951,23 @@ fn parse_cpp_type(
         "unsigned int" | "uint32_t" | "unsigned long" | "DWORD" | "ULONG" => {
             TypeInfo::UnsignedInt(32)
         }
-        "unsigned long long" | "uint64_t" | "size_t" | "UINT64" | "ULONG64" => {
+        "unsigned long long" | "uint64_t" | "size_t" | "__size_t" | "UINT64" | "ULONG64" => {
             TypeInfo::UnsignedInt(64)
         }
         "unsigned short" | "uint16_t" | "WORD" | "USHORT" => TypeInfo::UnsignedInt(16),
         "unsigned char" | "uint8_t" | "BYTE" | "UCHAR" => TypeInfo::UnsignedInt(8),
         "void" => TypeInfo::Void,
         other => {
+            // Check if this is a known enum type from the AST
+            if let Some((variants, bits)) = ctx.enums.get(other) {
+                TypeInfo::Enum {
+                    name: other.to_string(),
+                    variants: variants.clone(),
+                    discriminant_bits: *bits,
+                }
+            }
             // Check if this is a known struct type from the AST
-            if let Some(fields) = struct_map.get(other) {
+            else if let Some(fields) = ctx.structs.get(other) {
                 let size = compute_struct_size_from_fields(fields);
                 TypeInfo::Struct {
                     name: other.to_string(),
@@ -647,7 +1998,7 @@ fn parse_cpp_type(
 }
 
 /// Look up well-known C++ STL and platform type sizes (MSVC x64 ABI).
-fn lookup_known_type_size(name: &str) -> Option<usize> {
+pub fn lookup_known_type_size(name: &str) -> Option<usize> {
     // Normalize: strip std:: and class/struct prefixes for matching
     let normalized = name
         .trim_start_matches("class ")
@@ -1493,5 +2844,183 @@ mod tests {
         assert_eq!(methods[0].method.params[0].mutability, Mutability::Readonly);
         // mutate is non-const → this should be mutable
         assert_eq!(methods[1].method.params[0].mutability, Mutability::Mutable);
+    }
+
+    /// Regression: vtable slots must follow source declaration order, not
+    /// the order the AST walker encounters methods. MSVC assigns slots in
+    /// the order virtual methods appear in the class body — sorting by
+    /// `source_offset` is what guarantees the generated vtable matches
+    /// the real ABI layout. Without this sort, SAW resolves vtable
+    /// dispatch to the wrong stub function.
+    #[test]
+    fn test_virtual_method_source_offset_captured() {
+        let ast = json!({
+            "kind": "TranslationUnitDecl",
+            "inner": [{
+                "id": "0xAA",
+                "kind": "CXXRecordDecl",
+                "name": "IRequestValidator",
+                "inner": [
+                    {
+                        "kind": "CXXMethodDecl",
+                        "name": "IsValidMetadataHeader",
+                        "loc": { "offset": 100, "line": 5, "col": 18 },
+                        "type": { "qualType": "bool () const noexcept" },
+                        "virtual": true,
+                        "pure": true,
+                        "inner": []
+                    },
+                    {
+                        "kind": "CXXMethodDecl",
+                        "name": "Authenticate",
+                        "loc": { "offset": 200, "line": 6, "col": 18 },
+                        "type": { "qualType": "bool () const noexcept" },
+                        "virtual": true,
+                        "pure": true,
+                        "inner": []
+                    }
+                ]
+            }]
+        });
+        let methods = extract_virtual_methods(&ast, None).unwrap();
+        assert_eq!(methods.len(), 2);
+        let is_valid = methods
+            .iter()
+            .find(|m| m.method.name == "IsValidMetadataHeader")
+            .expect("missing IsValidMetadataHeader");
+        let authenticate = methods
+            .iter()
+            .find(|m| m.method.name == "Authenticate")
+            .expect("missing Authenticate");
+        assert_eq!(is_valid.source_offset, 100);
+        assert_eq!(authenticate.source_offset, 200);
+        // After sorting by source_offset, IsValidMetadataHeader (offset 100)
+        // must come before Authenticate (offset 200) — this is the
+        // declaration order MSVC uses to assign vtable slots.
+        assert!(is_valid.source_offset < authenticate.source_offset);
+    }
+
+    /// Regression: when `clang -ast-dump-filter=IFace` emits a bare
+    /// `CXXRecordDecl` (no enclosing `TranslationUnitDecl`), `merge_asts`
+    /// must preserve the class wrapper. Previously the merger unwrapped
+    /// any node that had an `inner` field — including `CXXRecordDecl` —
+    /// which flattened each interface's methods to the synthetic TU
+    /// root, stripped their enclosing-class context, and caused
+    /// `extract_virtual_methods` to attribute every method to "Unknown".
+    /// The downstream effect was a single `@unknown_vtable` containing
+    /// the merged slots of every interface, dispatching virtual calls
+    /// at the wrong offsets.
+    #[test]
+    fn test_merge_asts_preserves_filtered_cxxrecorddecl() {
+        let ikeystore = json!({
+            "id": "0xKEY",
+            "kind": "CXXRecordDecl",
+            "name": "IKeyStore",
+            "inner": [
+                {
+                    "kind": "CXXMethodDecl",
+                    "name": "store_key",
+                    "loc": { "offset": 10 },
+                    "type": { "qualType": "bool () const noexcept" },
+                    "virtual": true,
+                    "pure": true,
+                    "inner": []
+                },
+                {
+                    "kind": "CXXMethodDecl",
+                    "name": "load_key",
+                    "loc": { "offset": 20 },
+                    "type": { "qualType": "bool () const noexcept" },
+                    "virtual": true,
+                    "pure": true,
+                    "inner": []
+                }
+            ]
+        });
+        let ivalidator = json!({
+            "id": "0xVAL",
+            "kind": "CXXRecordDecl",
+            "name": "IRequestValidator",
+            "inner": [
+                {
+                    "kind": "CXXMethodDecl",
+                    "name": "validate",
+                    "loc": { "offset": 30 },
+                    "type": { "qualType": "bool () const noexcept" },
+                    "virtual": true,
+                    "pure": true,
+                    "inner": []
+                },
+                {
+                    "kind": "CXXMethodDecl",
+                    "name": "authenticate",
+                    "loc": { "offset": 40 },
+                    "type": { "qualType": "bool () const noexcept" },
+                    "virtual": true,
+                    "pure": true,
+                    "inner": []
+                }
+            ]
+        });
+        let merged = merge_asts(vec![ikeystore, ivalidator]);
+        let methods = extract_virtual_methods(&merged, None).unwrap();
+        assert_eq!(methods.len(), 4);
+        // Critical assertion: methods must retain their per-interface
+        // class_name so vtable generation produces @ikeystore_vtable and
+        // @irequestvalidator_vtable instead of a single @unknown_vtable.
+        let by_class: std::collections::HashMap<&str, usize> =
+            methods.iter().fold(std::collections::HashMap::new(), |mut acc, m| {
+                *acc.entry(m.class_name.as_str()).or_insert(0) += 1;
+                acc
+            });
+        assert_eq!(by_class.get("IKeyStore"), Some(&2));
+        assert_eq!(by_class.get("IRequestValidator"), Some(&2));
+        assert_eq!(by_class.get("Unknown"), None);
+    }
+
+    /// Sanity check: merging real `TranslationUnitDecl` inputs still
+    /// concatenates their top-level `inner` arrays (existing behavior
+    /// preserved for the common case where each AST is a full TU).
+    #[test]
+    fn test_merge_asts_concatenates_translation_units() {
+        let tu_a = json!({
+            "kind": "TranslationUnitDecl",
+            "inner": [{
+                "id": "0xA",
+                "kind": "CXXRecordDecl",
+                "name": "A",
+                "inner": [{
+                    "kind": "CXXMethodDecl",
+                    "name": "foo",
+                    "type": { "qualType": "void ()" },
+                    "virtual": true,
+                    "pure": true,
+                    "inner": []
+                }]
+            }]
+        });
+        let tu_b = json!({
+            "kind": "TranslationUnitDecl",
+            "inner": [{
+                "id": "0xB",
+                "kind": "CXXRecordDecl",
+                "name": "B",
+                "inner": [{
+                    "kind": "CXXMethodDecl",
+                    "name": "bar",
+                    "type": { "qualType": "void ()" },
+                    "virtual": true,
+                    "pure": true,
+                    "inner": []
+                }]
+            }]
+        });
+        let merged = merge_asts(vec![tu_a, tu_b]);
+        let methods = extract_virtual_methods(&merged, None).unwrap();
+        assert_eq!(methods.len(), 2);
+        let names: std::collections::HashSet<&str> =
+            methods.iter().map(|m| m.class_name.as_str()).collect();
+        assert!(names.contains("A"));
+        assert!(names.contains("B"));
     }
 }

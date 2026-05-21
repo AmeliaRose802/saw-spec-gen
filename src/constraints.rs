@@ -24,7 +24,37 @@ pub struct FunctionInfo {
     pub params: Vec<ParamInfo>,
     pub return_type: TypeInfo,
     pub can_throw: bool,
+    pub is_virtual: bool,
+    /// Whether the function has a body (definition) or is declaration-only (external).
+    pub has_body: bool,
+    /// True if this function is declared in a system header (cstdio, ucrt, etc.).
+    /// We treat system functions as external for verification purposes — their
+    /// inline wrappers typically call LLVM intrinsics (va_start, etc.) and
+    /// platform-specific symbols that SAW can't resolve.
+    pub is_system: bool,
     pub annotations: Vec<Annotation>,
+    /// Global variables referenced by this function.
+    pub referenced_globals: Vec<GlobalVarInfo>,
+    /// Functions called by this function (mangled names).
+    pub called_functions: Vec<CalledFunction>,
+}
+
+/// A function called from another function's body.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CalledFunction {
+    pub name: String,
+    pub mangled_name: String,
+    pub has_body: bool,
+}
+
+/// A global variable referenced by a function.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GlobalVarInfo {
+    pub name: String,
+    pub mangled_name: String,
+    pub ty: TypeInfo,
+    /// Initial value as a string (e.g. "7" for int super_important = 7)
+    pub init_value: Option<String>,
 }
 
 /// Language-independent type representation.
@@ -117,7 +147,12 @@ pub struct SpecConstraint {
     pub params: Vec<ParamConstraint>,
     pub return_constraint: ReturnConstraint,
     pub can_throw: bool,
+    pub is_virtual: bool,
+    /// Whether the function has a body (definition) or is declaration-only.
+    pub has_body: bool,
     pub postconditions: Vec<String>,
+    /// Global variables referenced by this function.
+    pub referenced_globals: Vec<GlobalVarInfo>,
 }
 
 /// Constraint on a single parameter.
@@ -128,6 +163,13 @@ pub struct ParamConstraint {
     pub saw_type: String,
     pub preconditions: Vec<String>,
     pub unchanged_after: bool,
+    /// Byte size derived from an LLVM `dereferenceable(N)` annotation on the
+    /// parameter, if any.  When the AST gives us only an opaque struct name
+    /// and no LLVM IR is supplied via `--llvm-ir`, this size is the best
+    /// fallback the tool has for substituting `llvm_alias "Foo"` with a
+    /// concrete `llvm_array N (llvm_int 8)`.  None when no `dereferenceable`
+    /// annotation was present on the parameter.
+    pub dereferenceable_size: Option<usize>,
 }
 
 /// How to allocate the parameter in the SAW spec.
@@ -143,6 +185,11 @@ pub enum AllocType {
 pub struct ReturnConstraint {
     pub saw_type: String,
     pub value_constraints: Vec<String>,
+    /// True when the return is a struct that LLVM lowers via sret pointer.
+    pub is_sret: bool,
+    /// True when the function returns a pointer (e.g. operator new → void*).
+    /// The spec should use llvm_alloc + llvm_return for the return value.
+    pub returns_pointer: bool,
 }
 
 /// Derive SAW constraints from function info.
@@ -267,6 +314,10 @@ fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
             saw_type,
             preconditions,
             unchanged_after,
+            dereferenceable_size: param.annotations.iter().find_map(|a| match a {
+                Annotation::Dereferenceable(n) => Some(*n),
+                _ => None,
+            }),
         });
     }
 
@@ -293,7 +344,10 @@ fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
         params,
         return_constraint,
         can_throw,
+        is_virtual: func.is_virtual,
+        has_body: func.has_body,
         postconditions,
+        referenced_globals: func.referenced_globals.clone(),
     })
 }
 
@@ -323,9 +377,34 @@ fn derive_return_constraint(ty: &TypeInfo) -> ReturnConstraint {
         _ => {}
     }
 
+    let is_sret = matches!(ty, TypeInfo::Struct { .. })
+        || matches!(ty, TypeInfo::Opaque { size_bytes, .. } if *size_bytes > 8);
+
+    let returns_pointer = matches!(ty, TypeInfo::Pointer(_));
+
+    // For pointer returns, the SAW type should be the pointee type (for llvm_alloc)
+    let saw_type = if returns_pointer {
+        match ty {
+            TypeInfo::Pointer(inner) => {
+                let inner_saw = type_to_saw(inner);
+                if inner_saw == "// void" {
+                    // void* → allocate a byte array
+                    "llvm_array 64 (llvm_int 8)".to_string()
+                } else {
+                    inner_saw
+                }
+            }
+            _ => type_to_saw(ty),
+        }
+    } else {
+        type_to_saw(ty)
+    };
+
     ReturnConstraint {
-        saw_type: type_to_saw(ty),
+        saw_type,
         value_constraints,
+        is_sret,
+        returns_pointer,
     }
 }
 
@@ -339,8 +418,15 @@ pub fn type_to_saw(ty: &TypeInfo) -> String {
             size_bytes: Some(n),
             ..
         } => format!("llvm_array {n} (llvm_int 8)"),
-        TypeInfo::Struct { name, .. } => format!("llvm_alias \"{name}\""),
-        TypeInfo::Enum { name, .. } => format!("llvm_alias \"{name}\""),
+        TypeInfo::Struct { name, .. } => {
+            // Clang emits struct types as "struct.Name" in LLVM IR
+            if name.starts_with("struct.") || name.starts_with("class.") || name.starts_with("union.") {
+                format!("llvm_alias \"{name}\"")
+            } else {
+                format!("llvm_alias \"struct.{name}\"")
+            }
+        }
+        TypeInfo::Enum { discriminant_bits, .. } => format!("llvm_int {discriminant_bits}"),
         TypeInfo::Option(inner) => format!("// Option<{}>", type_to_saw(inner)),
         TypeInfo::Result(ok, err) => {
             format!("// Result<{}, {}>", type_to_saw(ok), type_to_saw(err))
@@ -348,6 +434,9 @@ pub fn type_to_saw(ty: &TypeInfo) -> String {
         TypeInfo::Opaque { name, size_bytes } => {
             if *size_bytes > 0 {
                 format!("llvm_array {size_bytes} (llvm_int 8)")
+            } else if name == "Self" || name == "Unknown" {
+                // Unresolved this pointer for abstract class — use pointer-sized
+                "llvm_int 64".into()
             } else {
                 format!("llvm_alias \"{name}\"")
             }
@@ -392,7 +481,7 @@ mod tests {
             size_bytes: None,
             fields: vec![("x".into(), TypeInfo::SignedInt(32))],
         };
-        assert_eq!(type_to_saw(&ty), "llvm_alias \"MyStruct\"");
+        assert_eq!(type_to_saw(&ty), "llvm_alias \"struct.MyStruct\"");
     }
 
     #[test]
@@ -402,7 +491,7 @@ mod tests {
             variants: vec!["Ok".into(), "Err".into(), "Pending".into()],
             discriminant_bits: 64,
         };
-        assert_eq!(type_to_saw(&ty), "llvm_alias \"Status\"");
+        assert_eq!(type_to_saw(&ty), "llvm_int 64");
     }
 
     #[test]
@@ -458,6 +547,11 @@ mod tests {
             }],
             return_type: TypeInfo::Void,
             can_throw: false,
+            is_virtual: false,
+            has_body: true,
+            is_system: false,
+            called_functions: vec![],
+            referenced_globals: vec![],
             annotations: vec![],
         };
         let specs = derive_constraints(&[func]).unwrap();
@@ -480,6 +574,11 @@ mod tests {
             }],
             return_type: TypeInfo::Void,
             can_throw: false,
+            is_virtual: false,
+            has_body: true,
+            is_system: false,
+            called_functions: vec![],
+            referenced_globals: vec![],
             annotations: vec![],
         };
         let specs = derive_constraints(&[func]).unwrap();
@@ -510,6 +609,11 @@ mod tests {
             ],
             return_type: TypeInfo::SignedInt(32),
             can_throw: false,
+            is_virtual: false,
+            has_body: true,
+            is_system: false,
+            called_functions: vec![],
+            referenced_globals: vec![],
             annotations: vec![],
         };
         let specs = derive_constraints(&[func]).unwrap();
@@ -531,6 +635,11 @@ mod tests {
             }],
             return_type: TypeInfo::Void,
             can_throw: false,
+            is_virtual: false,
+            has_body: true,
+            is_system: false,
+            called_functions: vec![],
+            referenced_globals: vec![],
             annotations: vec![],
         };
         let specs = derive_constraints(&[func]).unwrap();
@@ -558,6 +667,11 @@ mod tests {
             }],
             return_type: TypeInfo::Bool,
             can_throw: false,
+            is_virtual: false,
+            has_body: true,
+            is_system: false,
+            called_functions: vec![],
+            referenced_globals: vec![],
             annotations: vec![],
         };
         let specs = derive_constraints(&[func]).unwrap();
@@ -575,6 +689,11 @@ mod tests {
             params: vec![],
             return_type: TypeInfo::Void,
             can_throw: true,
+            is_virtual: false,
+            has_body: true,
+            is_system: false,
+            called_functions: vec![],
+            referenced_globals: vec![],
             annotations: vec![Annotation::NoThrow],
         };
         let specs = derive_constraints(&[func]).unwrap();
@@ -593,6 +712,11 @@ mod tests {
                 discriminant_bits: 32,
             },
             can_throw: false,
+            is_virtual: false,
+            has_body: true,
+            is_system: false,
+            called_functions: vec![],
+            referenced_globals: vec![],
             annotations: vec![],
         };
         let specs = derive_constraints(&[func]).unwrap();
@@ -617,6 +741,11 @@ mod tests {
             }],
             return_type: TypeInfo::Void,
             can_throw: false,
+            is_virtual: false,
+            has_body: true,
+            is_system: false,
+            called_functions: vec![],
+            referenced_globals: vec![],
             annotations: vec![],
         };
         let specs = derive_constraints(&[func]).unwrap();
@@ -634,6 +763,11 @@ mod tests {
             params: vec![],
             return_type: TypeInfo::SignedInt(32),
             can_throw: false,
+            is_virtual: false,
+            has_body: true,
+            is_system: false,
+            called_functions: vec![],
+            referenced_globals: vec![],
             annotations: vec![Annotation::MustInspectResult],
         };
         let specs = derive_constraints(&[func]).unwrap();

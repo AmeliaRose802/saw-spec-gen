@@ -1,0 +1,177 @@
+//! Resolve opaque `llvm_alias "Name"` references in generated SAW specs
+//! against either the LLVM IR struct-size table or an LLVM
+//! `dereferenceable(N)` annotation extracted from the function signature.
+//!
+//! Background: clang ASTs reference C++ classes by their short, unqualified
+//! name (`HttpRequest`), but LLVM IR emitted by MSVC fully-qualifies the
+//! struct (`%"struct.Microsoft::Azure::...::HttpRequest" = type { ... }`).
+//! A spec that emits `llvm_alias "HttpRequest"` therefore fails to load
+//! because SAW can't find a symbol matching that short name.  This module
+//! provides the substitution logic to convert those aliases into either a
+//! resolved byte-array (`llvm_array N (llvm_int 8)`) or — when the bitcode
+//! itself wasn't supplied via `--llvm-ir` but the function signature had a
+//! `dereferenceable(N)` attribute — a size-only byte-array using N.
+
+use std::collections::HashMap;
+
+#[doc(hidden)]
+// Re-export the internal IR resolution function for the post-processing
+// pass in `spec_rewrite`.  We keep `resolve_via_ir` private because it's
+// an implementation detail of the public `resolve_saw_type` API; this
+// wrapper lets a sibling module reuse the matching logic without
+// duplicating it.
+pub fn resolve_via_ir_pub(saw_type: &str, ir_sizes: &HashMap<String, usize>) -> Option<String> {
+    resolve_via_ir(saw_type, ir_sizes)
+}
+
+/// Returns true when `saw_type` is an `llvm_alias` reference that gen-verify
+/// should try to resolve through the LLVM IR struct table.
+pub fn needs_resolution(saw_type: &str) -> bool {
+    saw_type.starts_with("llvm_alias \"")
+}
+
+/// Look up an opaque `llvm_alias "X"` against the LLVM IR struct-size map
+/// and, when a unique match is found, return the byte-array substitute.
+///
+/// Matching strategy:
+///   1. Exact match on the alias's inner name.
+///   2. Strip `struct.` / `class.` / `union.` prefix, then match any IR
+///      name whose own simple-name suffix equals the AST short name
+///      (covers MSVC fully-qualified names like `struct.Foo::Bar::Baz`).
+///
+/// Ambiguous suffix matches (two unrelated namespaces sharing the same
+/// final component) return None so the caller can warn rather than
+/// silently pick the wrong layout.
+fn resolve_via_ir(saw_type: &str, ir_sizes: &HashMap<String, usize>) -> Option<String> {
+    if ir_sizes.is_empty() {
+        return None;
+    }
+    let prefix = "llvm_alias \"";
+    if !saw_type.starts_with(prefix) || !saw_type.ends_with('"') {
+        return None;
+    }
+    let name = &saw_type[prefix.len()..saw_type.len() - 1];
+
+    // 1. Exact match against the IR table.
+    if let Some(&n) = ir_sizes.get(name) {
+        return Some(format!("llvm_array {n} (llvm_int 8)"));
+    }
+
+    // 2. Suffix match on the simple C++ name.
+    fn strip_prefix(s: &str) -> &str {
+        s.strip_prefix("struct.")
+            .or_else(|| s.strip_prefix("class."))
+            .or_else(|| s.strip_prefix("union."))
+            .unwrap_or(s)
+    }
+    let simple = strip_prefix(name);
+    let needle = format!("::{simple}");
+    let candidates: Vec<usize> = ir_sizes
+        .iter()
+        .filter_map(|(k, v)| {
+            let k_simple = strip_prefix(k);
+            if k_simple == simple || k_simple.ends_with(&needle) {
+                Some(*v)
+            } else {
+                None
+            }
+        })
+        .collect();
+    if candidates.len() == 1 {
+        return Some(format!("llvm_array {} (llvm_int 8)", candidates[0]));
+    }
+    None
+}
+
+/// Resolve `saw_type` against the IR struct table, falling back to a
+/// `dereferenceable(N)` annotation size when the IR table has no entry.
+///
+/// The IR-table path returns the canonical byte size derived from the
+/// actual loaded module — preferred whenever available.  The
+/// `deref_fallback` is used only as a last resort and is correct for
+/// override specs (where SAW just needs an allocation large enough to
+/// satisfy the LLVM signature).
+pub fn resolve_saw_type(
+    saw_type: &str,
+    ir_sizes: &HashMap<String, usize>,
+    deref_fallback: Option<usize>,
+) -> Option<String> {
+    if let Some(r) = resolve_via_ir(saw_type, ir_sizes) {
+        return Some(r);
+    }
+    if needs_resolution(saw_type) {
+        if let Some(n) = deref_fallback {
+            return Some(format!("llvm_array {n} (llvm_int 8)"));
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_exact_match() {
+        let mut m = HashMap::new();
+        m.insert("struct.PacketHeader".to_string(), 24usize);
+        let out = resolve_saw_type("llvm_alias \"struct.PacketHeader\"", &m, None);
+        assert_eq!(out.as_deref(), Some("llvm_array 24 (llvm_int 8)"));
+    }
+
+    #[test]
+    fn resolve_suffix_match_namespaced() {
+        let mut m = HashMap::new();
+        m.insert(
+            "struct.Microsoft::Azure::Host::HttpRequest".to_string(),
+            112usize,
+        );
+        let out = resolve_saw_type("llvm_alias \"struct.HttpRequest\"", &m, None);
+        assert_eq!(out.as_deref(), Some("llvm_array 112 (llvm_int 8)"));
+    }
+
+    #[test]
+    fn resolve_ambiguous_returns_none() {
+        let mut m = HashMap::new();
+        m.insert("struct.A::Thing".to_string(), 8usize);
+        m.insert("struct.B::Thing".to_string(), 16usize);
+        let out = resolve_saw_type("llvm_alias \"struct.Thing\"", &m, None);
+        assert!(out.is_none());
+    }
+
+    #[test]
+    fn resolve_skips_non_alias_types() {
+        let mut m = HashMap::new();
+        m.insert("struct.X".to_string(), 4usize);
+        assert!(resolve_saw_type("llvm_int 32", &m, None).is_none());
+        assert!(resolve_saw_type("llvm_array 8 (llvm_int 8)", &m, None).is_none());
+    }
+
+    #[test]
+    fn resolve_empty_map_is_noop() {
+        let m: HashMap<String, usize> = HashMap::new();
+        assert!(resolve_saw_type("llvm_alias \"struct.X\"", &m, None).is_none());
+    }
+
+    #[test]
+    fn resolve_uses_dereferenceable_fallback_when_ir_table_misses() {
+        let m: HashMap<String, usize> = HashMap::new();
+        let out = resolve_saw_type("llvm_alias \"HttpRequest\"", &m, Some(112));
+        assert_eq!(out.as_deref(), Some("llvm_array 112 (llvm_int 8)"));
+    }
+
+    #[test]
+    fn resolve_prefers_ir_table_over_dereferenceable_fallback() {
+        let mut m = HashMap::new();
+        m.insert("struct.HttpRequest".to_string(), 96usize);
+        let out = resolve_saw_type("llvm_alias \"HttpRequest\"", &m, Some(999));
+        assert_eq!(out.as_deref(), Some("llvm_array 96 (llvm_int 8)"));
+    }
+
+    #[test]
+    fn resolve_dereferenceable_fallback_ignored_for_non_alias() {
+        let m: HashMap<String, usize> = HashMap::new();
+        let out = resolve_saw_type("llvm_int 32", &m, Some(112));
+        assert!(out.is_none());
+    }
+}

@@ -1,0 +1,525 @@
+//! Driver for the `gen-verify` subcommand.
+//!
+//! Runs the full C++ → SAW verification pipeline:
+//!   1. Parse clang AST (one or more files, merged into a synthetic TU)
+//!   2. Derive target function + global / call-graph info
+//!   3. Emit adversarial specs for externals, virtual methods, and
+//!      direct in-module callees (compositional verification)
+//!   4. Emit the top-level `verify.saw` script that wires everything together
+
+use crate::spec_rewrite::{apply_alias_rewrites, collect_type_sizes};
+use crate::type_resolve::{needs_resolution, resolve_saw_type};
+use crate::{clang_ast, constraints, llvm_ir, saw_emit};
+use anyhow::Result;
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
+
+pub fn run(
+    ast: &[std::path::PathBuf],
+    bitcode: &Path,
+    llvm_ir_path: Option<&Path>,
+    cryptol_spec: &Path,
+    cryptol_fn: &str,
+    function: &str,
+    output: &Path,
+) -> Result<()> {
+    if ast.is_empty() {
+        anyhow::bail!("At least one --ast file is required");
+    }
+    let parsed_ast = if ast.len() == 1 {
+        eprintln!("Reading clang AST from: {}", ast[0].display());
+        clang_ast::parse_ast(&ast[0])?
+    } else {
+        eprintln!("Reading and merging {} clang ASTs:", ast.len());
+        let mut parsed = Vec::with_capacity(ast.len());
+        for p in ast {
+            eprintln!("  - {}", p.display());
+            parsed.push(clang_ast::parse_ast(p)?);
+        }
+        clang_ast::merge_asts(parsed)
+    };
+    let all_functions = clang_ast::extract_functions(&parsed_ast, None)?;
+    eprintln!("Found {} functions", all_functions.len());
+
+    // Optional LLVM IR for struct-size resolution.  MSVC-clang fully qualifies
+    // struct symbols (`%"struct.Foo::Bar::Baz"`), so when the AST contains an
+    // incomplete forward decl of `Baz` we can't pick a matching `llvm_alias`
+    // unless we know the IR-side name.  When `--llvm-ir` is supplied we parse
+    // the .ll for every `%struct.X = type {...}` and replace any unsized
+    // `llvm_alias` parameter type with `llvm_array N (llvm_int 8)`.
+    let ir_struct_sizes: HashMap<String, usize> = match llvm_ir_path {
+        Some(p) => {
+            eprintln!("Reading LLVM IR for struct sizes: {}", p.display());
+            let ir_text = llvm_ir::parse_llvm_ir(p)?;
+            let sizes = llvm_ir::struct_sizes(&ir_text);
+            eprintln!("  parsed {} struct type definitions", sizes.len());
+            sizes
+        }
+        None => HashMap::new(),
+    };
+
+    // Find the target function (FunctionInfo with call graph)
+    let target_fn = all_functions
+        .iter()
+        .filter(|f| f.name == function)
+        .min_by_key(|f| if f.is_virtual { 1 } else { 0 })
+        .ok_or_else(|| anyhow::anyhow!("Function '{}' not found in AST", function))?
+        .clone();
+
+    // Find the target function's spec
+    let target_spec = {
+        let specs = constraints::derive_constraints(&all_functions)?;
+        let matches: Vec<_> = specs
+            .into_iter()
+            .filter(|s| s.function_name == function)
+            .collect();
+        matches.into_iter().min_by_key(|s| if s.is_virtual { 1 } else { 0 })
+    };
+    let mut target_spec = target_spec
+        .ok_or_else(|| anyhow::anyhow!("Function '{}' not found in AST", function))?;
+    let target_mangled = target_spec
+        .mangled_name
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("No mangled name for '{}'", function))?;
+
+    // Resolve any opaque `llvm_alias` parameter / return types against the
+    // LLVM IR struct table.  Without this, MSVC-clang output (which fully
+    // qualifies struct names like `%"struct.Foo::Bar::Baz"`) fails to load
+    // because SAW can't find a `struct.Baz` symbol.
+    let mut unresolved: Vec<String> = Vec::new();
+    for p in &mut target_spec.params {
+        if let Some(replacement) =
+            resolve_saw_type(&p.saw_type, &ir_struct_sizes, p.dereferenceable_size)
+        {
+            eprintln!(
+                "  resolved param '{}' type {} → {}",
+                p.name, p.saw_type, replacement
+            );
+            p.saw_type = replacement;
+        } else if needs_resolution(&p.saw_type) {
+            unresolved.push(format!("param '{}' type {}", p.name, p.saw_type));
+        }
+    }
+    if let Some(replacement) = resolve_saw_type(
+        &target_spec.return_constraint.saw_type,
+        &ir_struct_sizes,
+        None,
+    ) {
+        eprintln!(
+            "  resolved return type {} → {}",
+            target_spec.return_constraint.saw_type, replacement
+        );
+        target_spec.return_constraint.saw_type = replacement;
+    } else if needs_resolution(&target_spec.return_constraint.saw_type) {
+        unresolved.push(format!(
+            "return type {}",
+            target_spec.return_constraint.saw_type
+        ));
+    }
+    if !unresolved.is_empty() {
+        if llvm_ir_path.is_some() {
+            eprintln!(
+                "warning: {} unresolved opaque struct type(s) — generated spec may fail to load:",
+                unresolved.len()
+            );
+            for u in &unresolved {
+                eprintln!("  - {u}");
+            }
+            eprintln!(
+                "  hint: ensure the .ll file contains a matching `%struct.X = type {{...}}`,"
+            );
+            eprintln!(
+                "        or pass an additional --ast file with the struct's full definition."
+            );
+        } else {
+            eprintln!(
+                "warning: {} opaque struct type(s) in target spec; pass --llvm-ir <path>",
+                unresolved.len()
+            );
+            eprintln!("        to resolve them against the bitcode's struct table:");
+            for u in &unresolved {
+                eprintln!("  - {u}");
+            }
+        }
+    }
+
+    let all_globals = clang_ast::extract_all_globals(&parsed_ast)?;
+    let all_specs = constraints::derive_constraints(&all_functions)?;
+
+    // Warn about interfaces referenced by fields but missing from the merged
+    // AST.  These cause `extract_virtual_methods` to miss the interface,
+    // which in turn causes gen-verify to skip vtable stub generation and
+    // emit a spec that fails to verify (the indirect calls have no overrides).
+    let missing = clang_ast::detect_missing_interfaces(&parsed_ast);
+    if !missing.is_empty() {
+        eprintln!(
+            "warning: {} interface(s) referenced by class fields but missing from AST(s):",
+            missing.len(),
+        );
+        for m in &missing {
+            eprintln!(
+                "  - {}::{} : {}<{}> (interface AST not provided)",
+                m.owning_class, m.field_name, m.wrapper, m.interface_name,
+            );
+        }
+        eprintln!("  hint: pass additional --ast files containing each missing interface so");
+        eprintln!("        gen-verify can synthesize vtable stubs for their virtual methods.");
+    }
+
+    std::fs::create_dir_all(output)?;
+
+    // Walk the call graph transitively to find ALL external calls reachable
+    // through any in-module function. Necessary because when SAW executes a
+    // real method body, that method's external calls (e.g. printf) also need
+    // overrides.
+    let fn_by_mangled: HashMap<String, &constraints::FunctionInfo> = all_functions
+        .iter()
+        .filter_map(|f| f.mangled_name.as_ref().map(|m| (m.clone(), f)))
+        .collect();
+    let fn_by_name: HashMap<String, &constraints::FunctionInfo> =
+        all_functions.iter().map(|f| (f.name.clone(), f)).collect();
+
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut called_mangled: HashSet<String> = HashSet::new();
+    let mut worklist: Vec<&constraints::FunctionInfo> = vec![&target_fn];
+    while let Some(f) = worklist.pop() {
+        let key = f.mangled_name.clone().unwrap_or_else(|| f.name.clone());
+        if !visited.insert(key) {
+            continue;
+        }
+        for c in &f.called_functions {
+            called_mangled.insert(c.mangled_name.clone());
+            // Recurse only if callee has a body AND isn't a system function.
+            // System functions (stdio/ucrt/etc.) have inline bodies that rely
+            // on LLVM intrinsics SAW can't resolve, so we treat them as
+            // external instead.
+            let callee = fn_by_mangled
+                .get(&c.mangled_name)
+                .or_else(|| fn_by_name.get(&c.name))
+                .copied();
+            if let Some(callee) = callee {
+                if callee.has_body && !callee.is_system {
+                    worklist.push(callee);
+                }
+            }
+        }
+    }
+
+    // Find which called functions are treated as external. Skip clang
+    // `__builtin_*` intrinsics — they aren't real bitcode symbols. Skip
+    // virtuals — they're handled via vtable stubs.
+    let external_calls: Vec<&constraints::SpecConstraint> = all_specs
+        .iter()
+        .filter(|s| {
+            let fn_info = s
+                .mangled_name
+                .as_ref()
+                .and_then(|m| fn_by_mangled.get(m))
+                .or_else(|| fn_by_name.get(&s.function_name))
+                .copied();
+            let is_treated_external = match fn_info {
+                Some(f) => !f.has_body || f.is_system,
+                None => !s.has_body,
+            };
+            if !is_treated_external {
+                return false;
+            }
+            if s.is_virtual {
+                return false;
+            }
+            if let Some(f) = fn_info {
+                if f.is_virtual {
+                    return false;
+                }
+            }
+            if s.function_name.starts_with("__builtin_") {
+                return false;
+            }
+            if let Some(ref m) = s.mangled_name {
+                if m.starts_with("__builtin_") {
+                    return false;
+                }
+                called_mangled.contains(m)
+            } else {
+                false
+            }
+        })
+        .collect();
+
+    // Extract interface info first so external spec generation can detect
+    // functions whose return type is an interface pointer.
+    let vmethods = clang_ast::extract_virtual_methods(&parsed_ast, None)?;
+    let has_interfaces = !vmethods.is_empty();
+    let interface_classes: HashSet<String> =
+        vmethods.iter().map(|m| m.class_name.clone()).collect();
+
+    // Pointer-to-interface helper. Abstract classes (only virtual methods,
+    // no fields) parse as Opaque rather than Struct, so we accept both.
+    let interface_of = |ty: &constraints::TypeInfo| -> Option<String> {
+        if let constraints::TypeInfo::Pointer(inner) = ty {
+            let name_opt = match inner.as_ref() {
+                constraints::TypeInfo::Struct { name, .. } => Some(name.as_str()),
+                constraints::TypeInfo::Opaque { name, .. } => Some(name.as_str()),
+                _ => None,
+            };
+            if let Some(name) = name_opt {
+                if interface_classes.contains(name) {
+                    return Some(name.to_string());
+                }
+            }
+        }
+        None
+    };
+
+    // External specs (only those actually called)
+    if !external_calls.is_empty() {
+        let experimental_dir = output.join("specs_experimental");
+        std::fs::create_dir_all(&experimental_dir)?;
+        for spec in &external_calls {
+            if spec.function_name == "operator new"
+                || spec.mangled_name.as_deref() == Some("??2@YAPEAX_K@Z")
+            {
+                let mangled = spec.mangled_name.as_deref().unwrap_or("??2@YAPEAX_K@Z");
+                saw_emit::emit_operator_new_spec(mangled, &experimental_dir)?;
+                continue;
+            }
+
+            let fn_info = all_functions
+                .iter()
+                .find(|f| f.name == spec.function_name && f.mangled_name == spec.mangled_name);
+            let iface_return = fn_info.and_then(|f| interface_of(&f.return_type));
+
+            if let Some(iface_name) = iface_return {
+                saw_emit::emit_interface_factory_spec(
+                    spec,
+                    &iface_name,
+                    &all_globals,
+                    &experimental_dir,
+                )?;
+                continue;
+            }
+
+            let is_system = fn_info.map(|f| f.is_system).unwrap_or(false);
+            saw_emit::emit_single_experimental_spec(spec, &all_globals, is_system, &experimental_dir)?;
+        }
+        eprintln!("Generated {} external function specs", external_calls.len());
+    }
+
+    // Vtable stubs + interface overrides
+    let mut ctors = Vec::new();
+    if has_interfaces {
+        let class_names: Vec<String> = interface_classes.iter().cloned().collect();
+        ctors = clang_ast::extract_constructors(&parsed_ast, &class_names)?;
+        // Trust the AST. `classes_with_virtual_dtor` already propagates
+        // virtual-dtor-ness through inheritance, so a derived class that
+        // doesn't redeclare `~T()` still gets the slot when its base has
+        // one. If the AST is incomplete (filtered ast-dump etc.), MSVC's
+        // real bitcode will reflect the *declared* layout — we must
+        // match that exactly, or SAW will dispatch every method to the
+        // wrong vtable entry. An incorrect over-eager dtor slot is at
+        // least as bad as a missing one: it shifts every method by one
+        // and SAW will resolve `log(this, msg)` through a `(ptr, i32)`
+        // dtor stub, producing a function-handle type mismatch.
+        let classes_with_vdtor = clang_ast::classes_with_virtual_dtor(&parsed_ast);
+        let missing_dtor: Vec<&str> = interface_classes
+            .iter()
+            .filter(|c| !classes_with_vdtor.contains(c.as_str()))
+            .map(|c| c.as_str())
+            .collect();
+        if !missing_dtor.is_empty() {
+            let mut sorted = missing_dtor.clone();
+            sorted.sort_unstable();
+            eprintln!(
+                "note: emitting vtable for {} polymorphic class(es) without a virtual dtor slot \
+                 (no `virtual ~T()` declared, transitively):",
+                sorted.len(),
+            );
+            for c in &sorted {
+                eprintln!("  - {c}");
+            }
+            eprintln!(
+                "      If your real bitcode disagrees with this layout, add \
+                 `virtual ~T() = default;` to the interface header."
+            );
+        }
+        saw_emit::emit_interface_stubs(
+            &vmethods,
+            &ctors,
+            &all_globals,
+            &classes_with_vdtor,
+            output,
+            Some(cryptol_fn),
+        )?;
+        eprintln!(
+            "Generated {} havoc specs + {} constructor overrides",
+            vmethods.len(),
+            ctors.len(),
+        );
+    }
+
+    // Try to assemble `vtable_stubs.ll` → `vtable_stubs.bc` so the
+    // generated script is directly runnable. SAW's `llvm_load_module`
+    // only accepts bitcode; a text `.ll` produces "Invalid magic number"
+    // at load time. If no assembler (llvm-as / clang) is on PATH we fall
+    // back to referencing the `.ll` and the emitted script will warn the
+    // user to assemble it manually.
+    let stubs_status = if has_interfaces {
+        let st = saw_emit::assemble_vtable_stubs(output);
+        match &st {
+            saw_emit::AssembledStubs::Bitcode { bc_filename, assembler } => {
+                eprintln!(
+                    "Assembled vtable stubs to {} via `{assembler}`",
+                    bc_filename,
+                );
+            }
+            saw_emit::AssembledStubs::TextOnly { ll_filename } => {
+                eprintln!(
+                    "warning: could not find llvm-as / clang on PATH — \
+                     {ll_filename} was NOT assembled to bitcode.",
+                );
+                eprintln!(
+                    "         SAW's llvm_load_module rejects text IR. Run one of:",
+                );
+                eprintln!(
+                    "           llvm-as {} -o {}/vtable_stubs.bc",
+                    output.join(ll_filename).display(),
+                    output.display(),
+                );
+                eprintln!(
+                    "           clang -c -emit-llvm {} -o {}/vtable_stubs.bc",
+                    output.join(ll_filename).display(),
+                    output.display(),
+                );
+                eprintln!(
+                    "         before invoking saw on verify.saw.",
+                );
+            }
+            saw_emit::AssembledStubs::NoStubs => {}
+        }
+        st
+    } else {
+        saw_emit::AssembledStubs::NoStubs
+    };
+
+    // Compositional sub-function overrides.
+    //
+    // Each in-module function the target directly calls is replaced by an
+    // adversarial (havoc) override.  Skip callees already covered elsewhere:
+    // virtuals (vtable stubs), constructors (interface overrides), and
+    // system / external functions.
+    let ctor_mangled: HashSet<String> = ctors.iter().map(|c| c.mangled_name.clone()).collect();
+    let external_mangled: HashSet<String> = external_calls
+        .iter()
+        .filter_map(|s| s.mangled_name.clone())
+        .collect();
+    let mut sub_callee_specs: Vec<constraints::SpecConstraint> = Vec::new();
+    let mut seen_sub: HashSet<String> = HashSet::new();
+    for c in &target_fn.called_functions {
+        if !seen_sub.insert(c.mangled_name.clone()) {
+            continue;
+        }
+        if c.mangled_name == target_mangled {
+            continue;
+        }
+        if ctor_mangled.contains(&c.mangled_name) {
+            continue;
+        }
+        if external_mangled.contains(&c.mangled_name) {
+            continue;
+        }
+        if c.name.starts_with("__builtin_") || c.mangled_name.starts_with("__builtin_") {
+            continue;
+        }
+        let callee = fn_by_mangled
+            .get(&c.mangled_name)
+            .or_else(|| fn_by_name.get(&c.name))
+            .copied();
+        let Some(callee) = callee else { continue };
+        if !callee.has_body || callee.is_system || callee.is_virtual {
+            continue;
+        }
+        let spec = all_specs
+            .iter()
+            .find(|s| s.mangled_name.as_deref() == Some(c.mangled_name.as_str()));
+        if let Some(spec) = spec {
+            sub_callee_specs.push(spec.clone());
+        }
+    }
+    if !sub_callee_specs.is_empty() {
+        let experimental_dir = output.join("specs_experimental");
+        std::fs::create_dir_all(&experimental_dir)?;
+        for spec in &sub_callee_specs {
+            saw_emit::emit_single_experimental_spec(spec, &all_globals, false, &experimental_dir)?;
+        }
+        eprintln!(
+            "Generated {} sub-function override specs (compositional)",
+            sub_callee_specs.len(),
+        );
+    }
+
+    // Apply the same `llvm_alias` resolution / dereferenceable fallback to
+    // every spec that will be emitted as an override (sub-callees and
+    // externals), not just the target.  Without this the override files
+    // contain `llvm_alias "ShortName"` references that SAW can't load
+    // against the bitcode's mangled struct table.
+    let resolve_spec_inplace = |spec: &mut constraints::SpecConstraint| {
+        for p in &mut spec.params {
+            if let Some(r) =
+                resolve_saw_type(&p.saw_type, &ir_struct_sizes, p.dereferenceable_size)
+            {
+                p.saw_type = r;
+            }
+        }
+        if let Some(r) = resolve_saw_type(
+            &spec.return_constraint.saw_type,
+            &ir_struct_sizes,
+            None,
+        ) {
+            spec.return_constraint.saw_type = r;
+        }
+    };
+    for spec in &mut sub_callee_specs {
+        resolve_spec_inplace(spec);
+    }
+    let mut external_calls_owned: Vec<constraints::SpecConstraint> =
+        external_calls.iter().map(|s| (*s).clone()).collect();
+    for spec in &mut external_calls_owned {
+        resolve_spec_inplace(spec);
+    }
+
+    saw_emit::emit_verification_script(
+        bitcode,
+        cryptol_spec,
+        cryptol_fn,
+        function,
+        &target_mangled,
+        &target_spec,
+        &target_fn,
+        &vmethods,
+        has_interfaces,
+        &external_calls_owned,
+        &sub_callee_specs,
+        &all_globals,
+        &ctors,
+        &stubs_status,
+        output,
+    )?;
+
+    // Post-processing: rewrite any `llvm_alias "X"` reference SAW can't
+    // resolve into a sized byte array.  Without this, emitters that go
+    // straight through `type_to_saw` (havoc specs, vtable stub setups,
+    // experimental override specs) leave short C++ names like
+    // `HttpRequest`, `std::tuple<…>`, `SessionState`, or `LatchResult`
+    // in the output — none of which exist in the bitcode's struct
+    // table (clang fully namespace-qualifies them), so SAW aborts on
+    // the first load with "alias not found".  The byte-array fallback
+    // is sound for override specs because SAW only needs the
+    // allocation size, not the field layout, when the memory is
+    // havoced symbolically.
+    let extra_sizes = collect_type_sizes(&all_functions);
+    apply_alias_rewrites(output, &ir_struct_sizes, &extra_sizes);
+
+    eprintln!("Generated verification script in {}", output.display());
+    eprintln!("Run with: saw {}/verify.saw", output.display());
+    Ok(())
+}

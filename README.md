@@ -16,6 +16,8 @@ Writing these by hand is error-prone:
 
 This tool extracts constraints from the type system, SAL annotations, and compiler attributes, and generates the **maximally adversarial** spec consistent with those constraints.
 
+Note: STD functions are assumed not to be evil and safe assume specs are auto generated for them. Maybe evil std mode is a future feature.
+
 ## What It Generates
 
 ### Regular specs (`from-clang-ast` / `from-mir-json`)

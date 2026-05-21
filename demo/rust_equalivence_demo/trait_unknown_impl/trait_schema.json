@@ -1,0 +1,14 @@
+{
+  "traits": [
+    {
+      "name": "Stepper",
+      "methods": [
+        {
+          "name": "step",
+          "args": [{ "kind": "Ref" }],
+          "ret":  { "kind": "U32" }
+        }
+      ]
+    }
+  ]
+}

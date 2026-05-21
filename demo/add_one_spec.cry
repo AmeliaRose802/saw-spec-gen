@@ -1,0 +1,5 @@
+// Cryptol spec: the MATHEMATICAL definition of what add_one should do.
+// This is pure math — no C++, no memory, no pointers. Just: "given x, return x+1"
+
+add_one_spec : [32] -> [32]
+add_one_spec x = x + 1

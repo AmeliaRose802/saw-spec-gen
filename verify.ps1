@@ -1,0 +1,415 @@
+<#
+.SYNOPSIS
+    End-to-end SAW formal verification: compile → AST → gen-verify → SAW.
+
+.DESCRIPTION
+    Single script that takes a C++ source file and a Cryptol spec, then:
+      1. Compiles the C++ to LLVM bitcode (clang)
+      2. Dumps the clang AST to JSON
+      3. Runs saw-spec-gen gen-verify to generate all specs + verify.saw
+      4. Assembles vtable stubs (llvm-as)
+      5. Runs SAW to check equivalence
+
+    All artifacts are placed under a single output directory:
+      out/
+        add_one.bc              ← compiled bitcode
+        add_one_ast.json        ← clang AST dump
+        add_one_spec.cry        ← copy of Cryptol spec
+        verify.saw              ← generated verification script
+        specs/                  ← override specs + vtable stubs
+          vtable_stubs.ll
+          vtable_stubs.bc
+          interface_overrides.saw
+          ILog_log_havoc_spec.saw
+          ...
+        specs_experimental/     ← experimental (llvm_unspecified_globals) specs
+          rand_auto_spec.saw
+          ...
+
+.PARAMETER CppFile
+    Path to the C++ source file.
+
+.PARAMETER CryptolSpec
+    Path to the Cryptol spec file (.cry).
+
+.PARAMETER CryptolFn
+    Name of the Cryptol function to check against (e.g. "add_one_spec").
+
+.PARAMETER Function
+    Name of the C++ function to verify (unmangled, e.g. "add_one").
+
+.PARAMETER OutputDir
+    Output directory for all generated artifacts. Defaults to "out/" next to the .cpp file.
+
+.EXAMPLE
+    .\verify.ps1 -CppFile demo\add_one.cpp -CryptolSpec demo\add_one_spec.cry -CryptolFn add_one_spec -Function add_one
+    .\verify.ps1 -CppFile demo\add_one.cpp -CryptolSpec demo\add_one_spec.cry -CryptolFn add_one_spec -Function add_one -OutputDir my_output
+#>
+
+param(
+    [Parameter(Mandatory)][string]$CppFile,
+    [Parameter(Mandatory)][string]$CryptolSpec,
+    [Parameter(Mandatory)][string]$CryptolFn,
+    [Parameter(Mandatory)][string]$Function,
+    [string]$OutputDir
+)
+
+$ErrorActionPreference = "Stop"
+
+# ── Resolve paths ──────────────────────────────────────────────────────────────
+$CppFile     = Resolve-Path $CppFile
+$CryptolSpec = Resolve-Path $CryptolSpec
+$ScriptRoot  = $PSScriptRoot  # directory where this .ps1 lives (repo root)
+$baseName    = [System.IO.Path]::GetFileNameWithoutExtension($CppFile)
+
+if (-not $OutputDir) {
+    $OutputDir = Join-Path (Split-Path $CppFile) "out_${baseName}"
+}
+if (Test-Path $OutputDir) { Remove-Item -Recurse -Force $OutputDir }
+New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+$OutputDir = Resolve-Path $OutputDir
+
+# ── Find tools ─────────────────────────────────────────────────────────────────
+# Clang / LLVM tools
+$clangCandidates = @(
+    "C:\Users\ameliapayne\clang+llvm-20.1.6-x86_64-pc-windows-msvc\bin"
+    "C:\Program Files\LLVM\bin"
+)
+$llvmBin = $null
+foreach ($dir in $clangCandidates) {
+    if (Test-Path "$dir\clang.exe") { $llvmBin = $dir; break }
+}
+if (-not $llvmBin) {
+    Write-Error "Could not find clang. Searched: $($clangCandidates -join ', ')"
+    exit 1
+}
+$clang  = Join-Path $llvmBin "clang.exe"
+$llvmAs = Join-Path $llvmBin "llvm-as.exe"
+
+# saw-spec-gen (built from this repo)
+$specGen = Join-Path $ScriptRoot "target\release\saw-spec-gen.exe"
+if (-not (Test-Path $specGen)) {
+    Write-Host "[*] Building saw-spec-gen..." -ForegroundColor Cyan
+    Push-Location $ScriptRoot
+    cargo build --release 2>&1 | Write-Host
+    Pop-Location
+    if (-not (Test-Path $specGen)) {
+        Write-Error "Failed to build saw-spec-gen"
+        exit 1
+    }
+}
+
+# SAW
+$sawCandidates = @(
+    "C:\Users\ameliapayne\saw-script\dist-newstyle\build\x86_64-windows\ghc-9.6.7\saw-1.5.0.99\x\saw\build\saw\saw.exe"
+    (Get-Command saw -ErrorAction SilentlyContinue).Source
+)
+$saw = $null
+foreach ($s in $sawCandidates) {
+    if ($s -and (Test-Path $s)) { $saw = $s; break }
+}
+if (-not $saw) {
+    Write-Error "Could not find SAW executable"
+    exit 1
+}
+
+# z3 on PATH (SAW needs it)
+$solverDir = "C:\Users\ameliapayne\saw-1.5-windows-2022-X64-with-solvers\bin"
+if (Test-Path $solverDir) {
+    $env:PATH = "$solverDir;$env:PATH"
+}
+
+# ── All artifacts go under $OutputDir ──────────────────────────────────────────
+$bcFile   = Join-Path $OutputDir "$baseName.bc"
+$llFile   = Join-Path $OutputDir "$baseName.ll"
+$astFile  = Join-Path $OutputDir "${baseName}_ast.json"
+
+# ── Step 1: Compile C++ → LLVM bitcode ────────────────────────────────────────
+Write-Host ""
+Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host " Step 1: Compile $baseName.cpp → bitcode" -ForegroundColor Cyan
+Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
+& $clang -c -emit-llvm -O0 -fno-rtti -target x86_64-pc-windows-msvc $CppFile -o $bcFile 2>&1
+if ($LASTEXITCODE -ne 0) { Write-Error "clang failed"; exit 1 }
+Write-Host "  → $bcFile ($((Get-Item $bcFile).Length) bytes)" -ForegroundColor Green
+
+# Also emit IR text so gen-verify can resolve fully qualified struct names.
+& $clang -S -emit-llvm -O0 -fno-rtti -target x86_64-pc-windows-msvc $CppFile -o $llFile 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  warning: failed to emit .ll (continuing without struct-size resolution)" -ForegroundColor Yellow
+    $llFile = $null
+} else {
+    Write-Host "  → $llFile" -ForegroundColor Green
+}
+
+# ── Step 2: Dump clang AST → JSON ─────────────────────────────────────────────
+Write-Host ""
+Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host " Step 2: Dump clang AST → JSON" -ForegroundColor Cyan
+Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
+& $clang -Xclang -ast-dump=json -fsyntax-only -target x86_64-pc-windows-msvc $CppFile 2>$null | Out-File -Encoding utf8 $astFile
+if (-not (Test-Path $astFile) -or (Get-Item $astFile).Length -eq 0) {
+    Write-Error "AST dump failed"; exit 1
+}
+Write-Host "  → $astFile ($([math]::Round((Get-Item $astFile).Length / 1MB, 1)) MB)" -ForegroundColor Green
+
+# ── Step 3: Generate specs + verify.saw ────────────────────────────────────────
+Write-Host ""
+Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host " Step 3: saw-spec-gen gen-verify" -ForegroundColor Cyan
+Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
+# Copy Cryptol spec into output dir so verify.saw can reference it locally
+$cryDest = Join-Path $OutputDir ([System.IO.Path]::GetFileName($CryptolSpec))
+Copy-Item $CryptolSpec $cryDest -Force
+
+$genVerifyArgs = @(
+    'gen-verify',
+    '--ast', $astFile,
+    '--bitcode', $bcFile,
+    '--cryptol-spec', $cryDest,
+    '--function', $Function,
+    '--cryptol-fn', $CryptolFn,
+    '--output', $OutputDir
+)
+if ($llFile) {
+    $genVerifyArgs += @('--llvm-ir', $llFile)
+}
+& $specGen @genVerifyArgs 2>&1 | Write-Host
+if ($LASTEXITCODE -ne 0) { Write-Error "saw-spec-gen failed"; exit 1 }
+$verifySaw = Join-Path $OutputDir "verify.saw"
+Write-Host "  → $verifySaw" -ForegroundColor Green
+
+# ── Step 4: Assemble vtable stubs (.ll → .bc) ─────────────────────────────────
+$stubsLl = Join-Path $OutputDir "vtable_stubs.ll"
+$stubsBc = Join-Path $OutputDir "vtable_stubs.bc"
+if (Test-Path $stubsLl) {
+    Write-Host ""
+    Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host " Step 4: Assemble vtable stubs → bitcode" -ForegroundColor Cyan
+    Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
+    & $llvmAs $stubsLl -o $stubsBc 2>&1
+    if ($LASTEXITCODE -ne 0) { Write-Error "llvm-as failed"; exit 1 }
+    Write-Host "  → $stubsBc ($((Get-Item $stubsBc).Length) bytes)" -ForegroundColor Green
+
+    # Patch verify script to use .bc instead of .ll
+    (Get-Content $verifySaw -Raw) -replace 'vtable_stubs\.ll', 'vtable_stubs.bc' |
+        Set-Content $verifySaw -NoNewline
+}
+
+# ── Step 5: Run SAW ───────────────────────────────────────────────────────────
+Write-Host ""
+Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host " Step 5: SAW verification" -ForegroundColor Cyan
+Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
+
+Push-Location $OutputDir
+$sawOutput = & $saw ([System.IO.Path]::GetFileName($verifySaw)) 2>&1 | Out-String
+Pop-Location
+
+# ── Demangle helper ───────────────────────────────────────────────────────────
+# Find Microsoft's undname.exe for MSVC name demangling
+$undname = (Get-ChildItem "C:\Program Files (x86)\Microsoft Visual Studio\*" `
+    -Recurse -Filter "undname.exe" -ErrorAction SilentlyContinue |
+    Where-Object { $_.FullName -match 'Hostx64\\x64|Hostx64\\arm64' } |
+    Select-Object -Index 0).FullName
+
+function Demangle([string]$mangled) {
+    if (-not $mangled -or -not $undname) { return $mangled }
+    # undname outputs: 'is :- "demangled name"'
+    $raw = & $undname $mangled 2>$null | Out-String
+    if ($raw -match 'is :- "(.+)"') {
+        $result = $Matches[1].Trim()
+        # Clean up MSVC noise: __cdecl, __ptr64, public:, etc.
+        $result = $result -replace '\s*__cdecl\s*', ' '
+        $result = $result -replace '\s*__ptr64\s*', ''
+        $result = $result -replace '^\s*public:\s*', ''
+        $result = $result -replace '^\s*private:\s*', ''
+        $result = $result -replace '^\s*protected:\s*', ''
+        $result = $result -replace '\s+', ' '
+        return $result.Trim()
+    }
+    return $mangled
+}
+
+function FormatOverride([string]$name) {
+    # Skip already-readable stub names
+    if ($name -notmatch '^\?') { return $name }
+    $demangled = Demangle $name
+    if ($demangled -ne $name) {
+        return $demangled
+    }
+    return $name
+}
+
+# ── Report results ─────────────────────────────────────────────────────────────
+Write-Host ""
+Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host " Result" -ForegroundColor Cyan
+Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
+
+# Helper: write a small result.json that verify-equiv.ps1 reads to render
+# its combined verdict. Shape kept in sync with verify-rust.ps1.
+function Write-ResultJson($verdict, $cex, $expected, $actual) {
+    $payload = [PSCustomObject]@{
+        side           = "cpp"
+        function       = $Function
+        cryptol_fn     = $CryptolFn
+        verdict        = $verdict
+        counterexample = @($cex)
+        expected       = $expected
+        actual         = $actual
+    }
+    $payload | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $OutputDir "result.json") -Encoding utf8
+}
+
+if ($sawOutput -match "Counterexample") {
+    Write-Host ""
+    Write-Host "  RESULT: UNSAT" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "  C++ function  : $Function" -ForegroundColor White
+    Write-Host "  Cryptol spec  : $CryptolFn" -ForegroundColor White
+    Write-Host "  Equivalence   : DISPROVED — counterexample found" -ForegroundColor Red
+    Write-Host ""
+
+    # Parse counterexample values from SAW output
+    $cexVars = @()
+    $cexPairs = @()
+    $sawOutput -split "`n" | ForEach-Object {
+        if ($_ -match '^\s+(\S+):\s+(\d+)\s*$') {
+            $varName = $Matches[1]
+            $rawVal  = [uint64]$Matches[2]
+            $cexPairs += @{ Name = $varName; Value = $rawVal }
+            # Show as signed if top bit set (32-bit)
+            if ($rawVal -gt 2147483647 -and $rawVal -le 4294967295) {
+                $signed = [int]($rawVal - 4294967296)
+                $cexVars += "    $varName = $rawVal  ($signed as signed)"
+            } else {
+                $cexVars += "    $varName = $rawVal"
+            }
+        }
+    }
+
+    if ($cexVars.Count -gt 0) {
+        Write-Host "  Counterexample:" -ForegroundColor Yellow
+        foreach ($v in $cexVars) {
+            Write-Host $v -ForegroundColor Yellow
+        }
+        Write-Host ""
+    }
+
+    # ── Evaluate expected vs actual at counterexample inputs ────────────────
+    if ($cexPairs.Count -gt 0) {
+        $displayArgs = ($cexPairs | ForEach-Object { "$($_.Value)" }) -join ", "
+
+        # Evaluate Cryptol spec at counterexample values
+        $cryptolArgs = ($cexPairs | ForEach-Object { "($($_.Value) : [32])" }) -join " "
+        $cryptolExpr = "$CryptolFn $cryptolArgs"
+        $evalScript  = Join-Path $OutputDir "_eval_cex.saw"
+        $cryFileName = [System.IO.Path]::GetFileName($cryDest)
+        @"
+import "$cryFileName";
+let r = eval_int {{ $cryptolExpr }};
+print (str_concat "CRYPTOL_RESULT=" (show r));
+"@ | Set-Content $evalScript -Encoding utf8
+
+        Push-Location $OutputDir
+        $evalOut = & $saw "_eval_cex.saw" 2>&1 | Out-String
+        Pop-Location
+
+        $expectedVal = $null
+        if ($evalOut -match "CRYPTOL_RESULT=(\d+)") {
+            $expectedVal = $Matches[1]
+        }
+
+        # Compile + run C++ function at counterexample values
+        $testCpp = Join-Path $OutputDir "_test_cex.cpp"
+        $testExe = Join-Path $OutputDir "_test_cex.exe"
+        $cppArgs = ($cexPairs | ForEach-Object { "$($_.Value)u" }) -join ", "
+        $origSrc = Get-Content $CppFile -Raw
+        @"
+$origSrc
+
+#include <cstdio>
+int main() {
+    auto result = ${Function}($cppArgs);
+    printf("CPP_RESULT=%llu\n", (unsigned long long)result);
+    return 0;
+}
+"@ | Set-Content $testCpp -Encoding utf8
+
+        & $clang -O0 -target x86_64-pc-windows-msvc $testCpp -o $testExe 2>$null
+        $actualVal = $null
+        if (Test-Path $testExe) {
+            $cppOut = & $testExe 2>&1 | Out-String
+            if ($cppOut -match "CPP_RESULT=(\d+)") {
+                $actualVal = $Matches[1]
+            }
+        }
+
+        if ($expectedVal -or $actualVal) {
+            Write-Host "  Expected vs Actual at ($displayArgs):" -ForegroundColor White
+            if ($expectedVal) {
+                Write-Host "    Cryptol $CryptolFn($displayArgs) = $expectedVal" -ForegroundColor Green
+            }
+            if ($actualVal) {
+                Write-Host "    C++     $Function($displayArgs)  = $actualVal" -ForegroundColor Red
+            }
+            Write-Host ""
+        }
+    }
+
+    # Show which overrides fired (with demangled names)
+    $overrides = @()
+    $sawOutput -split "`n" | ForEach-Object {
+        if ($_ -match 'Applied override!\s+(.+)$') {
+            $overrides += $Matches[1].Trim()
+        }
+    }
+    if ($overrides.Count -gt 0) {
+        Write-Host "  Overrides applied during symbolic execution:" -ForegroundColor DarkGray
+        foreach ($ov in $overrides) {
+            Write-Host "    → $(FormatOverride $ov)" -ForegroundColor DarkGray
+        }
+        Write-Host ""
+    }
+
+    # Show the reason (subgoal that failed, demangled)
+    $sawOutput -split "`n" | ForEach-Object {
+        if ($_ -match 'Subgoal failed:\s+(\S+)') {
+            $failedSym = $Matches[1]
+            $friendly  = Demangle $failedSym
+            Write-Host "  Failed proof obligation: $friendly" -ForegroundColor DarkGray
+            if ($friendly -ne $failedSym) {
+                Write-Host "    ($failedSym)" -ForegroundColor DarkGray
+            }
+        }
+    }
+
+    Write-Host ""
+    # Persist a structured record for verify-equiv.ps1 to pick up.
+    $cexForJson = @($cexPairs | ForEach-Object {
+        [PSCustomObject]@{ Name = $_.Name; Value = [string]$_.Value }
+    })
+    Write-ResultJson "DISPROVED" $cexForJson $expectedVal $actualVal
+    exit 1
+} elseif ($sawOutput -match "VERIFIED") {
+    Write-Host ""
+    Write-Host "  RESULT: SAT" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  C++ function  : $Function" -ForegroundColor White
+    Write-Host "  Cryptol spec  : $CryptolFn" -ForegroundColor White
+    Write-Host "  Equivalence   : VERIFIED by z3" -ForegroundColor Green
+    Write-Host ""
+    Write-ResultJson "VERIFIED" @() $null $null
+    exit 0
+} else {
+    Write-Host ""
+    Write-Host "  RESULT: UNKNOWN" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  SAW did not produce a clear sat/unsat result." -ForegroundColor Yellow
+    Write-Host "  Full output:" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host $sawOutput
+    Write-ResultJson "UNKNOWN" @() $null $null
+    exit 2
+}

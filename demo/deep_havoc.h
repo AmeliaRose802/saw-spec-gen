@@ -24,3 +24,17 @@ public:
     // non-const method: can modify config and everything reachable from it
     virtual int process(Config *cfg) noexcept = 0;
 };
+
+// --------------------------------------------------------------------------
+// Functions under verification. Both call through the IProcessor vtable.
+// --------------------------------------------------------------------------
+
+// UNSAFE: reads cfg->flags AFTER non-const process() could clobber it.
+// Proof that return == original flags should FAIL.
+extern "C" uint32_t
+process_and_read_flags(IProcessor *proc, Config *cfg) noexcept;
+
+// SAFE: saves cfg->flags BEFORE calling process(), returns the saved copy.
+// Proof that return == original flags should SUCCEED.
+extern "C" uint32_t
+save_flags_then_process(IProcessor *proc, Config *cfg) noexcept;

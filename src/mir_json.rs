@@ -209,7 +209,12 @@ fn parse_mir_function(func: &Value, adt_map: &HashMap<String, TypeInfo>) -> Opti
         params,
         return_type,
         can_throw: false, // Rust doesn't have exceptions
+        is_virtual: false,
+        has_body: true,
+        is_system: false,
         annotations,
+        referenced_globals: vec![],
+        called_functions: vec![],
     })
 }
 

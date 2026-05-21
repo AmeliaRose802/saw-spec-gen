@@ -1,0 +1,10 @@
+// Cryptol spec: saturating add on 32-bit unsigned ints.
+//
+// If a + b would overflow, the result must be the maximum 32-bit value
+// (0xFFFFFFFF), NOT zero, NOT the wrapped sum.
+
+sat_add_spec : [32] -> [32] -> [32]
+sat_add_spec a b = if carry then 0xFFFFFFFF else sum
+  where
+    sum   = a + b
+    carry = sum < a

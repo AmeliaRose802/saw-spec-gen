@@ -1,0 +1,15 @@
+// Cryptol spec for compute_fee — matches the product spec exactly.
+//
+//   1. base fee + 2% of the amount
+//   2. cap at $50.00 (5000 cents)
+//   3. subscriber 25% discount
+//
+// All arithmetic is on 32-bit unsigned, wrapping on overflow.
+
+// is_subscriber is a 1-bit value (SAW models C++ bool / Rust bool as i1 → [1]).
+compute_fee_spec : [32] -> [1] -> [32]
+compute_fee_spec amount_cents is_subscriber = discounted
+  where
+    raw        = 500 + (amount_cents * 2 / 100)
+    capped     = if raw > 5000 then 5000 else raw
+    discounted = if is_subscriber != 0 then (capped * 75 / 100) else capped

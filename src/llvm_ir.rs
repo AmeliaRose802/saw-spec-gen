@@ -59,6 +59,30 @@ pub fn extract_functions(ir: &str, filter: Option<&str>) -> Result<Vec<FunctionI
     Ok(functions)
 }
 
+/// Build a map from LLVM struct name (as it appears in IR, e.g.
+/// `struct.Microsoft::Azure::HttpRequest`) to the struct's size in bytes.
+///
+/// Used by `gen-verify` to resolve opaque C++ struct parameter types into
+/// concrete `llvm_array N (llvm_int 8)` allocations when the AST alone
+/// can't predict the layout (MSVC-clang fully-qualifies template / namespace
+/// names so `llvm_alias` lookups by short name fail).
+pub fn struct_sizes(ir: &str) -> HashMap<String, usize> {
+    let defs = parse_struct_types(ir);
+    let mut sizes = HashMap::new();
+    for (raw_name, def) in &defs {
+        if let Some(size) = compute_struct_size(def, &defs) {
+            // Strip the leading `%` and any surrounding quotes so callers can
+            // match on the canonical form they see in SAW (`struct.X`).
+            let cleaned = raw_name
+                .trim_start_matches('%')
+                .trim_matches('"')
+                .to_string();
+            sizes.insert(cleaned, size);
+        }
+    }
+    sizes
+}
+
 /// Parsed LLVM struct type fields.
 #[derive(Debug, Clone)]
 struct IrStructDef {
@@ -219,7 +243,7 @@ fn type_alignment(ty: &str, struct_map: &HashMap<String, IrStructDef>) -> Option
 }
 
 fn parse_ir_function(line: &str, struct_map: &HashMap<String, IrStructDef>) -> Option<FunctionInfo> {
-    let _is_define = line.starts_with("define ");
+    let is_define = line.starts_with("define ");
 
     // Extract attributes that appear before the return type
     let has_nounwind = line.contains("nounwind");
@@ -264,7 +288,12 @@ fn parse_ir_function(line: &str, struct_map: &HashMap<String, IrStructDef>) -> O
         params: final_params,
         return_type: effective_return,
         can_throw: !has_nounwind,
+        is_virtual: false,
+        has_body: is_define,
+        is_system: false,
         annotations,
+        referenced_globals: vec![],
+        called_functions: vec![],
     })
 }
 
@@ -316,8 +345,14 @@ fn extract_sret(
             .filter(|(i, _)| *i != idx)
             .map(|(_, p)| p.clone())
             .collect();
-        // The effective return type is void since the result goes through the sret pointer
-        (Some(out_param), remaining, TypeInfo::Void)
+        // The effective return type is the sret inner type (not void) so that
+        // derive_return_constraint recognizes it as sret and emits the proper
+        // llvm_points_to result_ptr postcondition.
+        let sret_return = match &sret_param.ty {
+            TypeInfo::Pointer(inner) => *inner.clone(),
+            other => other.clone(),
+        };
+        (Some(out_param), remaining, sret_return)
     } else {
         (None, params.to_vec(), original_return.clone())
     }
@@ -361,12 +396,52 @@ fn extract_return_type(line: &str, at_pos: usize) -> String {
         "zeroext",
         "signext",
         "noundef",
+        "dllexport",
+        "dllimport",
+        "nounwind",
+        "mustprogress",
+        "willreturn",
+        "noreturn",
+        "noinline",
+        "alwaysinline",
+        "optnone",
+        "optsize",
+        "uwtable",
+        "dead_on_unwind",
+        "writable",
     ];
 
-    let type_parts: Vec<&str> = parts
-        .into_iter()
-        .filter(|p| !linkage_keywords.contains(p) && !p.starts_with('#'))
-        .collect();
+    // Filter out attributes, handling balanced parenthesized groups
+    // e.g. range(i32 0, 4) spans multiple whitespace-delimited tokens
+    let mut type_parts: Vec<&str> = Vec::new();
+    let mut skip_depth: i32 = 0;
+    for p in &parts {
+        if skip_depth > 0 {
+            for c in p.chars() {
+                if c == '(' { skip_depth += 1; }
+                if c == ')' { skip_depth -= 1; }
+            }
+            continue;
+        }
+
+        if linkage_keywords.contains(p) || p.starts_with('#') {
+            continue;
+        }
+
+        // Check for parenthesized attribute groups
+        let is_paren_attr = p.starts_with("range(")
+            || p.starts_with("memory(")
+            || p.starts_with("align(")
+            || p.starts_with("captures(");
+        if is_paren_attr {
+            let opens: i32 = p.chars().filter(|&c| c == '(').count() as i32;
+            let closes: i32 = p.chars().filter(|&c| c == ')').count() as i32;
+            skip_depth = opens - closes;
+            continue;
+        }
+
+        type_parts.push(p);
+    }
 
     type_parts.join(" ").trim().to_string()
 }
@@ -445,17 +520,43 @@ fn parse_ir_param_resolved(
     let mut deref_size: Option<usize> = None;
     let mut type_str = String::new();
     let mut name = format!("arg{idx}");
+    let mut skip_depth: i32 = 0; // track balanced parens in attributes like range(i32 0, 4)
+    let mut skip_next: bool = false; // skip the next token (e.g. the N in "align N")
 
     for part in &parts {
+        // Skip the token after "align"
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+
+        // If we're inside a parenthesized attribute group, skip tokens until balanced
+        if skip_depth > 0 {
+            for c in part.chars() {
+                if c == '(' { skip_depth += 1; }
+                if c == ')' { skip_depth -= 1; }
+            }
+            continue;
+        }
+
         match *part {
             "readonly" => is_readonly = true,
             "writeonly" => is_writeonly = true,
             "noalias" => is_noalias = true,
             "nocapture" => is_nocapture = true,
             "nonnull" => is_nonnull = true,
-            "zeroext" | "signext" | "noundef" | "inreg" | "align" => {}
+            "zeroext" | "signext" | "noundef" | "inreg"
+            | "dead_on_unwind" | "writable" | "returned" | "immarg"
+            | "mustprogress" | "nofree" | "nosync" | "nounwind"
+            | "willreturn" | "memory(none)" | "memory(read)" | "memory(write)"
+            | "memory(argmem:" | "captures(none)" => {}
+            "align" => { skip_next = true; } // "align N" — skip the next token
             p if p.starts_with("sret(") || p == "sret" => {
                 is_sret = true;
+                // Extract the struct type from sret(%struct.Foo) for proper type resolution
+                if let Some(inner) = p.strip_prefix("sret(").and_then(|s| s.strip_suffix(')')) {
+                    type_str = inner.to_string();
+                }
             }
             p if p.starts_with("dereferenceable(") => {
                 let n = p
@@ -471,13 +572,58 @@ fn parse_ir_param_resolved(
             {
                 // This is a parameter name (e.g. %x, %retval) — only if we
                 // already have a type. If type_str is empty, treat as type ref.
-                name = p.trim_start_matches('%').to_string();
+                let raw = p.trim_start_matches('%').to_string();
+                // LLVM IR allows numeric parameter names (`%0`, `%1`, ...)
+                // but SAWScript identifiers must start with a letter or
+                // underscore. Prefix `arg` so the downstream emitter
+                // produces valid SAW variable names like `arg0_ptr`.
+                name = if raw.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+                    format!("arg{raw}")
+                } else {
+                    raw
+                };
             }
             _ => {
-                if !type_str.is_empty() {
-                    type_str.push(' ');
+                // Skip LLVM IR attributes/qualifiers that aren't types
+                let p = *part;
+
+                // Check if this is a parenthesized attribute group (e.g. range(i32 0, 4))
+                // Track paren depth so we skip all tokens until balanced
+                let is_paren_attr = p.starts_with("range(")
+                    || p.starts_with("align(")
+                    || p.starts_with("memory(")
+                    || p.starts_with("captures(")
+                    || p.starts_with("dereferenceable_or_null(")
+                    || p.starts_with("byval(")
+                    || p.starts_with("byref(")
+                    || p.starts_with("preallocated(")
+                    || p.starts_with("inalloca(");
+
+                if is_paren_attr {
+                    // Count parens in this token to determine if we need to skip more
+                    let opens: i32 = p.chars().filter(|&c| c == '(').count() as i32;
+                    let closes: i32 = p.chars().filter(|&c| c == ')').count() as i32;
+                    skip_depth = opens - closes;
+                    // skip_depth > 0 means more tokens needed
+                } else if p.starts_with('#')
+                    || p.starts_with("dllexport")
+                    || p.starts_with("dllimport")
+                    || p == "noreturn"
+                    || p == "noinline"
+                    || p == "alwaysinline"
+                    || p == "optnone"
+                    || p == "optsize"
+                    || p == "cold"
+                    || p == "hot"
+                    || p == "uwtable"
+                {
+                    // Single-word attribute, skip
+                } else {
+                    if !type_str.is_empty() {
+                        type_str.push(' ');
+                    }
+                    type_str.push_str(part);
                 }
-                type_str.push_str(part);
             }
         }
     }
@@ -861,8 +1007,9 @@ ret void
         assert_eq!(f.params[0].nullable, Nullability::NonNull);
         // Second param is the regular input
         assert_eq!(f.params[1].name, "input");
-        // Return type should be void since sret handles it
-        assert_eq!(f.return_type, TypeInfo::Void);
+        // Return type should be the sret struct type (not void) so constraints
+        // engine recognizes it as sret and emits proper postconditions
+        assert!(matches!(f.return_type, TypeInfo::Struct { .. } | TypeInfo::Opaque { .. }));
     }
 
     #[test]
@@ -921,5 +1068,29 @@ ret void
         );
         // packed: i8 + i32 = 5
         assert_eq!(compute_ir_type_size("%struct.S3", &map), Some(5));
+    }
+
+    /// Regression: LLVM IR allows numeric parameter names (`%0`, `%1`)
+    /// for unnamed parameters, but SAWScript identifiers must start with
+    /// a letter or underscore. Stripping the `%` would leave `"0"` /
+    /// `"1"` and the downstream emitter would produce SAW variables like
+    /// `0_ptr` that fail to parse. Prefix with `arg` to recover.
+    #[test]
+    fn test_numeric_param_names_get_arg_prefix() {
+        let ir = "define i32 @f(ptr %0, i32 %1) {\nret i32 0\n}\n";
+        let funcs = extract_functions(ir, None).unwrap();
+        assert_eq!(funcs[0].params.len(), 2);
+        assert_eq!(funcs[0].params[0].name, "arg0");
+        assert_eq!(funcs[0].params[1].name, "arg1");
+    }
+
+    /// Named parameters must pass through untouched — only digits trigger
+    /// the prefix.
+    #[test]
+    fn test_named_params_not_prefixed() {
+        let ir = "define i32 @f(ptr %input, i32 %count) {\nret i32 0\n}\n";
+        let funcs = extract_functions(ir, None).unwrap();
+        assert_eq!(funcs[0].params[0].name, "input");
+        assert_eq!(funcs[0].params[1].name, "count");
     }
 }

@@ -218,6 +218,11 @@ mod tests {
             }],
             return_type: TypeInfo::Bool,
             can_throw: false,
+            is_virtual: false,
+            has_body: true,
+            is_system: false,
+            called_functions: vec![],
+            referenced_globals: vec![],
             annotations: vec![],
         }];
         let output = generate_cryptol_predicates(&funcs);
@@ -246,6 +251,11 @@ mod tests {
             }],
             return_type: TypeInfo::Bool,
             can_throw: false,
+            is_virtual: false,
+            has_body: true,
+            is_system: false,
+            called_functions: vec![],
+            referenced_globals: vec![],
             annotations: vec![],
         }];
         emit_cryptol_constraints(&funcs, &dir).unwrap();

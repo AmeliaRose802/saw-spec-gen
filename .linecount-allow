@@ -1,0 +1,14 @@
+# Files allowed to exceed the 500 non-whitespace-line limit.
+#
+# Each line is a forward-slash-relative path from the repo root.
+# Lines starting with '#' or empty lines are ignored.
+#
+# DO NOT add new files here. The limit exists to keep modules small and
+# reviewable. If you are tempted to add an entry, refactor the file
+# instead. Entries below are legacy debt scheduled for refactoring.
+
+src/clang_ast.rs
+src/saw_emit.rs
+src/llvm_ir.rs
+src/constraints.rs
+src/mir_json.rs

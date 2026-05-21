@@ -66,3 +66,10 @@ jobs:
         components: rustfmt
     - name: Check formatting
       run: cargo fmt -- --check
+
+  line-count:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Enforce 500 non-whitespace line limit
+      run: bash scripts/check-line-count.sh

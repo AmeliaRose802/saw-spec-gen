@@ -1,0 +1,7 @@
+// Two's complement negation of a 32-bit value.
+//
+// Cryptol's unary minus on [32] is two's complement negation,
+// exactly what (~x) + 1 should compute.
+
+negate_spec : [32] -> [32]
+negate_spec x = -x

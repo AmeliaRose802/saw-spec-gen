@@ -6,9 +6,24 @@ Cargo.lock
 
 # Build artifacts
 *.bc
-demo/*.ll
-demo/*_ast.json
+*.ll
+**/*_ast.json
 demo/specs/
+
+# Generated tool outputs (saw-spec-gen produces these per-demo)
+**/out_*/
+demo/rust_specs/
+demo/rust_demo_specs/
+
+# Loose test artifacts
+_test_ast.json
+demo/_test.saw
+demo/test_load.saw
+demo/test_load2.saw
+demo/token_service_out
+demo/token_service_out.mir
+demo/token_service_out.linked-mir.json
+demo/token_service.mir.json
 
 # Beads / Dolt files (added by bd init)
 .dolt/

@@ -1,0 +1,116 @@
+// Vtable havoc demo: IProcessor::process() dispatched through vtable
+//
+// saw-spec-gen auto-generated:
+//   1. vtable_stubs.ll — stub functions + concrete vtable global
+//   2. IProcessor_process_havoc_spec.saw — adversarial spec: cfg HAVOCED
+//   3. IProcessor_check_havoc_spec.saw  — const spec: cfg PRESERVED
+//   4. interface_overrides.saw — binds stubs to havoc specs + vtable helper
+//
+// We verify two functions that call process() through vtable dispatch:
+//   - save_flags_then_process: saves cfg->flags BEFORE process → SAFE
+//   - process_and_read_flags: reads cfg->flags AFTER process  → UNSAFE
+
+enable_experimental;
+
+// Load bitcode + vtable stubs, combine into one module
+m_main  <- llvm_load_module "deep_havoc.bc";
+m_stubs <- llvm_load_module "deep_havoc_specs/vtable_stubs.bc";
+m       <- llvm_combine_modules m_main [m_stubs];
+
+// Load all auto-generated havoc specs + wire overrides to stub names
+include "deep_havoc_specs/interface_overrides.saw";
+
+// ============================================================================
+// TEST 1: save_flags_then_process — should SUCCEED
+//
+// This function saves cfg->flags into a local BEFORE calling process(),
+// then returns the saved copy. Even though process() havoces cfg through
+// the vtable, the local variable on the stack is not reachable through cfg.
+// ============================================================================
+
+let save_flags_spec : LLVMSetup () = do {
+    // Allocate IProcessor `this` with vtable wired to stubs
+    proc_ptr <- alloc_iprocessor_this;
+
+    // Allocate Config = { i32 flags, ptr input_buf, ptr output_buf }
+    cfg_ptr <- llvm_alloc (llvm_alias "struct.Config");
+    original_flags <- llvm_fresh_var "original_flags" (llvm_int 32);
+    input_buf_ptr  <- llvm_alloc (llvm_array 16 (llvm_int 8));
+    input_buf_val  <- llvm_fresh_var "input_buf"  (llvm_array 16 (llvm_int 8));
+    llvm_points_to input_buf_ptr (llvm_term input_buf_val);
+    output_buf_ptr <- llvm_alloc (llvm_array 16 (llvm_int 8));
+    output_buf_val <- llvm_fresh_var "output_buf" (llvm_array 16 (llvm_int 8));
+    llvm_points_to output_buf_ptr (llvm_term output_buf_val);
+    llvm_points_to cfg_ptr (llvm_struct_value
+        [ llvm_term original_flags
+        , input_buf_ptr
+        , output_buf_ptr
+        ]);
+
+    llvm_execute_func [proc_ptr, cfg_ptr];
+
+    // CLAIM: return == original flags (saved before vtable call trashed cfg)
+    llvm_return (llvm_term original_flags);
+};
+
+print "";
+print "=== TEST 1: save_flags_then_process ===";
+print "  Saves cfg->flags BEFORE vtable call to process()";
+print "  Claim: return == original flags";
+
+llvm_verify m "save_flags_then_process"
+    [ov_iprocessor_process_stub, ov_iprocessor_check_stub]
+    false
+    save_flags_spec
+    z3;
+
+print "  PASSED: save-before-call pattern is safe against vtable havoc";
+
+// ============================================================================
+// TEST 2: process_and_read_flags — should FAIL
+//
+// This function reads cfg->flags AFTER process() through the vtable.
+// The auto-generated adversarial havoc spec replaces cfg->flags with
+// a fresh unconstrained value, so we CANNOT prove the return equals
+// the original flags.
+// ============================================================================
+
+let read_after_flags_spec : LLVMSetup () = do {
+    // Allocate IProcessor `this` with vtable wired to stubs
+    proc_ptr <- alloc_iprocessor_this;
+
+    // Allocate Config
+    cfg_ptr <- llvm_alloc (llvm_alias "struct.Config");
+    original_flags <- llvm_fresh_var "original_flags" (llvm_int 32);
+    input_buf_ptr  <- llvm_alloc (llvm_array 16 (llvm_int 8));
+    input_buf_val  <- llvm_fresh_var "input_buf"  (llvm_array 16 (llvm_int 8));
+    llvm_points_to input_buf_ptr (llvm_term input_buf_val);
+    output_buf_ptr <- llvm_alloc (llvm_array 16 (llvm_int 8));
+    output_buf_val <- llvm_fresh_var "output_buf" (llvm_array 16 (llvm_int 8));
+    llvm_points_to output_buf_ptr (llvm_term output_buf_val);
+    llvm_points_to cfg_ptr (llvm_struct_value
+        [ llvm_term original_flags
+        , input_buf_ptr
+        , output_buf_ptr
+        ]);
+
+    llvm_execute_func [proc_ptr, cfg_ptr];
+
+    // CLAIM: return == original flags
+    // This should FAIL — process() havoced cfg->flags to an arbitrary value
+    llvm_return (llvm_term original_flags);
+};
+
+print "";
+print "=== TEST 2: process_and_read_flags ===";
+print "  Reads cfg->flags AFTER vtable call to process()";
+print "  Claim: return == original flags";
+print "  (This SHOULD fail — the auto-generated havoc spec clobbers cfg)";
+
+llvm_verify m "process_and_read_flags"
+    [ov_iprocessor_process_stub, ov_iprocessor_check_stub]
+    false
+    read_after_flags_spec
+    z3;
+
+print "ERROR: this line should never print";
