@@ -207,6 +207,33 @@ The `demo/` directory contains working examples:
 - `interface_example.cpp` / `prove_cpp.saw` — Virtual dispatch through IValidator, proved equivalent to Cryptol spec
 - `adversarial.h` / `prove_adversarial.saw` — Adversarial havoc model: safe vs unsafe patterns after unknown function calls
 
+## Tests
+
+Cargo tests cover the Rust crate:
+
+```bash
+cargo test --release
+```
+
+End-to-end SAW demo regressions live under `tests/saw_demos/`:
+
+```powershell
+# Run the full demo suite (auto-skips if SAW isn't installed).
+pwsh tests/saw_demos/Run-SawDemos.ps1
+
+# Filter by tag.
+pwsh tests/saw_demos/Run-SawDemos.ps1 -Tag cpp_havoc,bounded_loop
+
+# Show what would run.
+pwsh tests/saw_demos/Run-SawDemos.ps1 -List
+```
+
+The pre-commit hook (`git config core.hooksPath .githooks`) runs the
+line-count check **and** the SAW demo suite. Skip the SAW portion
+with `SKIP_SAW_TESTS=1` if you need a fast amend. See
+[tests/saw_demos/README.md](tests/saw_demos/README.md) for the case
+manifest and how to add new demos.
+
 ## License
 
 MIT

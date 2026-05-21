@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
-# Pre-commit hook: reject commits that introduce or modify files exceeding
-# the non-whitespace line limit (default 500). Activate this hook once with:
+# Pre-commit hook for saw-spec-gen.
+#
+# Runs:
+#   1. scripts/check-line-count.sh on staged source files (always).
+#   2. tests/saw_demos/Run-SawDemos.ps1, the end-to-end SAW demo suite.
+#      The runner auto-skips when SAW is not installed on the machine.
+#      Set SKIP_SAW_TESTS=1 in the environment to skip explicitly.
+#
+# Activate once per clone with:
 #
 #     git config core.hooksPath .githooks
 #
@@ -9,14 +16,25 @@ set -e
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
-# Collect staged additions/modifications (not deletions).
+# ── 1. Line-count check on staged additions/modifications ─────────────────
 staged=()
 while IFS= read -r f; do
     [ -n "$f" ] && staged+=("$f")
 done < <(git diff --cached --name-only --diff-filter=AM)
 
-if [ "${#staged[@]}" -eq 0 ]; then
+if [ "${#staged[@]}" -gt 0 ]; then
+    bash scripts/check-line-count.sh "${staged[@]}"
+fi
+
+# ── 2. SAW demo suite (skippable) ─────────────────────────────────────────
+if [ "${SKIP_SAW_TESTS:-0}" = "1" ]; then
+    echo "pre-commit: SKIP_SAW_TESTS=1 set; skipping SAW demo suite."
     exit 0
 fi
 
-exec bash scripts/check-line-count.sh "${staged[@]}"
+if ! command -v pwsh >/dev/null 2>&1; then
+    echo "pre-commit: pwsh not found; skipping SAW demo suite."
+    exit 0
+fi
+
+pwsh -NoLogo -NoProfile -File tests/saw_demos/Run-SawDemos.ps1
