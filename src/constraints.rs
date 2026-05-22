@@ -219,7 +219,26 @@ fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
             other => other,
         };
 
-        let saw_type = type_to_saw(inner_ty);
+        // For pointer parameters, an `_In_reads_(N)` / `_In_reads_bytes_(N)`
+        // / `_Out_writes_(N)` annotation upgrades the allocation from a
+        // single element to an `N`-element array.  Without this, a
+        // `const char* s` annotated `_In_reads_(8)` would allocate only
+        // one byte and every `s[i]` for i > 0 would fault with "outside
+        // of the allocation".  The annotation is the only way the spec
+        // generator can know the caller's buffer-size contract.
+        let buffer_len = if is_indirect {
+            param.annotations.iter().find_map(|a| match a {
+                Annotation::InReads(n) | Annotation::OutWrites(n) if *n > 1 => Some(*n),
+                _ => None,
+            })
+        } else {
+            None
+        };
+        let element_saw = type_to_saw(inner_ty);
+        let saw_type = match buffer_len {
+            Some(n) => format!("llvm_array {n} ({element_saw})"),
+            None => element_saw,
+        };
 
         let (alloc_type, unchanged_after) = if is_indirect {
             match param.mutability {

@@ -1,16 +1,22 @@
-mod alias_fallbacks;
-mod alias_fallbacks_ir;
-mod clang_ast;
+// Top-level utilities that stay at the crate root.
 mod constraints;
-mod cryptol_emit;
 mod gen_verify;
-mod llvm_ir;
 mod mangle;
-mod mir_json;
-mod rust_trait_emit;
-mod saw_emit;
-mod spec_rewrite;
-mod type_resolve;
+
+// Grouped subsystems. Each is a folder under `src/` with its own
+// module root file. Re-exported below so existing `crate::clang_ast::`
+// (etc.) call sites keep working without churn.
+mod emit;
+mod parsers;
+mod transform;
+
+// Re-exports keep the public-from-main.rs view flat: the rest of the
+// crate can still write `crate::clang_ast::parse_ast(...)` rather than
+// `crate::parsers::clang_ast::parse_ast(...)`. The folder grouping is
+// a layout-only change.
+pub(crate) use emit::{cryptol_emit, rust_trait_emit, saw_emit};
+pub(crate) use parsers::{clang_ast, llvm_ir, mir_json};
+pub(crate) use transform::{alias_fallbacks, alias_fallbacks_ir, spec_rewrite, type_resolve};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};

@@ -13,10 +13,14 @@
 // instead of (or after undefining) `<sal.h>` whenever you build a demo for
 // SAW verification.
 //
-// Only the macros saw-spec-gen currently understands are listed here. Sized
-// variants (`_In_reads_(n)`, `_Out_writes_(n)`) are *not* covered because
-// the size argument can't pass through the annotation string portably; use
-// the unsized forms in demos.
+// Sized variants (`_In_reads_(N)`, `_Out_writes_(N)`) carry their integer
+// argument through the preprocessor via the `#` stringization operator:
+//
+//     _In_reads_(8)
+//   → __attribute__((annotate("_In_reads_(" "8" ")")))
+//   → __attribute__((annotate("_In_reads_(8)")))   (after string concat)
+//
+// which is exactly the form `src/clang_ast/sal.rs::classify` matches.
 #pragma once
 #ifndef SAW_SAL_H_INCLUDED
 #define SAW_SAL_H_INCLUDED
@@ -40,6 +44,18 @@
 #ifdef _Inout_opt_
 #undef _Inout_opt_
 #endif
+#ifdef _In_reads_
+#undef _In_reads_
+#endif
+#ifdef _In_reads_bytes_
+#undef _In_reads_bytes_
+#endif
+#ifdef _Out_writes_
+#undef _Out_writes_
+#endif
+#ifdef _Out_writes_bytes_
+#undef _Out_writes_bytes_
+#endif
 
 #define _In_         __attribute__((annotate("_In_")))
 #define _In_opt_     __attribute__((annotate("_In_opt_")))
@@ -47,5 +63,13 @@
 #define _Out_opt_    __attribute__((annotate("_Out_opt_")))
 #define _Inout_      __attribute__((annotate("_Inout_")))
 #define _Inout_opt_  __attribute__((annotate("_Inout_opt_")))
+
+// Sized variants: the `#n` stringization turns the integer literal
+// into a string fragment that's concatenated with the surrounding
+// pieces at translation time.
+#define _In_reads_(n)         __attribute__((annotate("_In_reads_(" #n ")")))
+#define _In_reads_bytes_(n)   __attribute__((annotate("_In_reads_bytes_(" #n ")")))
+#define _Out_writes_(n)       __attribute__((annotate("_Out_writes_(" #n ")")))
+#define _Out_writes_bytes_(n) __attribute__((annotate("_Out_writes_bytes_(" #n ")")))
 
 #endif // SAW_SAL_H_INCLUDED

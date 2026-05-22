@@ -1,0 +1,434 @@
+//! LLVM-mode SAW spec emission.
+//!
+//! Produces the per-function `<name>_auto_spec.saw` files plus an
+//! `auto_specs.saw` include index. Two flavors are supported:
+//!
+//! * **concrete**: spec drives `llvm_verify` against a real
+//!   implementation (sret + non-sret variants, postconditions, etc.).
+//! * **adversarial**: spec drives `llvm_unsafe_assume_spec` for
+//!   virtual / external functions where the implementation is unknown.
+
+use super::llvm_return::{
+    emit_adversarial_return_and_postconds, emit_concrete_return_and_postconds,
+};
+use super::llvm_setup::{emit_llvm_globals_setup, emit_llvm_param_setup};
+use super::names::{sanitize_name, spec_safe_id};
+use crate::constraints::*;
+use anyhow::{Context, Result};
+use std::fs;
+use std::io::Write;
+use std::path::Path;
+
+/// Whether to emit LLVM or MIR specs.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum EmitMode {
+    Llvm,
+    Mir,
+}
+
+/// Emit SAW spec files for all constraints (LLVM mode).
+pub fn emit_saw_specs(
+    specs: &[SpecConstraint],
+    output_dir: &Path,
+    experimental: bool,
+) -> Result<()> {
+    let all_globals: Vec<GlobalVarInfo> = if experimental {
+        let mut gs: Vec<_> = specs
+            .iter()
+            .flat_map(|s| s.referenced_globals.iter().cloned())
+            .collect();
+        gs.sort_by(|a, b| a.mangled_name.cmp(&b.mangled_name));
+        gs.dedup_by(|a, b| a.mangled_name == b.mangled_name);
+        gs
+    } else {
+        vec![]
+    };
+    emit_saw_specs_with_mode(specs, output_dir, EmitMode::Llvm, experimental, &all_globals)
+}
+
+/// Emit LLVM SAW spec files with an explicit list of globals.
+pub fn emit_saw_specs_with_globals(
+    specs: &[SpecConstraint],
+    output_dir: &Path,
+    experimental: bool,
+    all_globals: &[GlobalVarInfo],
+) -> Result<()> {
+    emit_saw_specs_with_mode(specs, output_dir, EmitMode::Llvm, experimental, all_globals)
+}
+
+/// Emit a single experimental (`llvm_unspecified_globals`) spec file.
+///
+/// When `is_system` is true (e.g. `printf` from `<cstdio>`), the spec
+/// will NOT list user-defined globals as modifiable.  System functions
+/// only affect external state (stdout, errno, etc.) that SAW doesn't
+/// model — assuming they havoc user globals leads to spurious
+/// counterexamples.
+pub fn emit_single_experimental_spec(
+    spec: &SpecConstraint,
+    all_globals: &[GlobalVarInfo],
+    is_system: bool,
+    output_dir: &Path,
+) -> Result<()> {
+    fs::create_dir_all(output_dir)?;
+    let safe_id = spec_safe_id(spec);
+    let filename = format!("{}_auto_spec.saw", safe_id);
+    let filepath = output_dir.join(&filename);
+    let effective_globals: &[GlobalVarInfo] = if is_system { &[] } else { all_globals };
+    fs::write(&filepath, generate_unspecified_spec(spec, effective_globals))?;
+    Ok(())
+}
+
+/// Write the `operator new` spec to `operator_new_auto_spec.saw`.
+///
+/// Allocates a 256-byte buffer — generous enough to cover every
+/// reasonable C++ object size in the bundled demos. Smaller buffers
+/// failed override matching for classes with non-trivial data members.
+pub fn emit_operator_new_spec(mangled_name: &str, output_dir: &Path) -> Result<()> {
+    fs::create_dir_all(output_dir)?;
+    let filepath = output_dir.join("operator_new_auto_spec.saw");
+    let content = format!(
+        "// Auto-generated spec for: operator new\n\
+         // Allocates fresh memory and returns a pointer\n\
+         \n\
+         let operator_new_spec = do {{\n\
+         \x20   sz <- llvm_fresh_var \"sz\" (llvm_int 64);\n\
+         \x20   llvm_execute_func [llvm_term sz];\n\
+         \x20   p <- llvm_alloc_aligned 8 (llvm_array 256 (llvm_int 8));\n\
+         \x20   llvm_return p;\n\
+         }};\n\
+         ov_new <- llvm_unsafe_assume_spec m \"{}\" operator_new_spec;\n",
+        mangled_name,
+    );
+    fs::write(&filepath, content)?;
+    Ok(())
+}
+
+/// Shared dispatcher used by both LLVM and MIR public entry points.
+pub fn emit_saw_specs_with_mode(
+    specs: &[SpecConstraint],
+    output_dir: &Path,
+    mode: EmitMode,
+    experimental: bool,
+    all_globals: &[GlobalVarInfo],
+) -> Result<()> {
+    fs::create_dir_all(output_dir)
+        .with_context(|| format!("Failed to create output directory {}", output_dir.display()))?;
+
+    for spec in specs {
+        let filename = format!("{}_auto_spec.saw", sanitize_name(&spec.function_name));
+        let filepath = output_dir.join(&filename);
+        let mut file = fs::File::create(&filepath)
+            .with_context(|| format!("Failed to create {}", filepath.display()))?;
+
+        let needs_adversarial = spec.is_virtual || !spec.has_body;
+        let content = if experimental && needs_adversarial && mode == EmitMode::Llvm {
+            generate_unspecified_spec(spec, all_globals)
+        } else {
+            match mode {
+                EmitMode::Llvm => generate_saw_spec(spec),
+                EmitMode::Mir => super::mir_spec::generate_mir_spec(spec),
+            }
+        };
+        write!(file, "{}", content)?;
+    }
+
+    let index_path = output_dir.join("auto_specs.saw");
+    let mut index = fs::File::create(&index_path)?;
+    writeln!(index, "// Auto-generated SAW specs -- do not edit")?;
+    writeln!(index, "// Generated by saw-spec-gen from type system constraints")?;
+    writeln!(
+        index,
+        "// Mode: {}",
+        match mode {
+            EmitMode::Llvm => "LLVM",
+            EmitMode::Mir => "MIR",
+        }
+    )?;
+    writeln!(index)?;
+    let mut seen = std::collections::HashSet::new();
+    for spec in specs {
+        let filename = format!("{}_auto_spec.saw", sanitize_name(&spec.function_name));
+        if seen.insert(filename.clone()) {
+            writeln!(index, "include \"{filename}\";")?;
+        }
+    }
+    Ok(())
+}
+
+/// Generate the full LLVM SAW spec for a single function.
+pub fn generate_saw_spec(spec: &SpecConstraint) -> String {
+    let mut out = String::new();
+    let fn_name = &spec.function_name;
+    let target_name = spec
+        .mangled_name
+        .as_deref()
+        .unwrap_or(&spec.function_name);
+
+    out.push_str(&format!("// Auto-generated spec for: {fn_name}\n"));
+    out.push_str("// Constraints derived from type system and annotations\n");
+    if spec.can_throw {
+        out.push_str("// WARNING: Function may throw -- exception path not modeled\n");
+    }
+    out.push_str(&format!(
+        "\nlet {safe_name}_auto_spec : LLVMSetup () = do {{\n",
+        safe_name = sanitize_name(fn_name),
+    ));
+
+    for param in &spec.params {
+        emit_llvm_param_setup(&mut out, param);
+    }
+    if !spec.referenced_globals.is_empty() {
+        emit_llvm_globals_setup(&mut out, &spec.referenced_globals);
+    }
+
+    let mut args: Vec<String> = Vec::new();
+    if spec.return_constraint.is_sret {
+        out.push_str("\n    // sret: struct returned via hidden first pointer parameter\n");
+        out.push_str(&format!(
+            "    result_ptr <- llvm_alloc ({});\n",
+            spec.return_constraint.saw_type,
+        ));
+        args.push("result_ptr".into());
+    }
+    args.extend(spec.params.iter().map(|p| match p.alloc_type {
+        AllocType::AllocReadonly | AllocType::AllocMutable => format!("{}_ptr", p.name),
+        AllocType::FreshVar => format!("llvm_term {}", p.name),
+    }));
+    out.push_str(&format!(
+        "\n    llvm_execute_func [{}];\n",
+        args.join(", "),
+    ));
+
+    let needs_adversarial = spec.is_virtual || !spec.has_body;
+    if needs_adversarial {
+        emit_adversarial_return_and_postconds(&mut out, spec);
+    } else {
+        emit_concrete_return_and_postconds(&mut out, spec);
+    }
+
+    out.push_str("};\n");
+
+    if needs_adversarial {
+        out.push_str(&format!(
+            "\n// Usage: ov_{safe} <- llvm_unsafe_assume_spec m \"{target}\" {safe}_auto_spec;\n",
+            safe = sanitize_name(fn_name),
+            target = target_name,
+        ));
+    } else {
+        out.push_str(&format!(
+            "\n// Usage: ov_{safe} <- llvm_verify m \"{target}\" [] false {safe}_auto_spec z3;\n",
+            safe = sanitize_name(fn_name),
+            target = target_name,
+        ));
+    }
+    out
+}
+
+/// Generate a spec using SAW's experimental `llvm_unspecified_globals` builtin.
+pub fn generate_unspecified_spec(
+    spec: &SpecConstraint,
+    all_globals: &[GlobalVarInfo],
+) -> String {
+    let mut out = String::new();
+    let fn_name = &spec.function_name;
+    let target_name = spec
+        .mangled_name
+        .as_deref()
+        .unwrap_or(&spec.function_name);
+
+    out.push_str(&format!("// Auto-generated spec for: {fn_name}\n"));
+    out.push_str("// Uses SAW experimental llvm_unspecified_globals builtin\n");
+    out.push_str("// Requires: enable_experimental;\n\n");
+
+    let safe = spec_safe_id(spec);
+    if all_globals.is_empty() {
+        out.push_str(&format!(
+            "ov_{safe} <- llvm_unspecified m \"{target}\";\n",
+            target = target_name,
+        ));
+    } else {
+        let globals_list = all_globals
+            .iter()
+            .map(|g| format!("\"{}\"", g.mangled_name))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str(&format!(
+            "ov_{safe} <- llvm_unspecified_globals m \"{target}\" [{globals_list}];\n",
+            target = target_name,
+        ));
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::writer::VOID_SAW_TYPE;
+    use crate::constraints::{ParamConstraint, ReturnConstraint};
+
+    fn make_spec(
+        name: &str,
+        params: Vec<ParamConstraint>,
+        return_type: &str,
+        can_throw: bool,
+    ) -> SpecConstraint {
+        SpecConstraint {
+            function_name: name.into(),
+            mangled_name: None,
+            params,
+            return_constraint: ReturnConstraint {
+                saw_type: return_type.into(),
+                value_constraints: vec![],
+                is_sret: false,
+                returns_pointer: false,
+            },
+            can_throw,
+            is_virtual: false,
+            has_body: true,
+            referenced_globals: vec![],
+            postconditions: vec![],
+        }
+    }
+
+    #[test]
+    fn test_generate_llvm_spec_readonly() {
+        let spec = make_spec(
+            "test_fn",
+            vec![ParamConstraint {
+                name: "x".into(),
+                alloc_type: AllocType::AllocReadonly,
+                saw_type: "llvm_int 32".into(),
+                preconditions: vec![],
+                unchanged_after: true,
+                dereferenceable_size: None,
+            }],
+            VOID_SAW_TYPE,
+            false,
+        );
+        let output = generate_saw_spec(&spec);
+        assert!(output.contains("LLVMSetup ()"));
+        assert!(output.contains("llvm_alloc_readonly"));
+        assert!(output.contains("llvm_fresh_var"));
+        assert!(output.contains("llvm_execute_func"));
+    }
+
+    #[test]
+    fn test_generate_llvm_spec_mutable() {
+        let spec = make_spec(
+            "mutate_fn",
+            vec![ParamConstraint {
+                name: "buf".into(),
+                alloc_type: AllocType::AllocMutable,
+                saw_type: "llvm_int 64".into(),
+                preconditions: vec![],
+                unchanged_after: false,
+                dereferenceable_size: None,
+            }],
+            VOID_SAW_TYPE,
+            false,
+        );
+        let output = generate_saw_spec(&spec);
+        assert!(output.contains("llvm_alloc (llvm_int 64)"));
+        assert!(!output.contains("llvm_alloc_readonly"));
+    }
+
+    #[test]
+    fn test_generate_llvm_spec_freshvar() {
+        let spec = make_spec(
+            "add",
+            vec![
+                ParamConstraint {
+                    name: "a".into(),
+                    alloc_type: AllocType::FreshVar,
+                    saw_type: "llvm_int 32".into(),
+                    preconditions: vec![],
+                    unchanged_after: false,
+                    dereferenceable_size: None,
+                },
+                ParamConstraint {
+                    name: "b".into(),
+                    alloc_type: AllocType::FreshVar,
+                    saw_type: "llvm_int 32".into(),
+                    preconditions: vec![],
+                    unchanged_after: false,
+                    dereferenceable_size: None,
+                },
+            ],
+            "llvm_int 32",
+            false,
+        );
+        let output = generate_saw_spec(&spec);
+        assert!(output.contains("a <- llvm_fresh_var \"a\" (llvm_int 32)"));
+        assert!(output.contains("llvm_term a, llvm_term b"));
+    }
+
+    #[test]
+    fn test_generate_llvm_spec_return() {
+        let spec = make_spec("get_val", vec![], "llvm_int 32", false);
+        let output = generate_saw_spec(&spec);
+        assert!(output.contains("ret <- llvm_fresh_var \"ret\" (llvm_int 32)"));
+        assert!(output.contains("llvm_return (llvm_term ret)"));
+        assert!(output.contains("ACTION REQUIRED"));
+        assert!(output.contains("llvm_verify"));
+        assert!(!output.contains("llvm_unsafe_assume_spec"));
+    }
+
+    #[test]
+    fn test_generate_llvm_spec_void_return() {
+        let spec = make_spec("noop", vec![], VOID_SAW_TYPE, false);
+        let output = generate_saw_spec(&spec);
+        assert!(!output.contains("llvm_return"));
+    }
+
+    #[test]
+    fn test_generate_llvm_spec_can_throw() {
+        let spec = make_spec("risky", vec![], VOID_SAW_TYPE, true);
+        let output = generate_saw_spec(&spec);
+        assert!(output.contains("WARNING: Function may throw"));
+    }
+
+    #[test]
+    fn test_emit_saw_specs_creates_files() {
+        let dir = std::env::temp_dir().join("saw_spec_gen_test_emit");
+        let _ = fs::remove_dir_all(&dir);
+        let specs = vec![make_spec("test_fn", vec![], VOID_SAW_TYPE, false)];
+        emit_saw_specs(&specs, &dir, false).unwrap();
+        assert!(dir.join("test_fn_auto_spec.saw").exists());
+        assert!(dir.join("auto_specs.saw").exists());
+        let index = fs::read_to_string(dir.join("auto_specs.saw")).unwrap();
+        assert!(index.contains("include \"test_fn_auto_spec.saw\""));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_generate_postconditions() {
+        let spec = SpecConstraint {
+            function_name: "read_fn".into(),
+            mangled_name: None,
+            params: vec![ParamConstraint {
+                name: "data".into(),
+                alloc_type: AllocType::AllocReadonly,
+                saw_type: "llvm_int 32".into(),
+                preconditions: vec![],
+                unchanged_after: true,
+                dereferenceable_size: None,
+            }],
+            return_constraint: ReturnConstraint {
+                saw_type: VOID_SAW_TYPE.into(),
+                value_constraints: vec![],
+                is_sret: false,
+                returns_pointer: false,
+            },
+            can_throw: false,
+            is_virtual: false,
+            has_body: true,
+            referenced_globals: vec![],
+            postconditions: vec![
+                "llvm_points_to data_ptr (llvm_term data_before)".into(),
+            ],
+        };
+        let output = generate_saw_spec(&spec);
+        assert!(output.contains("Postconditions"));
+        assert!(output.contains("data_before"));
+    }
+}

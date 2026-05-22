@@ -7,8 +7,4 @@
 # reviewable. If you are tempted to add an entry, refactor the file
 # instead. Entries below are legacy debt scheduled for refactoring.
 
-src/clang_ast.rs
-src/saw_emit.rs
-src/llvm_ir.rs
 src/constraints.rs
-src/mir_json.rs

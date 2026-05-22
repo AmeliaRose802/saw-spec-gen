@@ -79,6 +79,12 @@
         @{ Tag = 'string_ops'; Runner = 'cpp'; Dir = 'demo/string_ops'; File = 'has_null_byte_sat.cpp';   Cry = 'has_null_byte_spec.cry'; CryptolFn = 'has_null_byte_spec'; Function = 'has_null_byte'; Expected = 'SAT'   }
         @{ Tag = 'string_ops'; Runner = 'cpp'; Dir = 'demo/string_ops'; File = 'has_null_byte_unsat.cpp'; Cry = 'has_null_byte_spec.cry'; CryptolFn = 'has_null_byte_spec'; Function = 'has_null_byte'; Expected = 'UNSAT' }
 
+        # ── Real C-string demo: count_digits over `_In_reads_(8) const char*`.
+        #    Exercises the SAL count annotation -> 8-byte buffer allocation
+        #    path plus the auto-emitted llvm.var.annotation override. ───────
+        @{ Tag = 'strings'; Runner = 'cpp'; Dir = 'demo/strings'; File = 'count_digits_cstr.cpp';       Cry = 'count_digits_spec.cry'; CryptolFn = 'count_digits_spec'; Function = 'count_digits'; Expected = 'SAT'   }
+        @{ Tag = 'strings'; Runner = 'cpp'; Dir = 'demo/strings'; File = 'count_digits_cstr_unsat.cpp'; Cry = 'count_digits_spec.cry'; CryptolFn = 'count_digits_spec'; Function = 'count_digits'; Expected = 'UNSAT' }
+
         # ── C++/Rust equivalence demos (verify-equiv.ps1) ───────────────────
         @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'demo/rust_equalivence_demo/cpp_fee_reordered';      Cpp = 'compute_fee.cpp'; Rust = 'compute_fee_good.rs'; Cry = 'compute_fee_spec.cry'; CryptolFn = 'compute_fee_spec'; Function = 'compute_fee'; Expected = 'EQUIVALENT'     }
         @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'demo/rust_equalivence_demo/cpp_fee_reordered';      Cpp = 'compute_fee.cpp'; Rust = 'compute_fee_bad.rs';  Cry = 'compute_fee_spec.cry'; CryptolFn = 'compute_fee_spec'; Function = 'compute_fee'; Expected = 'NOT EQUIVALENT' }
