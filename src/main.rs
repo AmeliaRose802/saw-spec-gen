@@ -207,6 +207,38 @@ enum Commands {
         #[arg(short, long)]
         output: PathBuf,
     },
+
+    /// Strip system-header decls from a clang AST dump.
+    ///
+    /// Reads `--input` JSON, drops every top-level declaration whose
+    /// source file lives outside any of the `--keep` directories, and
+    /// writes the filtered AST to `--output`. The check is purely
+    /// path-prefix based -- no allowlist of vendor headers required.
+    ///
+    /// Typical use is as a pre-pass before `gen-verify` when the raw
+    /// AST is too large (e.g. when the translation unit `#include`s a
+    /// templated STL header). For the demo:
+    ///
+    ///     saw-spec-gen filter-ast \
+    ///         --input  big_ast.json \
+    ///         --output small_ast.json \
+    ///         --keep   demo/strings
+    FilterAst {
+        /// Path to the raw clang AST dump (any size).
+        #[arg(long)]
+        input: PathBuf,
+
+        /// Path the filtered AST will be written to. May be the same
+        /// as `--input`; the rewrite is atomic.
+        #[arg(long)]
+        output: PathBuf,
+
+        /// Directory whose contents to keep. Pass `--keep` multiple
+        /// times to union several roots (e.g. the .cpp's directory
+        /// plus a third-party library you DO want introspected).
+        #[arg(long, num_args = 1.., action = clap::ArgAction::Append, required = true)]
+        keep: Vec<PathBuf>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -388,6 +420,26 @@ fn main() -> Result<()> {
             eprintln!(
                 "Wrote trait_stubs.ll and interface_overrides.saw to {}",
                 output.display(),
+            );
+        }
+        Commands::FilterAst { input, output, keep } => {
+            let size_mb = std::fs::metadata(&input)
+                .map(|m| m.len() / (1024 * 1024))
+                .unwrap_or(0);
+            eprintln!(
+                "Filtering AST: {} ({} MB) -> {}",
+                input.display(),
+                size_mb,
+                output.display(),
+            );
+            eprintln!("Keep prefixes:");
+            for p in &keep {
+                eprintln!("  {}", p.display());
+            }
+            let stats = clang_ast::filter_ast_file(&input, &output, &keep)?;
+            eprintln!(
+                "Filter result: kept {}, dropped {}, no-loc {}",
+                stats.kept, stats.dropped, stats.no_loc,
             );
         }
     }

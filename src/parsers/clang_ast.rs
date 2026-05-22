@@ -37,6 +37,7 @@ mod globals;
 mod interfaces;
 mod node;
 mod parse;
+mod path_filter;
 mod sal;
 mod source_cache;
 mod system_headers;
@@ -69,6 +70,8 @@ pub use interfaces::{detect_missing_interfaces, MissingInterfaceRef};
 pub use node::AstNode;
 #[allow(unused_imports)]
 pub use parse::{merge_asts, parse_ast, MAX_AST_FILE_SIZE};
+#[allow(unused_imports)]
+pub use path_filter::{filter_ast_file, filter_translation_unit_value, FilterStats};
 #[allow(unused_imports)]
 pub use virtual_methods::{classes_with_virtual_dtor, extract_virtual_methods, InterfaceMethod};
 

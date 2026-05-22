@@ -5,122 +5,125 @@
 //!   2. The concatenated multi-object output produced when
 //!      `-ast-dump-filter=Name` matches more than one decl.
 //!   3. A synthetic merge of multiple parsed ASTs (one per header).
+//!
+//! Both file and string inputs flow through
+//! [`serde_json::Deserializer`]'s streaming reader API, which decodes
+//! one top-level JSON value at a time without materialising the full
+//! source text in memory. This keeps peak memory roughly proportional
+//! to the *parsed* AST size rather than `2 ×` the file size that the
+//! previous `read_to_string` + `from_str` pipeline required, and lets
+//! the on-disk size guard be a sanity ceiling rather than a hard cap.
 
 use super::node::AstNode;
 use anyhow::{Context, Result};
-use serde_json::Value;
+use std::fs::File;
+use std::io::{BufReader, Read};
 use std::path::Path;
 
-/// Maximum input file size that [`parse_ast`] will load (100 MB).
+/// Sanity ceiling on input AST file size (2 GiB).
 ///
-/// Clang AST dumps for large translation units routinely exceed this and
-/// would OOM the host. The error message guides users toward
-/// `-ast-dump-filter` or pre-filtering with `jq`.
-pub const MAX_AST_FILE_SIZE: u64 = 100 * 1024 * 1024;
+/// Streamed parsing keeps peak memory proportional to the parsed AST
+/// shape rather than the on-disk byte length, so this limit is now a
+/// guardrail against pathological inputs (e.g. a clang log accidentally
+/// fed in as JSON) rather than a memory cap. Raise via
+/// `SAW_SPEC_GEN_MAX_AST_BYTES` when verifying very large translation
+/// units.
+pub const MAX_AST_FILE_SIZE: u64 = 2 * 1024 * 1024 * 1024;
+
+/// Environment override for [`MAX_AST_FILE_SIZE`] (raw byte count).
+const MAX_AST_FILE_SIZE_ENV: &str = "SAW_SPEC_GEN_MAX_AST_BYTES";
+
+/// Buffer size for the streaming file reader (1 MiB).
+const READ_BUFFER_BYTES: usize = 1024 * 1024;
+
+fn effective_max_ast_size() -> u64 {
+    std::env::var(MAX_AST_FILE_SIZE_ENV)
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(MAX_AST_FILE_SIZE)
+}
 
 /// Read a clang JSON AST dump from disk and decode it into an [`AstNode`].
 ///
-/// Enforces [`MAX_AST_FILE_SIZE`] and accepts both single-object dumps
-/// and concatenated multi-object dumps (from `-ast-dump-filter`).
+/// Uses a streamed `BufReader` so the raw JSON text is never
+/// materialised as a single `String`; the size guard is enforced via
+/// `metadata()` before any data is read. Accepts both single-object
+/// dumps and concatenated multi-object dumps (from `-ast-dump-filter`).
 pub fn parse_ast(path: &Path) -> Result<AstNode> {
     let metadata = std::fs::metadata(path)
         .with_context(|| format!("Failed to stat {}", path.display()))?;
     let file_size = metadata.len();
-    if file_size > MAX_AST_FILE_SIZE {
+    let max_size = effective_max_ast_size();
+    if file_size > max_size {
         let size_mb = file_size / (1024 * 1024);
         anyhow::bail!(
-            "AST file {} is too large ({} MB, limit is {} MB). To reduce size, try:\n\
+            "AST file {} is too large ({} MB, sanity limit is {} MB). \
+             Streaming reduces peak memory but cannot bound the parsed \
+             AST itself — if you really need to load this file, raise \
+             the limit via {}=<bytes>. Otherwise, try:\n\
              \n  1. Use clang -ast-dump-filter=<function> to dump only specific declarations\n\
              \n  2. Split the translation unit into smaller files\n\
              \n  3. Pre-filter with: jq 'select(.name == \"MyFunc\")' large_ast.json > filtered.json",
             path.display(),
             size_mb,
-            MAX_AST_FILE_SIZE / (1024 * 1024),
+            max_size / (1024 * 1024),
+            MAX_AST_FILE_SIZE_ENV,
         );
     }
 
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read {}", path.display()))?;
-    parse_ast_str(&content)
+    let file = File::open(path)
+        .with_context(|| format!("Failed to open {}", path.display()))?;
+    let reader = BufReader::with_capacity(READ_BUFFER_BYTES, file);
+    parse_ast_from_reader(reader)
         .with_context(|| format!("Failed to parse JSON from {}", path.display()))
 }
 
-/// Parse a JSON string into an [`AstNode`].  Tries a single-object decode
-/// first and falls back to the concatenated-objects splitter so callers
-/// can transparently feed in `-ast-dump-filter` output.
-pub fn parse_ast_str(content: &str) -> Result<AstNode> {
-    if let Ok(node) = serde_json::from_str::<AstNode>(content) {
-        return Ok(node);
+/// Parse one or more top-level AST objects out of an arbitrary
+/// [`Read`] source, streaming the bytes through serde_json without an
+/// intermediate `String`.
+pub fn parse_ast_from_reader<R: Read>(reader: R) -> Result<AstNode> {
+    let stream =
+        serde_json::Deserializer::from_reader(reader).into_iter::<AstNode>();
+    let mut nodes: Vec<AstNode> = Vec::new();
+    for item in stream {
+        nodes.push(item.context("Failed to deserialize AST node")?);
     }
-    let objects = split_concatenated_json(content)?;
-    if objects.is_empty() {
-        anyhow::bail!("No JSON objects found in input");
-    }
-    if objects.len() == 1 {
-        let v = objects.into_iter().next().unwrap();
-        return Ok(serde_json::from_value(v)?);
-    }
-    let synthetic = Value::Object(
-        [
-            ("kind".to_string(), Value::String("TranslationUnitDecl".into())),
-            ("inner".to_string(), Value::Array(objects)),
-        ]
-        .into_iter()
-        .collect(),
-    );
-    Ok(serde_json::from_value(synthetic)?)
+    finalize_ast_nodes(nodes)
 }
 
-/// Split a string containing one or more top-level JSON objects pasted
-/// back-to-back. Handles nested braces inside string literals.
-pub fn split_concatenated_json(content: &str) -> Result<Vec<Value>> {
-    let mut objects = Vec::new();
-    let mut depth: i32 = 0;
-    let mut start: Option<usize> = None;
-    let mut in_string = false;
-    let mut escape_next = false;
-
-    for (i, c) in content.char_indices() {
-        if escape_next {
-            escape_next = false;
-            continue;
-        }
-        if c == '\\' && in_string {
-            escape_next = true;
-            continue;
-        }
-        if c == '"' {
-            in_string = !in_string;
-            continue;
-        }
-        if in_string {
-            continue;
-        }
-        match c {
-            '{' => {
-                if depth == 0 {
-                    start = Some(i);
-                }
-                depth += 1;
-            }
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    if let Some(s) = start {
-                        let slice = &content[s..=i];
-                        let v: Value = serde_json::from_str(slice).with_context(|| {
-                            format!("Failed to parse JSON object at byte offset {s}")
-                        })?;
-                        objects.push(v);
-                    }
-                    start = None;
-                }
-            }
-            _ => {}
-        }
+/// Parse a JSON string into an [`AstNode`]. Streams through
+/// `Deserializer::from_str` so single-object and concatenated-object
+/// inputs share a single code path with the file-based loader.
+///
+/// Kept on the public surface for tests and embedders even though the
+/// in-tree `parse_ast` no longer routes through it.
+#[allow(dead_code)]
+pub fn parse_ast_str(content: &str) -> Result<AstNode> {
+    let stream =
+        serde_json::Deserializer::from_str(content).into_iter::<AstNode>();
+    let mut nodes: Vec<AstNode> = Vec::new();
+    for item in stream {
+        nodes.push(item.context("Failed to deserialize AST node")?);
     }
+    finalize_ast_nodes(nodes)
+}
 
-    Ok(objects)
+/// Collapse the per-object stream into a single [`AstNode`]: pass a
+/// solo object through verbatim, or wrap multiple objects in a
+/// synthetic `TranslationUnitDecl` so downstream walkers always see a
+/// normal root.
+fn finalize_ast_nodes(mut nodes: Vec<AstNode>) -> Result<AstNode> {
+    if nodes.is_empty() {
+        anyhow::bail!("No JSON objects found in input");
+    }
+    if nodes.len() == 1 {
+        return Ok(nodes.pop().unwrap());
+    }
+    Ok(AstNode {
+        kind: "TranslationUnitDecl".into(),
+        inner: nodes,
+        ..AstNode::default()
+    })
 }
 
 /// Merge multiple parsed ASTs into a single synthetic `TranslationUnitDecl`.
@@ -184,6 +187,20 @@ mod tests {
     }
 
     #[test]
+    fn streaming_reader_matches_string_path() {
+        let content = r#"{"kind":"FunctionDecl","name":"foo"}
+{"kind":"FunctionDecl","name":"bar"}"#;
+        let from_str = parse_ast_str(content).unwrap();
+        let from_rdr = parse_ast_from_reader(content.as_bytes()).unwrap();
+        assert_eq!(from_str.kind, from_rdr.kind);
+        assert_eq!(from_str.inner.len(), from_rdr.inner.len());
+        assert_eq!(
+            from_str.inner[0].name.as_deref(),
+            from_rdr.inner[0].name.as_deref()
+        );
+    }
+
+    #[test]
     fn small_file_round_trip() {
         let dir = std::env::temp_dir().join("saw_spec_gen_parse_test");
         let _ = std::fs::create_dir_all(&dir);
@@ -199,12 +216,16 @@ mod tests {
         let path = std::env::temp_dir().join("definitely_not_here_xyzzy.json");
         let err = parse_ast(&path).unwrap_err();
         let msg = format!("{err}");
-        assert!(msg.contains("Failed to stat") || msg.contains("Failed to read"));
+        assert!(
+            msg.contains("Failed to stat")
+                || msg.contains("Failed to read")
+                || msg.contains("Failed to open")
+        );
     }
 
     #[test]
-    fn max_file_size_constant_is_100mb() {
-        assert_eq!(MAX_AST_FILE_SIZE, 100 * 1024 * 1024);
+    fn max_file_size_constant_is_2gib() {
+        assert_eq!(MAX_AST_FILE_SIZE, 2 * 1024 * 1024 * 1024);
     }
 
     #[test]

@@ -84,6 +84,12 @@
         #    path plus the auto-emitted llvm.var.annotation override. ───────
         @{ Tag = 'strings'; Runner = 'cpp'; Dir = 'demo/strings'; File = 'count_digits_cstr.cpp';       Cry = 'count_digits_spec.cry'; CryptolFn = 'count_digits_spec'; Function = 'count_digits'; Expected = 'SAT'   }
         @{ Tag = 'strings'; Runner = 'cpp'; Dir = 'demo/strings'; File = 'count_digits_cstr_unsat.cpp'; Cry = 'count_digits_spec.cry'; CryptolFn = 'count_digits_spec'; Function = 'count_digits'; Expected = 'UNSAT' }
+        # std::string roadmap target: gen-verify loads (thanks to the
+        # path-based AST pre-filter in verify.ps1) but verification fails on
+        # missing basic_string layout / STL overrides. Tagged separately so
+        # it doesn't run in the default suite. To enable, add tag
+        # 'strings_stl_roadmap'. Flip Expected to SAT when the demo passes.
+        @{ Tag = 'strings_stl_roadmap'; Runner = 'cpp'; Dir = 'demo/strings'; File = 'count_digits_string.cpp'; Cry = 'count_digits_spec.cry'; CryptolFn = 'count_digits_spec'; Function = 'count_digits'; Expected = 'UNKNOWN' }
 
         # ── C++/Rust equivalence demos (verify-equiv.ps1) ───────────────────
         @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'demo/rust_equalivence_demo/cpp_fee_reordered';      Cpp = 'compute_fee.cpp'; Rust = 'compute_fee_good.rs'; Cry = 'compute_fee_spec.cry'; CryptolFn = 'compute_fee_spec'; Function = 'compute_fee'; Expected = 'EQUIVALENT'     }

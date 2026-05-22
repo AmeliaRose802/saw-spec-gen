@@ -6,7 +6,7 @@
 //! lifetimes, etc. The module is organized into focused submodules:
 //!
 //! - [`node`] — typed serde structs for the JSON shape.
-//! - [`parse`] — file I/O with 100 MB size guard.
+//! - [`parse`] — streamed file I/O with a 2 GiB sanity guard.
 //! - [`adt`] — `name → TypeInfo` lookup table construction.
 //! - [`rust_types`] — Rust type-string parser
 //!   (`"ty::Ref<'_, u32, Shared>"` → `TypeInfo::Pointer(...)`).

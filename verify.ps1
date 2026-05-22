@@ -153,6 +153,25 @@ if (-not (Test-Path $astFile) -or (Get-Item $astFile).Length -eq 0) {
 }
 Write-Host "  → $astFile ($([math]::Round((Get-Item $astFile).Length / 1MB, 1)) MB)" -ForegroundColor Green
 
+# ── Step 2.5: Strip system-header decls from large ASTs ───────────────────────
+# Including STL headers like <string> can balloon the AST dump past
+# 100 MB (the size limit gen-verify enforces). The filter takes the
+# .cpp's parent directory as the "user code" root and drops every
+# top-level decl whose source file isn't underneath it. The check is
+# purely path-prefix based, so no per-toolchain allowlist is required.
+$astSizeMb = [math]::Round((Get-Item $astFile).Length / 1MB, 1)
+if ($astSizeMb -gt 10) {
+    Write-Host ""
+    Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host " Step 2.5: Filter AST to user-code paths" -ForegroundColor Cyan
+    Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
+    $userRoot = Split-Path $CppFile -Parent
+    & $specGen filter-ast --input $astFile --output $astFile --keep $userRoot 2>&1 | Write-Host
+    if ($LASTEXITCODE -ne 0) { Write-Error "filter-ast failed"; exit 1 }
+    $astSizeMbAfter = [math]::Round((Get-Item $astFile).Length / 1MB, 1)
+    Write-Host "  → $astFile (${astSizeMbAfter} MB after filter, was ${astSizeMb} MB)" -ForegroundColor Green
+}
+
 # ── Step 3: Generate specs + verify.saw ────────────────────────────────────────
 Write-Host ""
 Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan

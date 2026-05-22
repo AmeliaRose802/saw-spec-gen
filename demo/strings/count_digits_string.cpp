@@ -8,61 +8,59 @@ real C++ std::string by reference. It is included as a deliberate
 target for future work on gen-verify's STL support, not as a
 passing test case.
 
-Why it doesn't pass today
--------------------------
-0. The AST blows up. Simply running `clang -ast-dump=json` on this
-   translation unit produces ~328 MB of JSON -- including <string>
-   pulls in the entire MSVC <xstring>/<xmemory>/<xutility> chain
-   plus their templated dependencies. gen-verify currently refuses
-   to load AST files over 100 MB. The first thing a real STL story
-   needs is an AST filter (clang -ast-dump-filter=count_digits, or
-   a jq post-process) so only the target's declarations + the
-   handful of std::basic_string members it actually touches are
-   kept.
+What works today
+----------------
+verify.ps1 now runs a path-based AST pre-filter that strips every
+top-level declaration whose source file isn't under the demo's
+directory. For this file the raw clang AST dump is ~328 MB; after
+the filter only the user's `count_digits` declaration survives (8
+"no-loc" builtin nodes are passed through). gen-verify therefore
+loads the AST, finds the function, and emits a verify.saw. Step 2.5
+of verify.ps1 reports something like:
 
-1. MSVC `std::basic_string<char>` is a heap-backed type with a
-   small-string-optimisation (SSO) union. Its in-memory layout
-   under x86_64 MSVC is roughly:
+    Filter result: kept 1, dropped 7298, no-loc 8
 
-       struct {
-         union {
-           char        _Buf[16];     // SSO: inline storage
-           char*       _Ptr;         // heap: separately allocated
-         } _Bx;
-         size_t        _Mysize;      // current length
-         size_t        _Myres;       // current capacity
-       };
+That filter is purely path-prefix based -- no allowlist of
+toolchain include directories. The same mechanism handles GCC,
+clang, MSVC, MinGW, and any third-party headers transparently.
 
-   gen-verify currently cannot synthesise an opaque allocation for
-   this layout: it would have to know to allocate either a 16-byte
-   SSO buffer *or* a separate heap chunk, and to thread the chosen
-   discriminant through `size()` / `operator[]` calls.
+What still doesn't work
+-----------------------
+The Cryptol spec in count_digits_spec.cry is written for the
+fixed-length 8-byte buffer case (`[8][8] -> [32]`). A correct spec
+for the std::string flavour would have to describe how a
+`basic_string` is *laid out in memory* on MSVC -- the 16-byte SSO
+union, the size_t length, the size_t capacity -- and that's exactly
+what gen-verify can't synthesise on its own today. Even after the
+AST filter the equivalence check fails with:
 
-2. The member functions used here (`.size()`, `operator[]`) are
-   non-trivial inline templates. clang emits real calls to
-   `std::basic_string::size()` and `operator[]`. Without overrides
-   for those, SAW fails with "Could not find definition for
-   function" on the first one it hits.
+    Type mismatch:
+      Expected type: 8
+      Inferred type: 32
+    When checking type of function argument
 
-3. Once the loop bound is a symbolic `size_t` rather than the
-   compile-time constant 8, SAW also needs a loop-bound hint or a
-   fixpoint command -- gen-verify doesn't emit one today.
+which is Cryptol's polite way of saying "you handed me a 32-bit
+length where I wanted an 8-byte vector".
 
 What a successful run will eventually require
 ---------------------------------------------
-* AST filtering so the JSON dump stays under the size limit.
-* Recognising `std::basic_string<char>` (and `std::string` typedef)
-  in the AST as a known STL container, and synthesising a
-  parameterised "logical view" of its bytes for the spec.
+* A `std::basic_string<char>` layout recogniser in the AST emitter
+  so the `s_ptr` parameter is allocated as a 32-byte struct (SSO
+  union + size + capacity) instead of a single byte.
 * A library of MSVC STL overrides (`size`, `operator[]`, `c_str`,
   default ctor / dtor) shipped under lib/, in the same spirit as
   the MSP repo's lib/msvc_string_overrides.saw.
+* A Cryptol spec that operates on the assumed-layout struct, not on
+  a raw `[N][8]` buffer.
 * A loop-bound pragma (or `_In_reads_(s.size())`-style annotation)
-  so the verifier knows how many iterations to unroll.
+  so the verifier knows how many iterations to unroll once the
+  loop bound is a symbolic `size_t`.
 
-Expected outcome today: verify.ps1 aborts in Step 3 because the
-AST dump exceeds gen-verify's 100 MB safety limit. The case is
-intentionally NOT registered in tests/saw_demos/cases.psd1.
+Registered in tests/saw_demos/cases.psd1 with `Expected =
+'UNKNOWN'` so the suite tracks the demo's current failure mode --
+when we eventually make it pass, the harness will refuse to
+continue claiming UNKNOWN and the case will need to be flipped to
+SAT.
 */
 
 #include <cstdint>
