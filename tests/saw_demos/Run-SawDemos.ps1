@@ -92,6 +92,7 @@ $defaultTags = @(
     'trait_unknown_impl'
     'async_rust'
     'rust_adversarial'
+    'string_ops'
 )
 if ($All) {
     $selected = $cases
