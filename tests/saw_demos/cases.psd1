@@ -74,6 +74,11 @@
         @{ Tag = 'bounded_loop'; Runner = 'cpp';  Dir = 'demo/bounded_loop'; File = 'sum_first_n.cpp';  Expected = 'SAT';      Cry = 'sum_first_n_spec.cry'; CryptolFn = 'sum_first_n_spec'; Function = 'sum_first_n' }
         @{ Tag = 'bounded_loop'; Runner = 'rust'; Dir = 'demo/bounded_loop'; File = 'sum_first_n.rs';   Expected = 'VERIFIED'; Cry = 'sum_first_n_spec.cry'; CryptolFn = 'sum_first_n_spec'; Function = 'sum_first_n' }
 
+        # ── String operations (SWAR null-byte detection: real libc strlen
+        #    bit-trick over a 64-bit word treated as 8 packed bytes). ───────
+        @{ Tag = 'string_ops'; Runner = 'cpp'; Dir = 'demo/string_ops'; File = 'has_null_byte_sat.cpp';   Cry = 'has_null_byte_spec.cry'; CryptolFn = 'has_null_byte_spec'; Function = 'has_null_byte'; Expected = 'SAT'   }
+        @{ Tag = 'string_ops'; Runner = 'cpp'; Dir = 'demo/string_ops'; File = 'has_null_byte_unsat.cpp'; Cry = 'has_null_byte_spec.cry'; CryptolFn = 'has_null_byte_spec'; Function = 'has_null_byte'; Expected = 'UNSAT' }
+
         # ── C++/Rust equivalence demos (verify-equiv.ps1) ───────────────────
         @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'demo/rust_equalivence_demo/cpp_fee_reordered';      Cpp = 'compute_fee.cpp'; Rust = 'compute_fee_good.rs'; Cry = 'compute_fee_spec.cry'; CryptolFn = 'compute_fee_spec'; Function = 'compute_fee'; Expected = 'EQUIVALENT'     }
         @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'demo/rust_equalivence_demo/cpp_fee_reordered';      Cpp = 'compute_fee.cpp'; Rust = 'compute_fee_bad.rs';  Cry = 'compute_fee_spec.cry'; CryptolFn = 'compute_fee_spec'; Function = 'compute_fee'; Expected = 'NOT EQUIVALENT' }
