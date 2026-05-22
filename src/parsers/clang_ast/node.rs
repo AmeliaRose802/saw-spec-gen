@@ -87,7 +87,7 @@ pub struct AstNode {
 
     /// `FunctionDecl.exceptionSpec` — alternative location for noexcept
     /// info when the spec isn't baked into `qualType`.
-    #[serde(default, rename = "exceptionSpec")]
+    #[serde(default, rename = "exceptionSpec", deserialize_with = "deserialize_exception_spec")]
     pub exception_spec: Option<ExceptionSpec>,
 
     /// Source location of the primary token. Used to filter system
@@ -163,6 +163,10 @@ pub struct BaseRef {
 }
 
 /// `FunctionDecl.exceptionSpec` shape.
+///
+/// Clang 20+ may emit this as a bare string `"noexcept"` instead of an
+/// object `{"type":"noexcept",...}`.  The custom deserializer on
+/// `AstNode::exception_spec` handles both forms.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ExceptionSpec {
     #[serde(default)]
@@ -170,6 +174,29 @@ pub struct ExceptionSpec {
     #[serde(flatten)]
     #[allow(dead_code)]
     pub extra: Map<String, Value>,
+}
+
+/// Accept `"noexcept"` (string) or `{"type":"noexcept",...}` (object).
+fn deserialize_exception_spec<'de, D>(deserializer: D) -> Result<Option<ExceptionSpec>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let val = Option::<Value>::deserialize(deserializer)?;
+    match val {
+        None => Ok(None),
+        Some(Value::String(s)) => Ok(Some(ExceptionSpec {
+            r#type: Some(s),
+            extra: Map::new(),
+        })),
+        Some(Value::Object(map)) => {
+            let spec = ExceptionSpec {
+                r#type: map.get("type").and_then(|v| v.as_str()).map(String::from),
+                extra: map,
+            };
+            Ok(Some(spec))
+        }
+        Some(_) => Ok(None),
+    }
 }
 
 /// A clang source location.  Some fields are only set on specific node

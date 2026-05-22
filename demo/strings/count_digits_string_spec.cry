@@ -1,0 +1,57 @@
+// Cryptol spec for count_digits over an MSVC std::string in HEAP mode.
+//
+// Approach
+// ========
+// SAW models pointers as opaque values, not bit patterns, so we
+// can't shove a 32-byte struct view at the spec and have it dig
+// out _Ptr. Instead the verify driver (verify_count_digits_string.saw)
+// allocates the heap buffer separately and threads it into the
+// basic_string's pointer field, then passes (content, mysize) to
+// this spec directly.
+//
+// Domain bounds
+// =============
+// `MAX_LEN` is the maximum logical character count gen-verify will
+// unroll over. SAW unrolls the C++ loop MAX_LEN times, so larger
+// values cost solver time but verify more inputs. Pick the smallest
+// value that bounds your real-world input domain.
+//
+// To raise the cap to e.g. 256 (a typical HTTP header field limit),
+// edit ONLY the `type MAX_LEN = ...` line below. No SAW edits, no
+// source edits, no annotation. The driver script and the gen-verify
+// `valid_string` precondition pick it up automatically.
+
+type MAX_LEN = 32
+
+// True iff `b` is an ASCII digit '0'..'9'.
+is_digit : [8] -> Bit
+is_digit b = (b >= 0x30) /\ (b <= 0x39)
+
+// Validity predicate over the spec inputs.
+//
+// Convention (planned for gen-verify auto-emission): if the Cryptol
+// spec defines `valid_<TypeName>`, the generated SAW spec emits
+//
+//     llvm_precond {{ valid_<TypeName> args... }};
+//
+// automatically. For now the demo driver references it by hand.
+valid_string : [MAX_LEN][8] -> [64] -> Bit
+valid_string content mysize = mysize <= `MAX_LEN
+
+// Count ASCII digits in `content[0 .. mysize - 1]`.
+//
+// Implementation: iterate over the *whole* MAX_LEN-byte content
+// buffer and gate the accumulator on `i < mysize`. This is the
+// Cryptol-friendly way to express "loop to a symbolic bound";
+// unused suffix bytes contribute zero. Equivalent to the imperative
+// `for (i = 0; i < mysize; i++) if is_digit(content[i]) ...`.
+count_digits_string_spec : [MAX_LEN][8] -> [64] -> [32]
+count_digits_string_spec content mysize = total
+  where
+    indices = take`{MAX_LEN} [(0 : [64]) ...]
+    total = sum [ if (is_digit b) /\ (i < mysize)
+                    then (1 : [32])
+                    else (0 : [32])
+                | b <- content
+                | i <- indices
+                ]

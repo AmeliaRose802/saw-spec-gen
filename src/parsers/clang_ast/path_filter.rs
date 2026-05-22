@@ -93,7 +93,10 @@ pub fn filter_translation_unit_value(root: &mut Value, keep_paths: &[PathBuf]) -
         match current_file.as_deref() {
             Some(f) => {
                 let canon = canonicalise(f);
-                if normalised_keep.iter().any(|kp| canon.starts_with(kp)) {
+                if normalised_keep
+                    .iter()
+                    .any(|kp| canon.starts_with(kp) || canon.contains(&format!("/{kp}")))
+                {
                     stats.kept += 1;
                     true
                 } else {

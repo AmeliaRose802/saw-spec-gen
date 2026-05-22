@@ -1,0 +1,98 @@
+// Hand-rolled SAW verification for count_digits(const std::string&).
+//
+// This is the heap-mode proof: the `_Bxty._Ptr` field of the
+// basic_string points at a separately-allocated SAW buffer of
+// MAX_LEN bytes. The C++ implementation then symbolically executes
+// through MSVC's inline `size()`, `operator[]`, `_Myptr`, and
+// `_Large_mode_engaged` against that buffer.
+//
+// Why hand-rolled?
+// ----------------
+// gen-verify can't synthesise this layout yet -- it doesn't know
+// that std::basic_string has a pointer field whose target needs a
+// separate allocation, nor that a Cryptol-defined `valid_string`
+// predicate should be asserted as a precondition. Those are
+// follow-up work for the generator. This file proves the approach
+// works end-to-end so that work has a target to aim at.
+//
+// MSVC basic_string layout (from the bitcode):
+//
+//   class basic_string {                 // %"class.std::basic_string"
+//     _Compressed_pair pair;             // %"class.std::_Compressed_pair"
+//   };
+//   class _Compressed_pair {
+//     _String_val val;                   // %"class.std::_String_val"
+//   };
+//   class _String_val {
+//     _Bxty  _Bx;                        // %"union.std::_String_val..."
+//     i64    _Mysize;
+//     i64    _Myres;
+//   };
+//   union _Bxty { char* _Ptr; char _Buf[16]; };  // LLVM lowers to { ptr, [8 x i8] }
+//
+// Heap mode (_Large_mode_engaged) is selected when _Myres > 15.
+
+m <- llvm_load_module "count_digits_string.bc";
+import "count_digits_string_spec.cry";
+
+// SAW-script integer mirroring `type MAX_LEN` in the Cryptol spec.
+// SAW can't directly evaluate a Cryptol type-level numeric, so we
+// duplicate the constant here. Keep them in sync.
+let max_len = 32;
+
+let count_digits_equiv_spec = do {
+    // (1) The basic_string itself, typed so the field structure matches.
+    s_ptr <- llvm_alloc_readonly (llvm_alias "class.std::basic_string");
+
+    // (2) The heap-backed character buffer that `_Bxty._Ptr` will point at.
+    //     Sized MAX_LEN bytes to match the Cryptol type alias.
+    content_ptr <- llvm_alloc_readonly (llvm_array max_len (llvm_int 8));
+    content <- llvm_fresh_var "content" (llvm_array max_len (llvm_int 8));
+    llvm_points_to content_ptr (llvm_term content);
+
+    // (3) Symbolic length and capacity. The trailing 8 bytes of the
+    //     _Bxty union are unused in heap mode but still part of the
+    //     struct layout, so we allocate them as fresh bytes.
+    mysize <- llvm_fresh_var "mysize" (llvm_int 64);
+    myres <- llvm_fresh_var "myres" (llvm_int 64);
+    buf_tail <- llvm_fresh_var "buf_tail" (llvm_array 8 (llvm_int 8));
+
+    // (4) Cryptol-defined precondition. Bound the logical length to
+    //     MAX_LEN so SAW's symbolic loop unrolls finitely.
+    llvm_precond {{ valid_string content mysize }};
+
+    // (5) basic_string invariant: size <= capacity. Always true for a
+    //     well-formed std::string, but SAW must be told.
+    llvm_precond {{ mysize <= myres }};
+
+    // (6) Force heap mode: _Large_mode_engaged returns (_Myres > 15).
+    //     Without this MSVC's _Myptr would return &_Buf[0], and the
+    //     content bytes would have to live inside the struct itself.
+    llvm_precond {{ myres > 15 }};
+    llvm_precond {{ myres <= `MAX_LEN }};
+
+    // (7) Lay out the nested struct. Each `llvm_struct_value [..]`
+    //     mirrors one level of the basic_string -> _Compressed_pair
+    //     -> _String_val -> _Bxty chain. The pointer slot in _Bxty
+    //     is wired directly to content_ptr; SAW resolves that
+    //     symbolically when the C++ runs `load ptr, %_Bx._Ptr`.
+    llvm_points_to s_ptr (llvm_struct_value
+        [ llvm_struct_value
+            [ llvm_struct_value
+                [ llvm_struct_value [ content_ptr, llvm_term buf_tail ]
+                , llvm_term mysize
+                , llvm_term myres
+                ]
+            ]
+        ]);
+
+    llvm_execute_func [s_ptr];
+
+    llvm_return (llvm_term {{ count_digits_string_spec content mysize }});
+};
+
+print "=== Checking: count_digits == count_digits_string_spec (Cryptol, heap mode) ===";
+llvm_verify m "?count_digits@@YAIAEBV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z"
+    []
+    false count_digits_equiv_spec z3;
+print "=== VERIFIED: count_digits == count_digits_string_spec ===";
