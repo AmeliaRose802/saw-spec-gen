@@ -20,9 +20,7 @@ FIX: declare `validate(const uint32_t* val)` (see add_one_sat.cpp),
 uint32_t add_one(IValidator* v, uint32_t x) {
     uint32_t input = x;
 
-    // Non-const pointer — SAW must assume *input could be modified
     v->validate(&input);
 
-    // If validate() wrote to *input, this != x + 1
     return input + 1;
 }

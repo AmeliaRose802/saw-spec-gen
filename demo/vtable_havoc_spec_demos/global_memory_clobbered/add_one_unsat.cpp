@@ -1,6 +1,6 @@
 #include "ilog.h"
 
-int super_important = 7;
+
 
 /*
 DEMO: Unsat due to global memory clobbering
@@ -14,6 +14,8 @@ mutable global.  Since super_important is mutable, the solver can
 set it to -1, triggering the bailout path and breaking the
 postcondition (returns 12 instead of x+1).
 */
+
+int super_important = 7;
 
 // Takes an unsigned integer, returns it plus 1.
 uint32_t add_one(uint32_t x) {

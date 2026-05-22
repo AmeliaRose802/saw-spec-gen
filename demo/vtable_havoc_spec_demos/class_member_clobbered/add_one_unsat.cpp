@@ -50,7 +50,7 @@ uint32_t add_one(uint32_t x) {
         counter = new BadCounter();
     }
 
-    // Non-const method — SAW must assume bias_ could be modified
+    // Non-const method
     counter->prepare(x);
 
     // If prepare() modified bias_, this returns x + 1 + 42, not x + 1

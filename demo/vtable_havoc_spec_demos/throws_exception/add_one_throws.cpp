@@ -1,28 +1,40 @@
 // DEMO: a function that throws a C++ exception on a "bad" input.
 //
 // add_one(x) is supposed to compute x + 1. For the magic input
-// x == 42, instead of returning a value it raises an int. There
-// is no try/catch — the exception propagates out of add_one.
+// x == 42 we instead raise an int via `throw 1`. There is no
+// try/catch here — the exception simply propagates out of add_one.
 //
-// What does SAW see?
+// What does clang generate, and what does SAW do with it?
 //
-// clang lowers `throw 1` (on the MSVC ABI, with -fno-rtti) to
+// On the MSVC ABI (the only ABI clang supports for
+// x86_64-pc-windows-msvc), `throw 1` lowers to:
 //
 //     call void @_CxxThrowException(ptr %ex, ptr @_TI1H)
 //     unreachable
 //
-// `_CxxThrowException` is an external void function. gen-verify
-// emits an auto-spec under specs_experimental/ that lets it return
-// normally with havoced memory. But the LLVM `unreachable` right
-// after the call tells SAW that any normal-return path is infeasible
-// — so SAW prunes the x == 42 path entirely.
+// `_TI1H` is a "throw info" global referencing a chain of MSVC
+// type-descriptor globals (`@"_CT??_R0H@84"`, `@_CTA1H`, ...) whose
+// initializers use `trunc (sub (ptrtoint @A) (ptrtoint @B)) to i32`
+// — the MSVC PE convention for image-relative addresses.
 //
-// As a consequence, SAW only checks the x != 42 branch, which
-// trivially returns x + 1, and reports the function as **equivalent**
-// to the Cryptol spec. That's correct under partial-correctness
-// equivalence ("if the function returns, it returns x + 1") but it
-// is *not* the property a programmer who wrote `throw 1` probably
-// has in mind.
+// SAW (post the crucible-llvm fix for ptrtoint-subtraction in global
+// initializers) now loads this bitcode cleanly: unfoldable
+// `ptrtoint`-difference fields are materialized as undef integers,
+// which is sound here because the metadata is only ever read by the
+// OS unwinder, never by user code.
+//
+// gen-verify emits an auto-spec for the external `_CxxThrowException`
+// that lets it return normally with havoced memory, but the
+// `unreachable` immediately after the throw call prunes that path.
+// SAW therefore proves the spec on the non-throwing branch only —
+// a partial-correctness property: "if add_one returns, it returns
+// x + 1."
+//
+// The Cryptol spec in add_one_spec.cry is a total mathematical
+// function (defined on every input), so the equivalence proof
+// against it fails at exactly the input on which add_one does *not*
+// return: the counterexample x = 42. Expected RESULT: UNSAT
+// (DISPROVED with counterexample x = 42).
 
 #include <cstdint>
 
