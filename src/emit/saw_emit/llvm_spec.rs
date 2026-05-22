@@ -224,7 +224,26 @@ pub fn generate_saw_spec(spec: &SpecConstraint) -> String {
     out
 }
 
-/// Generate a spec using SAW's experimental `llvm_unspecified_globals` builtin.
+/// Generate a havoc-style override spec for a sub-callee, written with
+/// `llvm_unsafe_assume_spec`.
+///
+/// We used to emit a call to SAW's experimental `llvm_unspecified_globals`
+/// builtin here, but that builtin is not present in the saw-script
+/// currently in use (1.5.0.99). The functionally-equivalent pattern,
+/// which works with stock SAW, is:
+///
+///   1. Pre-state: allocate fresh symbolic pointers / fresh-var scalars
+///      matching the function signature.
+///   2. `llvm_execute_func [...]`.
+///   3. Post-state: for every global the sub-callee may touch, write a
+///      *fresh* symbolic value through `llvm_points_to (llvm_global X)`.
+///      This is the same "globals may have any value after the call"
+///      semantics the experimental builtin provided, just spelled out.
+///
+/// The override is registered via `llvm_unsafe_assume_spec`, which is
+/// the standard mechanism for assuming a behaviour against a function
+/// with a body we don't want SAW to symbolically execute (e.g. because
+/// it has side effects on globals we want to havoc).
 pub fn generate_unspecified_spec(
     spec: &SpecConstraint,
     all_globals: &[GlobalVarInfo],
@@ -235,28 +254,106 @@ pub fn generate_unspecified_spec(
         .mangled_name
         .as_deref()
         .unwrap_or(&spec.function_name);
-
-    out.push_str(&format!("// Auto-generated spec for: {fn_name}\n"));
-    out.push_str("// Uses SAW experimental llvm_unspecified_globals builtin\n");
-    out.push_str("// Requires: enable_experimental;\n\n");
-
     let safe = spec_safe_id(spec);
-    if all_globals.is_empty() {
+
+    out.push_str(&format!("// Auto-generated havoc spec for sub-callee: {fn_name}\n"));
+    out.push_str("// Assumes the function may write any value to the listed globals;\n");
+    out.push_str("// inputs are accepted as fresh-symbolic and the return value (if\n");
+    out.push_str("// any) is unconstrained.\n\n");
+    out.push_str(&format!(
+        "let {safe}_spec : LLVMSetup () = do {{\n",
+    ));
+
+    // Pre-state: build args.  Mirrors the param-setup half of the
+    // concrete spec (llvm_setup::emit_llvm_param_setup), minus the
+    // post-state preservation -- the override is purely a havoc.
+    let mut args: Vec<String> = Vec::new();
+    for p in &spec.params {
+        match p.alloc_type {
+            AllocType::AllocReadonly | AllocType::AllocMutable => {
+                // Use llvm_fresh_pointer rather than llvm_alloc so SAW
+                // accepts callsites where the pointer aliases other
+                // allocations (e.g. when the caller passes &local).
+                out.push_str(&format!(
+                    "    {name}_ptr <- llvm_fresh_pointer ({ty});\n",
+                    name = p.name,
+                    ty = p.saw_type,
+                ));
+                args.push(format!("{}_ptr", p.name));
+            }
+            AllocType::FreshVar => {
+                out.push_str(&format!(
+                    "    {name} <- llvm_fresh_var \"{name}\" ({ty});\n",
+                    name = p.name,
+                    ty = p.saw_type,
+                ));
+                args.push(format!("llvm_term {}", p.name));
+            }
+        }
+    }
+    // Each global the caller may touch needs to be declared so we can
+    // refer to it in the post-state. Without `llvm_alloc_global` SAW
+    // rejects `llvm_points_to (llvm_global X)` outright.
+    for g in all_globals {
         out.push_str(&format!(
-            "ov_{safe} <- llvm_unspecified m \"{target}\";\n",
-            target = target_name,
-        ));
-    } else {
-        let globals_list = all_globals
-            .iter()
-            .map(|g| format!("\"{}\"", g.mangled_name))
-            .collect::<Vec<_>>()
-            .join(", ");
-        out.push_str(&format!(
-            "ov_{safe} <- llvm_unspecified_globals m \"{target}\" [{globals_list}];\n",
-            target = target_name,
+            "    llvm_alloc_global \"{}\";\n",
+            g.mangled_name,
         ));
     }
+    out.push_str(&format!(
+        "\n    llvm_execute_func [{}];\n",
+        args.join(", "),
+    ));
+
+    // Post-state: return value (if any) is unconstrained.
+    if !crate::emit::saw_emit::writer::is_void_saw_type(&spec.return_constraint.saw_type) {
+        if spec.return_constraint.returns_pointer {
+            out.push_str(&format!(
+                "    ret_ptr <- llvm_alloc ({});\n",
+                spec.return_constraint.saw_type,
+            ));
+            out.push_str("    llvm_return ret_ptr;\n");
+        } else {
+            out.push_str(&format!(
+                "    ret <- llvm_fresh_var \"ret\" ({});\n",
+                spec.return_constraint.saw_type,
+            ));
+            out.push_str("    llvm_return (llvm_term ret);\n");
+        }
+    }
+
+    // Post-state: havoc each listed global by storing a fresh value.
+    // The bit width is taken from TypeInfo::SignedInt/UnsignedInt where
+    // we know it, falling back to a byte array sized from the AST.
+    // This is the bit that gives us the "may have any value after the
+    // call" semantics SAW's experimental builtin used to provide.
+    for g in all_globals {
+        let (saw_ty, fresh_ty) = match &g.ty {
+            TypeInfo::SignedInt(b) | TypeInfo::UnsignedInt(b) => {
+                (format!("llvm_int {b}"), format!("llvm_int {b}"))
+            }
+            TypeInfo::Bool => ("llvm_int 1".to_string(), "llvm_int 1".to_string()),
+            TypeInfo::ByteArray(n) => (
+                format!("llvm_array {n} (llvm_int 8)"),
+                format!("llvm_array {n} (llvm_int 8)"),
+            ),
+            _ => ("llvm_int 32".to_string(), "llvm_int 32".to_string()),
+        };
+        let _ = saw_ty; // kept for future use; fresh_ty is what we need
+        let safe_g = sanitize_name(&g.mangled_name);
+        out.push_str(&format!(
+            "    {safe_g}_after <- llvm_fresh_var \"{safe_g}_after\" ({fresh_ty});\n",
+        ));
+        out.push_str(&format!(
+            "    llvm_points_to (llvm_global \"{}\") (llvm_term {safe_g}_after);\n",
+            g.mangled_name,
+        ));
+    }
+
+    out.push_str("};\n\n");
+    out.push_str(&format!(
+        "ov_{safe} <- llvm_unsafe_assume_spec m \"{target_name}\" {safe}_spec;\n",
+    ));
     out
 }
 

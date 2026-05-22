@@ -84,11 +84,65 @@ pub fn filter_translation_unit_value(root: &mut Value, keep_paths: &[PathBuf]) -
     let Some(inner) = root.get_mut("inner").and_then(|i| i.as_array_mut()) else {
         return stats;
     };
+    filter_decl_list(inner, &normalised_keep, &mut stats);
+    stats
+}
+
+/// Walk a list of decls (the `inner[]` array of a TranslationUnitDecl
+/// or a wrapper like LinkageSpecDecl / NamespaceDecl), keeping the
+/// ones we want and dropping the rest in place.
+///
+/// Wrapper decls (`extern "C" { ... }`, `namespace std { ... }`) are
+/// recursed into so that pure declarations of system functions like
+/// `rand` / `printf` -- which clang nests several layers deep under
+/// LinkageSpecDecl/NamespaceDecl living in vcruntime.h -- are
+/// preserved even though their wrapper's `loc.file` is outside the
+/// user's `keep` paths. After recursion, an empty wrapper is dropped.
+fn filter_decl_list(
+    inner: &mut Vec<Value>,
+    normalised_keep: &[String],
+    stats: &mut FilterStats,
+) {
     let mut current_file: Option<String> = None;
-    inner.retain(|node| {
+    inner.retain_mut(|node| {
         let file = first_loc_file(node).map(|f| f.to_string());
         if let Some(f) = &file {
             current_file = Some(f.clone());
+        }
+
+        // Wrapper decls: recurse, then decide whether the (now
+        // possibly trimmed) wrapper is still worth keeping.
+        let kind = node.get("kind").and_then(|k| k.as_str()).unwrap_or("");
+        let is_wrapper = matches!(kind, "LinkageSpecDecl" | "NamespaceDecl");
+        if is_wrapper {
+            if let Some(child) = node.get_mut("inner").and_then(|i| i.as_array_mut()) {
+                filter_decl_list(child, normalised_keep, stats);
+                if child.is_empty() {
+                    // Nothing survived the recursion. The wrapper
+                    // itself doesn't carry a definition the verifier
+                    // needs, so drop it.
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        // Pure declarations (no body) are always cheap and gen-verify
+        // needs them to emit external override specs for system
+        // functions the user's code calls -- e.g. `int rand();` in
+        // <cstdlib> or `printf` in <cstdio>. The path filter would
+        // otherwise drop those declarations along with the rest of
+        // the header, and SAW would later fail with "No implementation
+        // or override found for pointer" at the call site.
+        //
+        // A FunctionDecl is a pure declaration iff none of its
+        // `inner` children is a `CompoundStmt` (the function body
+        // node). Pure declarations carry only the signature + maybe
+        // a few `ParmVarDecl` children, so keeping them costs <1 KB
+        // per node and is the right thing to do regardless of source.
+        if is_pure_function_declaration(node) {
+            stats.kept += 1;
+            return true;
         }
         match current_file.as_deref() {
             Some(f) => {
@@ -110,12 +164,42 @@ pub fn filter_translation_unit_value(root: &mut Value, keep_paths: &[PathBuf]) -
             }
         }
     });
-    stats
 }
 
 /// True iff `root` looks like a clang `TranslationUnitDecl`.
 fn is_translation_unit(root: &Value) -> bool {
     root.get("kind").and_then(|k| k.as_str()) == Some("TranslationUnitDecl")
+}
+
+/// True iff `node` is a `FunctionDecl` (or `CXXMethodDecl` etc.) that
+/// carries no body. Clang represents the body as a child `CompoundStmt`
+/// node in `inner[]`; a pure declaration has none.
+///
+/// Pure declarations are always kept by the path filter -- they are
+/// cheap (signature + parameter decls only, no inlined template
+/// instantiations) and gen-verify needs them to emit external override
+/// specs for system functions like `printf` or `rand` that the user's
+/// code calls.
+fn is_pure_function_declaration(node: &Value) -> bool {
+    let kind = node.get("kind").and_then(|k| k.as_str()).unwrap_or("");
+    let is_function = matches!(
+        kind,
+        "FunctionDecl"
+            | "CXXMethodDecl"
+            | "CXXConstructorDecl"
+            | "CXXDestructorDecl"
+            | "CXXConversionDecl"
+    );
+    if !is_function {
+        return false;
+    }
+    let Some(inner) = node.get("inner").and_then(|i| i.as_array()) else {
+        // No `inner` at all: it's a forward declaration.
+        return true;
+    };
+    !inner.iter().any(|c| {
+        c.get("kind").and_then(|k| k.as_str()) == Some("CompoundStmt")
+    })
 }
 
 /// Find the first source-file string in any of the conventional spots
@@ -203,14 +287,27 @@ mod tests {
         PathBuf::from(r"C:\Program Files\LLVM\include")
     }
 
+    /// Helper: produce a FunctionDecl JSON node that LOOKS LIKE A
+    /// DEFINITION (has a CompoundStmt body), so the path filter
+    /// applies normally to it. Pure declarations (no body) are
+    /// always kept and would defeat path-filtering tests.
+    fn fn_def(name: &str, file: &str) -> serde_json::Value {
+        json!({
+            "kind": "FunctionDecl",
+            "name": name,
+            "loc": { "file": file },
+            "inner": [ { "kind": "CompoundStmt" } ]
+        })
+    }
+
     #[test]
     fn keeps_decls_under_project_dir() {
         let mut ast = json!({
             "kind": "TranslationUnitDecl",
             "inner": [
-                {"kind": "FunctionDecl", "loc": {"file": r"C:\Users\me\proj\foo.cpp"}},
-                {"kind": "FunctionDecl", "loc": {"file": r"C:\Program Files\LLVM\include\xstring"}},
-                {"kind": "FunctionDecl", "loc": {"file": r"C:\Users\me\proj\bar.h"}},
+                fn_def("foo", r"C:\Users\me\proj\foo.cpp"),
+                fn_def("stl_thing", r"C:\Program Files\LLVM\include\xstring"),
+                fn_def("bar", r"C:\Users\me\proj\bar.h"),
             ]
         });
         let stats =
@@ -228,13 +325,16 @@ mod tests {
         // file as the immediately-preceding one. The filter must
         // remember the last-seen file to classify the elided sibling
         // correctly.
+        // All four entries have bodies (CompoundStmt) so they're
+        // subject to path filtering rather than the pure-decl
+        // pass-through.
         let mut ast = json!({
             "kind": "TranslationUnitDecl",
             "inner": [
-                {"kind": "FunctionDecl", "loc": {"file": r"C:\Program Files\LLVM\include\xstring", "line": 10}},
-                {"kind": "FunctionDecl", "loc": {"line": 20}},
-                {"kind": "FunctionDecl", "loc": {"file": r"C:\Users\me\proj\foo.cpp", "line": 1}},
-                {"kind": "FunctionDecl", "loc": {"line": 2}},
+                {"kind": "FunctionDecl", "loc": {"file": r"C:\Program Files\LLVM\include\xstring", "line": 10}, "inner": [{"kind": "CompoundStmt"}]},
+                {"kind": "FunctionDecl", "loc": {"line": 20}, "inner": [{"kind": "CompoundStmt"}]},
+                {"kind": "FunctionDecl", "loc": {"file": r"C:\Users\me\proj\foo.cpp", "line": 1}, "inner": [{"kind": "CompoundStmt"}]},
+                {"kind": "FunctionDecl", "loc": {"line": 2}, "inner": [{"kind": "CompoundStmt"}]},
             ]
         });
         let stats = filter_translation_unit_value(&mut ast, &[project_dir()]);
@@ -266,8 +366,8 @@ mod tests {
             "kind": "TranslationUnitDecl",
             "inner": [
                 // Same path, different casing on the drive letter.
-                {"kind": "FunctionDecl", "loc": {"file": r"c:\users\ME\proj\Foo.cpp"}},
-                {"kind": "FunctionDecl", "loc": {"file": r"C:\Users\me\proj\bar.cpp"}},
+                fn_def("foo", r"c:\users\ME\proj\Foo.cpp"),
+                fn_def("bar", r"C:\Users\me\proj\bar.cpp"),
             ]
         });
         let stats = filter_translation_unit_value(&mut ast, &[project_dir()]);
@@ -280,8 +380,8 @@ mod tests {
         let mut ast = json!({
             "kind": "TranslationUnitDecl",
             "inner": [
-                {"kind": "FunctionDecl", "loc": {"file": "/home/me/proj/foo.cpp"}},
-                {"kind": "FunctionDecl", "loc": {"file": "/usr/include/c++/13/string"}},
+                fn_def("foo", "/home/me/proj/foo.cpp"),
+                fn_def("stl_thing", "/usr/include/c++/13/string"),
             ]
         });
         let stats = filter_translation_unit_value(
@@ -311,9 +411,9 @@ mod tests {
         let mut ast = json!({
             "kind": "TranslationUnitDecl",
             "inner": [
-                {"kind": "FunctionDecl", "loc": {"file": r"C:\Users\me\proj\foo.cpp"}},
-                {"kind": "FunctionDecl", "loc": {"file": r"C:\Users\me\third_party\lib.h"}},
-                {"kind": "FunctionDecl", "loc": {"file": r"C:\Program Files\LLVM\include\xstring"}},
+                fn_def("foo", r"C:\Users\me\proj\foo.cpp"),
+                fn_def("lib_helper", r"C:\Users\me\third_party\lib.h"),
+                fn_def("stl_thing", r"C:\Program Files\LLVM\include\xstring"),
             ]
         });
         let stats = filter_translation_unit_value(
@@ -339,6 +439,73 @@ mod tests {
                             "expansionLoc": {"file": r"C:\Users\me\proj\macro_user.cpp"}
                         }
                     }
+                }
+            ]
+        });
+        let stats = filter_translation_unit_value(&mut ast, &[project_dir()]);
+        assert_eq!(stats.kept, 1);
+        assert_eq!(stats.dropped, 0);
+    }
+
+    #[test]
+    fn pure_declarations_outside_keep_path_are_kept() {
+        // Models a typical <cstdlib> declaration for `int rand()`.
+        // gen-verify needs the declaration to emit an external
+        // override spec, so the filter must keep it even though it
+        // lives outside the user's directory.
+        let mut ast = json!({
+            "kind": "TranslationUnitDecl",
+            "inner": [
+                // Pure declaration in a system header -- KEEP.
+                {
+                    "kind": "FunctionDecl",
+                    "name": "rand",
+                    "loc": {"file": r"C:\Program Files\LLVM\include\stdlib.h"},
+                    "inner": [
+                        {"kind": "ParmVarDecl", "name": "p1"}
+                    ]
+                },
+                // Function with a body in the same system header -- DROP.
+                {
+                    "kind": "FunctionDecl",
+                    "name": "abort_impl",
+                    "loc": {"file": r"C:\Program Files\LLVM\include\stdlib.h"},
+                    "inner": [
+                        {"kind": "ParmVarDecl", "name": "p1"},
+                        {"kind": "CompoundStmt"}
+                    ]
+                },
+                // User code -- KEEP.
+                {
+                    "kind": "FunctionDecl",
+                    "name": "my_func",
+                    "loc": {"file": r"C:\Users\me\proj\foo.cpp"}
+                },
+            ]
+        });
+        let stats = filter_translation_unit_value(&mut ast, &[project_dir()]);
+        assert_eq!(stats.kept, 2, "rand decl + my_func kept");
+        assert_eq!(stats.dropped, 1, "abort_impl with body dropped");
+        let kept_names: Vec<&str> = ast["inner"]
+            .as_array().unwrap()
+            .iter()
+            .map(|n| n["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(kept_names, vec!["rand", "my_func"]);
+    }
+
+    #[test]
+    fn forward_declarations_with_no_inner_are_kept() {
+        // Some `FunctionDecl` JSON dumps have no `inner` key at all
+        // (truly forward declarations). They should still be treated
+        // as pure declarations and kept.
+        let mut ast = json!({
+            "kind": "TranslationUnitDecl",
+            "inner": [
+                {
+                    "kind": "FunctionDecl",
+                    "name": "printf",
+                    "loc": {"file": r"C:\Program Files\LLVM\include\stdio.h"}
                 }
             ]
         });
