@@ -1530,6 +1530,16 @@ fn collect_enum_defs(node: &Value, ctx: &mut TypeContext) {    if let Some(kind)
 
                 if !variants.is_empty() {
                     ctx.enums.insert(name.to_string(), (variants, bits));
+                } else if node.get("fixedUnderlyingType").is_some() {
+                    // Forward-declared enum with explicit underlying type
+                    // (e.g. `enum class LatchResult : uint32_t;`).  Record
+                    // it with an empty variants list so `parse_type`
+                    // produces `TypeInfo::Enum` (which seeds enum_bits
+                    // for the post-processing pass) instead of falling
+                    // through to `TypeInfo::Opaque`.
+                    ctx.enums
+                        .entry(name.to_string())
+                        .or_insert_with(|| (Vec::new(), bits));
                 }
             }
         }

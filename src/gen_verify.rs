@@ -7,6 +7,7 @@
 //!      direct in-module callees (compositional verification)
 //!   4. Emit the top-level `verify.saw` script that wires everything together
 
+use crate::alias_fallbacks::{apply_cli_overrides, dump_fallback_diagnostics};
 use crate::spec_rewrite::{apply_alias_rewrites, collect_type_sizes};
 use crate::type_resolve::{needs_resolution, resolve_saw_type};
 use crate::{alias_fallbacks_ir, clang_ast, constraints, llvm_ir, saw_emit};
@@ -22,6 +23,8 @@ pub fn run(
     cryptol_fn: &str,
     function: &str,
     output: &Path,
+    alias_size_overrides: &[String],
+    alias_enum_overrides: &[String],
 ) -> Result<()> {
     if ast.is_empty() {
         anyhow::bail!("At least one --ast file is required");
@@ -41,12 +44,9 @@ pub fn run(
     let all_functions = clang_ast::extract_functions(&parsed_ast, None)?;
     eprintln!("Found {} functions", all_functions.len());
 
-    // Optional LLVM IR for struct-size resolution and parameter-level
-    // `dereferenceable(N)` attributes.  MSVC-clang fully qualifies struct
-    // symbols, so when the AST has an incomplete forward decl of `Baz`
-    // we can't pick a matching `llvm_alias` unless we know the IR-side
-    // name; the IR also carries deref sizes for forward-declared types
-    // (e.g. `HttpRequest`) and `std::tuple<…>` sret return slots.
+    // Optional LLVM IR: struct-size table + per-param `dereferenceable(N)`.
+    // MSVC-clang fully qualifies struct symbols, so without the IR we can't
+    // match short C++ names against `%\"struct.Foo::Bar::Baz\"`.
     let (ir_struct_sizes, ir_funcs) = llvm_ir::load_optional(llvm_ir_path)?;
 
     // Find the target function (FunctionInfo with call graph)
@@ -496,14 +496,8 @@ pub fn run(
         output,
     )?;
 
-    // Post-processing: rewrite any `llvm_alias "X"` reference SAW can't
-    // resolve into a concrete SAW type.  Emitters that go straight
-    // through `type_to_saw` (havoc specs, vtable stub setups,
-    // experimental override specs) leave short C++ names like
-    // `HttpRequest`, `std::tuple<…>`, `SessionState`, or `LatchResult`
-    // in the output — none of which exist in the bitcode's struct table.
-    // Structs fall back to `llvm_array N (llvm_int 8)`; enums fall back
-    // to `llvm_int <bits>` to match the ABI lowering.
+    // Post-processing: rewrite unresolved `llvm_alias "X"` references into
+    // concrete SAW types (structs → byte arrays, enums → `llvm_int N`).
     let mut fallbacks = collect_type_sizes(&all_functions);
     // Seed enum_bits from every EnumDecl in the AST so forward-declared
     // enums like `LatchResult` still get the `llvm_int <bits>` fallback.
@@ -516,6 +510,12 @@ pub fn run(
             &all_functions,
             &ir_funcs,
         );
+    }
+    // CLI overrides take priority over inferred sizes.
+    apply_cli_overrides(&mut fallbacks, alias_size_overrides, alias_enum_overrides)?;
+    // SAW_SPEC_GEN_DEBUG_FALLBACKS=1 to see resolved fallback sizes.
+    if std::env::var_os("SAW_SPEC_GEN_DEBUG_FALLBACKS").is_some() {
+        dump_fallback_diagnostics(&fallbacks);
     }
     apply_alias_rewrites(output, &ir_struct_sizes, &fallbacks);
 

@@ -169,6 +169,63 @@ fn walk_type_for_sizes(ty: &TypeInfo, out: &mut AliasFallbacks) {
     }
 }
 
+/// Apply user-supplied CLI overrides to `fb` in place.
+///
+/// `size_overrides` entries have the form `NAME=BYTES` and populate the
+/// byte-array fallback map.  `enum_overrides` entries have the form
+/// `NAME=BITS` and populate the integer-width fallback map.  Both take
+/// priority over any inferred size — the user knows their codebase
+/// better than the heuristics.
+///
+/// Returns an error when a value can't be parsed.
+pub fn apply_cli_overrides(
+    fb: &mut AliasFallbacks,
+    size_overrides: &[String],
+    enum_overrides: &[String],
+) -> anyhow::Result<()> {
+    for entry in size_overrides {
+        let (name, value) = entry
+            .split_once('=')
+            .ok_or_else(|| anyhow::anyhow!("--alias-size expects NAME=BYTES, got: {entry}"))?;
+        let bytes: usize = value.trim().parse().map_err(|e| {
+            anyhow::anyhow!("--alias-size {name}: invalid byte count '{value}': {e}")
+        })?;
+        // Drop any inferred enum width — explicit byte override wins.
+        fb.enum_bits.remove(name.trim());
+        fb.bytes.insert(name.trim().to_string(), bytes);
+    }
+    for entry in enum_overrides {
+        let (name, value) = entry
+            .split_once('=')
+            .ok_or_else(|| anyhow::anyhow!("--alias-enum expects NAME=BITS, got: {entry}"))?;
+        let bits: u32 = value.trim().parse().map_err(|e| {
+            anyhow::anyhow!("--alias-enum {name}: invalid bit width '{value}': {e}")
+        })?;
+        fb.bytes.remove(name.trim());
+        fb.enum_bits.insert(name.trim().to_string(), bits);
+    }
+    Ok(())
+}
+
+/// Emit a sorted listing of every name in `fb` to stderr.  Triggered by
+/// the `SAW_SPEC_GEN_DEBUG_FALLBACKS` environment variable to help
+/// diagnose missing fallbacks ("did the post-processing pass actually
+/// see my type?").
+pub fn dump_fallback_diagnostics(fb: &AliasFallbacks) {
+    let mut bytes: Vec<(&String, &usize)> = fb.bytes.iter().collect();
+    bytes.sort_by(|a, b| a.0.cmp(b.0));
+    eprintln!("--- alias fallback diagnostics ({} byte sizes) ---", bytes.len());
+    for (name, n) in bytes {
+        eprintln!("  bytes  {name} = {n}");
+    }
+    let mut enums: Vec<(&String, &u32)> = fb.enum_bits.iter().collect();
+    enums.sort_by(|a, b| a.0.cmp(b.0));
+    eprintln!("--- alias fallback diagnostics ({} enum widths) ---", enums.len());
+    for (name, bits) in enums {
+        eprintln!("  enum   {name} = i{bits}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

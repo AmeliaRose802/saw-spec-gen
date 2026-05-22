@@ -161,6 +161,24 @@ enum Commands {
         /// Output directory for all generated files (specs, stubs, verify script)
         #[arg(short, long)]
         output: PathBuf,
+
+        /// Override the byte size of a specific C++ type name when the
+        /// post-processing pass can't resolve `llvm_alias "NAME"` from
+        /// the AST or LLVM IR.  Pass `--alias-size NAME=BYTES` once per
+        /// override; emits `llvm_array BYTES (llvm_int 8)` for that
+        /// name.  Use this for types whose only `dereferenceable(N)`
+        /// attribute lives in a separate bitcode module (e.g.
+        /// `std::tuple<…>` sret returns from interface methods
+        /// implemented in a different .bc file).
+        #[arg(long = "alias-size", value_name = "NAME=BYTES", num_args = 0..)]
+        alias_size: Vec<String>,
+
+        /// Override the bit width of a specific enum type name when the
+        /// AST is missing the `EnumDecl` definition (e.g. only a forward
+        /// declaration is reachable).  Pass `--alias-enum NAME=BITS`
+        /// once per override; emits `llvm_int BITS` for that name.
+        #[arg(long = "alias-enum", value_name = "NAME=BITS", num_args = 0..)]
+        alias_enum: Vec<String>,
     },
 
     /// Generate Rust trait vtable stubs + havoc specs for opaque
@@ -343,6 +361,8 @@ fn main() -> Result<()> {
             cryptol_fn,
             function,
             output,
+            alias_size,
+            alias_enum,
         } => {
             gen_verify::run(
                 &ast,
@@ -352,6 +372,8 @@ fn main() -> Result<()> {
                 &cryptol_fn,
                 &function,
                 &output,
+                &alias_size,
+                &alias_enum,
             )?;
         }
         Commands::GenRustTraitStubs { schema, output } => {

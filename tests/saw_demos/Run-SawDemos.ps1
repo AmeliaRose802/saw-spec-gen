@@ -181,8 +181,18 @@ function Invoke-Case($c) {
 }
 
 function Get-Verdict([string]$text) {
-    $m = [regex]::Match($text, 'RESULT:\s*(NOT EQUIVALENT|EQUIVALENT|VERIFIED|DISPROVED|UNKNOWN|SAT|UNSAT)')
-    if ($m.Success) { return $m.Groups[1].Value.Trim() }
+    # Pick the LAST `RESULT:` line in the output.  Equivalence demos emit
+    # three: one per side (C++/Rust) plus the final equivalence verdict.
+    # Taking the last one consistently lands on the verdict the script
+    # treats as authoritative.  Single-result runs (cpp, rust) are
+    # unaffected since they only emit one match.
+    $matches = [regex]::Matches(
+        $text,
+        'RESULT:\s*(NOT EQUIVALENT|EQUIVALENT|VERIFIED|DISPROVED|UNKNOWN|SAT|UNSAT)'
+    )
+    if ($matches.Count -gt 0) {
+        return $matches[$matches.Count - 1].Groups[1].Value.Trim()
+    }
     return 'NO-RESULT'
 }
 
