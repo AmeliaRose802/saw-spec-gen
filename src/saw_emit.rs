@@ -1104,25 +1104,35 @@ fn generate_llvm_ir_stubs(
                 continue;
             }
             let stub_name = stub_name_for(method);
-            let method_params_ir = method_params_to_ir(&method.method);
+            let param_strs = method_param_ir_pieces(&method.method);
 
             // MSVC ABI: any return type the platform can't fit in registers
             // (struct/class larger than 8 bytes) is lowered to a hidden
-            // sret pointer parameter — the caller passes an output buffer
-            // as the first argument and the function writes the result
-            // through it. The stub signature must match this ABI or SAW
+            // sret pointer parameter. For instance methods the parameter
+            // order is `this, sret_ptr, args...` — the implicit `this`
+            // stays at position 0 and the output pointer is inserted at
+            // position 1. The stub signature must match this ABI or SAW
             // will reject the generated module when it links against
             // bitcode that calls the real virtual method.
             let (ret_ir, params_ir) = match sret_inner_ir_type(&method.method.return_type) {
                 Some(inner) => {
-                    let mut params = format!("ptr sret({inner}) %retptr");
-                    if !method_params_ir.is_empty() {
-                        params.push_str(", ");
-                        params.push_str(&method_params_ir);
+                    let mut parts: Vec<String> = Vec::new();
+                    // `this` always lives at param index 0 for an
+                    // InterfaceMethod (added by the AST walker). Keep it
+                    // first; insert the sret pointer immediately after.
+                    if let Some(this_p) = param_strs.first() {
+                        parts.push(this_p.clone());
                     }
-                    ("void".to_string(), params)
+                    parts.push(format!("ptr sret({inner}) %retptr"));
+                    for p in param_strs.iter().skip(1) {
+                        parts.push(p.clone());
+                    }
+                    ("void".to_string(), parts.join(", "))
                 }
-                None => (type_to_llvm_ir(&method.method.return_type), method_params_ir),
+                None => (
+                    type_to_llvm_ir(&method.method.return_type),
+                    param_strs.join(", "),
+                ),
             };
 
             out.push_str(&format!(
@@ -1202,6 +1212,12 @@ fn type_to_llvm_ir(ty: &TypeInfo) -> String {
 /// scratch buffer — SAW only needs the signature to match for type
 /// checking; the body is unreachable when the spec is applied as an
 /// override.
+///
+/// Unsized `Opaque` returns whose name looks like an aggregate (template
+/// or qualified C++ name — e.g. `std::tuple<KeyStoreOperationResult,
+/// LatchableKey>`) are also sret. Without LLVM IR sizes the AST has no
+/// way to populate `size_bytes`, but the MSVC ABI lowering only depends
+/// on whether the type is an aggregate, not on its exact size.
 fn sret_inner_ir_type(ty: &TypeInfo) -> Option<String> {
     match ty {
         TypeInfo::Struct { size_bytes: Some(n), .. } => Some(format!("[{n} x i8]")),
@@ -1209,12 +1225,30 @@ fn sret_inner_ir_type(ty: &TypeInfo) -> Option<String> {
         TypeInfo::Opaque { size_bytes, .. } if *size_bytes > 8 => {
             Some(format!("[{size_bytes} x i8]"))
         }
+        TypeInfo::Opaque { size_bytes: 0, name } if looks_like_aggregate_name(name) => {
+            Some("[16 x i8]".to_string())
+        }
         _ => None,
     }
 }
 
-/// Generate LLVM IR parameter list for a method's stub.
-fn method_params_to_ir(func: &FunctionInfo) -> String {
+/// Heuristic: is this opaque type name almost certainly a C++ aggregate
+/// (struct/class/template instantiation) rather than a scalar alias?
+///
+/// Used only as a fallback when `size_bytes` isn't known. Templated names
+/// (`std::tuple<…>`) and fully-qualified C++ names always denote class
+/// types under MSVC, which means the ABI returns them via sret. Plain
+/// unqualified opaques like `Self` / `Unknown` (used for unresolved
+/// abstract `this` placeholders) are NOT aggregates.
+fn looks_like_aggregate_name(name: &str) -> bool {
+    name.contains('<') || name.contains("::")
+}
+
+/// Generate LLVM IR parameter pieces (one per param) for a method's stub.
+///
+/// Returned as a `Vec<String>` so callers can splice the implicit `this`
+/// and an sret pointer at the right positions before joining.
+fn method_param_ir_pieces(func: &FunctionInfo) -> Vec<String> {
     func.params
         .iter()
         .enumerate()
@@ -1225,8 +1259,7 @@ fn method_params_to_ir(func: &FunctionInfo) -> String {
             };
             format!("{ty} %arg{i}")
         })
-        .collect::<Vec<_>>()
-        .join(", ")
+        .collect()
 }
 
 /// Default return instruction for an LLVM IR type.
@@ -1376,6 +1409,34 @@ fn generate_havoc_spec(
         args.push(format!("{}_ptr", param.name));
     }
 
+    // MSVC ABI sret: an aggregate return is passed via a hidden output
+    // pointer at position 1 (immediately after `this`). Allocate the
+    // output buffer in setup, splice it into the argument list, and
+    // remember the SAW type so the postcondition can constrain *retptr
+    // instead of using llvm_return.
+    let sret_saw_type: Option<String> = sret_inner_ir_type(&func.return_type).map(|_| {
+        match &func.return_type {
+            // Unsized opaque aggregate (e.g. std::tuple<…>): use a
+            // byte-array scratch buffer matching the IR stub's sret type.
+            // type_to_saw would otherwise emit `llvm_alias "std::tuple<…>"`
+            // which doesn't exist in the loaded bitcode.
+            TypeInfo::Opaque { size_bytes: 0, .. } => "llvm_array 16 (llvm_int 8)".to_string(),
+            // Unsized struct: same fallback.
+            TypeInfo::Struct { size_bytes: None, .. } => "llvm_array 16 (llvm_int 8)".to_string(),
+            other => type_to_saw(other),
+        }
+    });
+    if let Some(saw_type) = &sret_saw_type {
+        setup.push_str("\n    // sret: aggregate return passed via hidden output pointer\n");
+        setup.push_str("    // (MSVC ABI: parameter index 1, immediately after `this`).\n");
+        setup.push_str(&format!("    result_ptr <- llvm_alloc ({saw_type});\n"));
+        if args.is_empty() {
+            args.push("result_ptr".to_string());
+        } else {
+            args.insert(1, "result_ptr".to_string());
+        }
+    }
+
     out.push_str(&setup);
 
     // Execute
@@ -1385,13 +1446,22 @@ fn generate_havoc_spec(
     ));
 
     // Return value
-    let ret_saw = type_to_saw(&func.return_type);
-    if ret_saw != "// void" {
-        out.push_str("\n    // Return: unconstrained (solver chooses any value)\n");
+    if let Some(saw_type) = &sret_saw_type {
+        // sret: the function returns void; the result lives in *result_ptr.
+        out.push_str("\n    // sret return: solver chooses any final value for *result_ptr\n");
         out.push_str(&format!(
-            "    ret <- llvm_fresh_var \"ret\" ({ret_saw});\n"
+            "    ret <- llvm_fresh_var \"ret\" ({saw_type});\n"
         ));
-        out.push_str("    llvm_return (llvm_term ret);\n");
+        out.push_str("    llvm_points_to result_ptr (llvm_term ret);\n");
+    } else {
+        let ret_saw = type_to_saw(&func.return_type);
+        if ret_saw != "// void" {
+            out.push_str("\n    // Return: unconstrained (solver chooses any value)\n");
+            out.push_str(&format!(
+                "    ret <- llvm_fresh_var \"ret\" ({ret_saw});\n"
+            ));
+            out.push_str("    llvm_return (llvm_term ret);\n");
+        }
     }
 
     // Postconditions
@@ -2171,6 +2241,132 @@ fn generate_override_index_with_vtable(
     out
 }
 
+/// Description of a single `this`-class field for `emit_container_this`.
+enum FieldKind {
+    /// Pointer to an interface — allocate via `alloc_<iface>_this`.
+    Interface(String, String), // (field_name, interface_class_name)
+    /// Anything else — allocate a fresh 8-byte slot so reads at this
+    /// offset return a deterministic value rather than tripping
+    /// "outside of the allocation".
+    Other(String), // field_name
+}
+
+/// A container class is a non-interface class whose own fields include
+/// at least one pointer to an interface in `interface_classes`.
+/// Recognises both raw pointers (`IFoo*` → `Pointer(Struct/Opaque{name:"IFoo"})`)
+/// and the common smart-pointer wrappers (`std::unique_ptr<IFoo>` /
+/// `std::shared_ptr<IFoo>` whose `TypeInfo::Struct` carries a templated
+/// name like `"std::unique_ptr<IFoo>"`). Returns `None` when no field
+/// matches — caller should fall back to the standard `llvm_alloc` path.
+fn container_layout_for(
+    ty: &TypeInfo,
+    interface_classes: &std::collections::HashSet<String>,
+) -> Option<Vec<FieldKind>> {
+    let TypeInfo::Pointer(inner) = ty else {
+        return None;
+    };
+    let TypeInfo::Struct { name, fields, .. } = inner.as_ref() else {
+        return None;
+    };
+    if fields.is_empty() || interface_classes.contains(name) {
+        return None;
+    }
+    let kinds: Vec<FieldKind> = fields
+        .iter()
+        .map(|(fname, fty)| match field_interface_name(fty, interface_classes) {
+            Some(iface) => FieldKind::Interface(fname.clone(), iface),
+            None => FieldKind::Other(fname.clone()),
+        })
+        .collect();
+    if kinds
+        .iter()
+        .any(|k| matches!(k, FieldKind::Interface(..)))
+    {
+        Some(kinds)
+    } else {
+        None
+    }
+}
+
+/// Extract the interface class name from a field type. Recognises raw
+/// pointers and the standard smart-pointer wrappers whose templated
+/// type name embeds the pointee (`std::unique_ptr<IFoo>`,
+/// `std::shared_ptr<IFoo>`).
+fn field_interface_name(
+    ty: &TypeInfo,
+    interface_classes: &std::collections::HashSet<String>,
+) -> Option<String> {
+    // Raw pointer to interface.
+    if let TypeInfo::Pointer(inner) = ty {
+        let pointee = match inner.as_ref() {
+            TypeInfo::Struct { name, .. } | TypeInfo::Opaque { name, .. } => Some(name.as_str()),
+            _ => None,
+        };
+        if let Some(n) = pointee {
+            if interface_classes.contains(n) {
+                return Some(n.to_string());
+            }
+        }
+    }
+    // Smart-pointer wrapper.
+    let wrapped = match ty {
+        TypeInfo::Struct { name, .. } | TypeInfo::Opaque { name, .. } => Some(name.as_str()),
+        _ => None,
+    };
+    if let Some(name) = wrapped {
+        for wrap in ["std::unique_ptr<", "unique_ptr<", "std::shared_ptr<", "shared_ptr<"] {
+            if let Some(rest) = name.strip_prefix(wrap) {
+                if let Some(end) = rest.find('>') {
+                    let inner = rest[..end].trim().trim_end_matches('*').trim();
+                    let simple = inner.split_whitespace().next().unwrap_or(inner);
+                    if interface_classes.contains(simple) {
+                        return Some(simple.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Emit a SAW block that allocates `<param>_ptr` as a packed struct whose
+/// interface-typed slots point to objects wired to their stub vtables,
+/// matching the layout the bitcode reads through `getelementptr`. Slots
+/// for non-interface fields get fresh 8-byte allocations so any load at
+/// their offset returns a defined symbolic value.
+fn emit_container_this(out: &mut String, param_name: &str, fields: &[FieldKind]) {
+    out.push_str(&format!(
+        "    // {param_name}: container class with interface fields — wire each vptr.\n",
+    ));
+    let mut slot_values: Vec<String> = Vec::with_capacity(fields.len());
+    for (i, kind) in fields.iter().enumerate() {
+        let slot_name = format!("{param_name}_f{i}");
+        match kind {
+            FieldKind::Interface(fname, iface) => {
+                let safe_iface = sanitize_name(iface).to_lowercase();
+                out.push_str(&format!(
+                    "    {slot_name} <- alloc_{safe_iface}_this;  // {fname} : {iface}*\n",
+                ));
+                slot_values.push(slot_name);
+            }
+            FieldKind::Other(fname) => {
+                out.push_str(&format!(
+                    "    {slot_name} <- llvm_alloc (llvm_int 64);  // {fname} (opaque slot)\n",
+                ));
+                slot_values.push(slot_name);
+            }
+        }
+    }
+    let n = fields.len();
+    out.push_str(&format!(
+        "    {param_name}_ptr <- llvm_alloc (llvm_array {n} (llvm_int 64));\n",
+    ));
+    out.push_str(&format!(
+        "    llvm_points_to {param_name}_ptr (llvm_packed_struct_value [{}]);\n",
+        slot_values.join(", "),
+    ));
+}
+
 /// Emit a complete, runnable SAW verification script that checks a C++ function
 /// against a Cryptol spec.
 ///
@@ -2417,6 +2613,25 @@ pub fn emit_verification_script(
                 "    {ptr_name} <- alloc_{safe_iface}_this;\n"
             ));
             execute_args.push(ptr_name);
+            continue;
+        }
+
+        // Detect container classes: a pointer to a class whose fields
+        // include interface pointers (the common shape for `this` on a
+        // method like `MetadataSecurityProtocol::AttestKeyOwnership`
+        // that internally invokes virtual methods through stored
+        // interface fields). A flat `llvm_alloc (llvm_int 64)` is not
+        // enough — the bitcode reads each field via `getelementptr`,
+        // which trips an "outside of the allocation" UB at the first
+        // non-zero offset. Emit a packed-struct `this` whose interface
+        // slots point to objects already wired to their stub vtables.
+        if let Some(container) = target_fn
+            .params
+            .get(i)
+            .and_then(|p| container_layout_for(&p.ty, &interface_classes))
+        {
+            emit_container_this(&mut out, &param.name, &container);
+            execute_args.push(format!("{}_ptr", param.name));
             continue;
         }
 
@@ -3051,5 +3266,124 @@ mod tests {
         assert!(!stub_line.contains("sret"), "got: {stub_line}");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Regression: even when the AST has no `size_bytes` for the return
+    /// type (e.g. `std::tuple<KeyStoreOperationResult, LatchableKey>`
+    /// comes through as `Opaque{size_bytes: 0}` because the bitcode
+    /// rewriter hasn't merged in a size yet), the stub must still lower
+    /// the aggregate return via sret. Templated/qualified C++ names are
+    /// always class types under MSVC, so falling back to a scalar `i32`
+    /// return would mismatch the real ABI signature.
+    #[test]
+    fn test_vtable_stub_uses_sret_for_unsized_tuple_return() {
+        let tuple_ret = TypeInfo::Opaque {
+            name: "std::tuple<KeyStoreOperationResult,LatchableKey>".into(),
+            size_bytes: 0,
+        };
+        let methods = vec![make_iface_method("IKeyStore", "Read", tuple_ret, 100)];
+        let dir = std::env::temp_dir().join("saw_spec_gen_vtable_sret_unsized");
+        let _ = fs::remove_dir_all(&dir);
+        emit_interface_stubs(
+            &methods,
+            &[],
+            &[],
+            &std::collections::HashSet::new(),
+            &dir,
+            None,
+        )
+        .unwrap();
+        let ll = fs::read_to_string(dir.join("vtable_stubs.ll")).unwrap();
+        let stub_line = ll
+            .lines()
+            .find(|l| l.contains("@ikeystore_read_stub"))
+            .expect("Read stub missing");
+        assert!(
+            stub_line.contains("define void"),
+            "unsized aggregate return must still lower to void, got: {stub_line}",
+        );
+        assert!(
+            stub_line.contains("sret(["),
+            "must use a scratch-buffer sret type, got: {stub_line}",
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Regression: the MSVC x64 ABI orders parameters as
+    /// `this, sret_ptr, args...` for instance methods. Putting the sret
+    /// pointer at position 0 (before `this`) would shift the `this`
+    /// argument and silently mis-dispatch when the stub is called via
+    /// a vtable slot.
+    #[test]
+    fn test_vtable_stub_sret_ordered_after_this() {
+        let large_struct = TypeInfo::Struct {
+            name: "std::tuple<KeyStoreOperationResult,LatchableKey>".into(),
+            size_bytes: Some(48),
+            fields: vec![],
+        };
+        let methods = vec![make_iface_method("IKeyStore", "Read", large_struct, 100)];
+        let dir = std::env::temp_dir().join("saw_spec_gen_vtable_sret_order");
+        let _ = fs::remove_dir_all(&dir);
+        emit_interface_stubs(
+            &methods,
+            &[],
+            &[],
+            &std::collections::HashSet::new(),
+            &dir,
+            None,
+        )
+        .unwrap();
+        let ll = fs::read_to_string(dir.join("vtable_stubs.ll")).unwrap();
+        let stub_line = ll
+            .lines()
+            .find(|l| l.contains("@ikeystore_read_stub"))
+            .expect("Read stub missing");
+        let this_pos = stub_line.find("%arg0").expect("this param missing");
+        let sret_pos = stub_line.find("%retptr").expect("sret param missing");
+        assert!(
+            this_pos < sret_pos,
+            "`this` (%arg0) must appear before sret (%retptr): {stub_line}",
+        );
+    }
+
+    /// Regression: a havoc spec for an sret-returning method must
+    /// allocate an output buffer, splice it into the argument list at
+    /// position 1 (after `this`), and constrain `*result_ptr` via
+    /// `llvm_points_to` rather than `llvm_return`. `llvm_return` on a
+    /// void-returning stub is a type error in SAW.
+    #[test]
+    fn test_havoc_spec_uses_points_to_for_sret_return() {
+        let tuple_ret = TypeInfo::Opaque {
+            name: "std::tuple<KeyStoreOperationResult,LatchableKey>".into(),
+            size_bytes: 0,
+        };
+        let method = make_iface_method("IKeyStore", "Read", tuple_ret, 100);
+        let spec = generate_havoc_spec(&method, &[], None, None);
+        assert!(
+            spec.contains("result_ptr <- llvm_alloc"),
+            "sret havoc spec must allocate result_ptr; spec was:\n{spec}",
+        );
+        assert!(
+            spec.contains("llvm_points_to result_ptr"),
+            "sret havoc spec must constrain *result_ptr via llvm_points_to; spec was:\n{spec}",
+        );
+        assert!(
+            !spec.contains("llvm_return"),
+            "sret havoc spec must not emit llvm_return; spec was:\n{spec}",
+        );
+        // result_ptr must follow this_ptr in the execute_func arg list.
+        let exec_line = spec
+            .lines()
+            .find(|l| l.contains("llvm_execute_func"))
+            .expect("execute_func missing");
+        let this_pos = exec_line.find("this_ptr").expect("this_ptr missing in args");
+        let result_pos = exec_line
+            .find("result_ptr")
+            .expect("result_ptr missing in args");
+        assert!(
+            this_pos < result_pos,
+            "result_ptr must follow this_ptr in execute_func args: {exec_line}",
+        );
     }
 }

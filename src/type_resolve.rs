@@ -107,6 +107,75 @@ pub fn resolve_saw_type(
     None
 }
 
+/// Resolve all `llvm_alias "X"` parameter & return types on `spec`
+/// against `ir_sizes`, mutating `spec` in place.  Logs each successful
+/// resolution and emits a warning for any types left unresolved.
+///
+/// `ir_was_supplied` controls the warning text: when the caller did not
+/// pass `--llvm-ir`, the warning suggests doing so; otherwise it points
+/// the user at AST coverage / IR coverage as the likely culprit.
+pub fn resolve_spec_aliases(
+    spec: &mut crate::constraints::SpecConstraint,
+    ir_sizes: &HashMap<String, usize>,
+    ir_was_supplied: bool,
+) {
+    let mut unresolved: Vec<String> = Vec::new();
+    for p in &mut spec.params {
+        if let Some(replacement) =
+            resolve_saw_type(&p.saw_type, ir_sizes, p.dereferenceable_size)
+        {
+            eprintln!(
+                "  resolved param '{}' type {} → {}",
+                p.name, p.saw_type, replacement
+            );
+            p.saw_type = replacement;
+        } else if needs_resolution(&p.saw_type) {
+            unresolved.push(format!("param '{}' type {}", p.name, p.saw_type));
+        }
+    }
+    if let Some(replacement) =
+        resolve_saw_type(&spec.return_constraint.saw_type, ir_sizes, None)
+    {
+        eprintln!(
+            "  resolved return type {} → {}",
+            spec.return_constraint.saw_type, replacement
+        );
+        spec.return_constraint.saw_type = replacement;
+    } else if needs_resolution(&spec.return_constraint.saw_type) {
+        unresolved.push(format!(
+            "return type {}",
+            spec.return_constraint.saw_type
+        ));
+    }
+    if unresolved.is_empty() {
+        return;
+    }
+    if ir_was_supplied {
+        eprintln!(
+            "warning: {} unresolved opaque struct type(s) — generated spec may fail to load:",
+            unresolved.len()
+        );
+        for u in &unresolved {
+            eprintln!("  - {u}");
+        }
+        eprintln!(
+            "  hint: ensure the .ll file contains a matching `%struct.X = type {{...}}`,"
+        );
+        eprintln!(
+            "        or pass an additional --ast file with the struct's full definition."
+        );
+    } else {
+        eprintln!(
+            "warning: {} opaque struct type(s) in target spec; pass --llvm-ir <path>",
+            unresolved.len()
+        );
+        eprintln!("        to resolve them against the bitcode's struct table:");
+        for u in &unresolved {
+            eprintln!("  - {u}");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

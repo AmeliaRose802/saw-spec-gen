@@ -9,7 +9,7 @@
 
 use crate::alias_fallbacks::{apply_cli_overrides, dump_fallback_diagnostics};
 use crate::spec_rewrite::{apply_alias_rewrites, collect_type_sizes};
-use crate::type_resolve::{needs_resolution, resolve_saw_type};
+use crate::type_resolve::resolve_saw_type;
 use crate::{alias_fallbacks_ir, clang_ast, constraints, llvm_ir, saw_emit};
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
@@ -77,62 +77,11 @@ pub fn run(
     // LLVM IR struct table.  Without this, MSVC-clang output (which fully
     // qualifies struct names like `%"struct.Foo::Bar::Baz"`) fails to load
     // because SAW can't find a `struct.Baz` symbol.
-    let mut unresolved: Vec<String> = Vec::new();
-    for p in &mut target_spec.params {
-        if let Some(replacement) =
-            resolve_saw_type(&p.saw_type, &ir_struct_sizes, p.dereferenceable_size)
-        {
-            eprintln!(
-                "  resolved param '{}' type {} → {}",
-                p.name, p.saw_type, replacement
-            );
-            p.saw_type = replacement;
-        } else if needs_resolution(&p.saw_type) {
-            unresolved.push(format!("param '{}' type {}", p.name, p.saw_type));
-        }
-    }
-    if let Some(replacement) = resolve_saw_type(
-        &target_spec.return_constraint.saw_type,
+    crate::type_resolve::resolve_spec_aliases(
+        &mut target_spec,
         &ir_struct_sizes,
-        None,
-    ) {
-        eprintln!(
-            "  resolved return type {} → {}",
-            target_spec.return_constraint.saw_type, replacement
-        );
-        target_spec.return_constraint.saw_type = replacement;
-    } else if needs_resolution(&target_spec.return_constraint.saw_type) {
-        unresolved.push(format!(
-            "return type {}",
-            target_spec.return_constraint.saw_type
-        ));
-    }
-    if !unresolved.is_empty() {
-        if llvm_ir_path.is_some() {
-            eprintln!(
-                "warning: {} unresolved opaque struct type(s) — generated spec may fail to load:",
-                unresolved.len()
-            );
-            for u in &unresolved {
-                eprintln!("  - {u}");
-            }
-            eprintln!(
-                "  hint: ensure the .ll file contains a matching `%struct.X = type {{...}}`,"
-            );
-            eprintln!(
-                "        or pass an additional --ast file with the struct's full definition."
-            );
-        } else {
-            eprintln!(
-                "warning: {} opaque struct type(s) in target spec; pass --llvm-ir <path>",
-                unresolved.len()
-            );
-            eprintln!("        to resolve them against the bitcode's struct table:");
-            for u in &unresolved {
-                eprintln!("  - {u}");
-            }
-        }
-    }
+        llvm_ir_path.is_some(),
+    );
 
     let all_globals = clang_ast::extract_all_globals(&parsed_ast)?;
     let all_specs = constraints::derive_constraints(&all_functions)?;
@@ -301,6 +250,13 @@ pub fn run(
     if has_interfaces {
         let class_names: Vec<String> = interface_classes.iter().cloned().collect();
         ctors = clang_ast::extract_constructors(&parsed_ast, &class_names)?;
+        // Drop ctors whose mangled symbol is absent from the LLVM IR —
+        // pure-virtual interface ctors are typically never emitted, and
+        // binding `llvm_unsafe_assume_spec` against a missing symbol
+        // makes SAW fail with "Could not find definition for function".
+        if !ir_funcs.is_empty() {
+            clang_ast::filter_ctors_by_ir_symbols(&mut ctors, &ir_funcs);
+        }
         // Trust the AST. `classes_with_virtual_dtor` already propagates
         // virtual-dtor-ness through inheritance, so a derived class that
         // doesn't redeclare `~T()` still gets the slot when its base has

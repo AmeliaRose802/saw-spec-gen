@@ -291,6 +291,25 @@ mod tests {
     }
 
     #[test]
+    fn collect_sizes_picks_up_enum_in_return_type() {
+        // Regression test for: enums that only appear as return types
+        // (e.g. `LatchResult IKeyStore::Latch(...)` on a pure-virtual
+        // method) must still be recorded so the rewriter can replace
+        // `llvm_alias "LatchResult"` with `llvm_int 32`. If
+        // `collect_type_sizes` walked only parameters, the alias would
+        // stay unresolved and the override spec would fail to load.
+        let mut f = empty_func();
+        f.return_type = TypeInfo::Enum {
+            name: "LatchResult".into(),
+            variants: vec!["Ok".into(), "AlreadyLatched".into()],
+            discriminant_bits: 32,
+        };
+        let fb = collect_type_sizes(&[f]);
+        assert_eq!(fb.enum_bits.get("LatchResult").copied(), Some(32));
+        assert!(fb.bytes.get("LatchResult").is_none());
+    }
+
+    #[test]
     fn collect_sizes_picks_up_opaque_with_known_stl_name() {
         let mut f = empty_func();
         f.params.push(param(

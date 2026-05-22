@@ -462,6 +462,59 @@ pub fn extract_constructors(ast: &Value, class_names: &[String]) -> Result<Vec<C
     Ok(ctors)
 }
 
+/// Drop entries from `ctors` whose `mangled_name` is not present as a
+/// function symbol in `ir_funcs`.  Emits a `note:` per dropped entry.
+///
+/// Pure-virtual interface classes (e.g. `IKeyStore`) have implicit
+/// default constructors that the compiler either inlines at every
+/// callsite or never emits at all when no standalone interface object
+/// is ever constructed.  Binding `llvm_unsafe_assume_spec m "??0IKeyStore@..."`
+/// against a symbol that doesn't exist makes SAW fail with
+/// `Could not find definition for function named ...`.
+///
+/// Constructor overrides only matter when the target function actually
+/// allocates an object internally (e.g. `new ConcreteImpl()`); they are
+/// irrelevant when the object arrives via a pre-constructed `this`
+/// pointer.
+pub fn filter_ctors_by_ir_symbols(
+    ctors: &mut Vec<ClassConstructor>,
+    ir_funcs: &[crate::constraints::FunctionInfo],
+) {
+    // The IR-text parser keeps the surrounding quotes on MSVC-mangled
+    // names (e.g. `@"??0Foo@@QEAA@XZ"` → name `"??0Foo@@QEAA@XZ"` with
+    // literal `"` characters). Strip them so symbol comparison matches
+    // the unquoted form the clang AST emits.
+    let ir_symbols: std::collections::HashSet<&str> = ir_funcs
+        .iter()
+        .map(|f| f.name.as_str().trim_matches('"'))
+        .collect();
+    let before = ctors.len();
+    let mut dropped: Vec<String> = Vec::new();
+    ctors.retain(|c| {
+        if ir_symbols.contains(c.mangled_name.as_str()) {
+            true
+        } else {
+            dropped.push(format!(
+                "{} (symbol {} not in bitcode)",
+                c.class_name, c.mangled_name,
+            ));
+            false
+        }
+    });
+    if !dropped.is_empty() {
+        eprintln!(
+            "note: dropping {}/{} constructor override(s) whose mangled symbol \
+             is absent from the bitcode (likely pure-virtual interface ctors that \
+             the compiler never emitted):",
+            dropped.len(),
+            before,
+        );
+        for d in &dropped {
+            eprintln!("  - {d}");
+        }
+    }
+}
+
 /// A reference to an interface type that is missing from the AST.
 #[derive(Debug, Clone)]
 pub struct MissingInterfaceRef {
@@ -2138,6 +2191,54 @@ fn cpp_type_size_align(ty: &TypeInfo) -> Option<(usize, usize)> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn empty_ir_func(name: &str) -> crate::constraints::FunctionInfo {
+        crate::constraints::FunctionInfo {
+            name: name.to_string(),
+            mangled_name: None,
+            params: vec![],
+            return_type: TypeInfo::Void,
+            can_throw: false,
+            is_virtual: false,
+            has_body: true,
+            is_system: false,
+            annotations: vec![],
+            referenced_globals: vec![],
+            called_functions: vec![],
+        }
+    }
+
+    fn ctor(class: &str, mangled: &str) -> ClassConstructor {
+        ClassConstructor {
+            class_name: class.into(),
+            mangled_name: mangled.into(),
+            layout_type_name: format!("class.{class}"),
+            layout_fields: vec![],
+        }
+    }
+
+    #[test]
+    fn filter_ctors_drops_when_symbol_missing() {
+        let mut ctors = vec![
+            ctor("Real", "??0Real@@QEAA@XZ"),
+            ctor("Missing", "??0Missing@@QEAA@XZ"),
+        ];
+        let ir = vec![empty_ir_func("\"??0Real@@QEAA@XZ\"")];
+        filter_ctors_by_ir_symbols(&mut ctors, &ir);
+        assert_eq!(ctors.len(), 1);
+        assert_eq!(ctors[0].class_name, "Real");
+    }
+
+    #[test]
+    fn filter_ctors_strips_msvc_ir_quotes() {
+        // The IR parser leaves the surrounding `"` on MSVC-mangled
+        // names. Filtering must compare against the unquoted form so we
+        // don't drop ctors whose symbols actually do exist in bitcode.
+        let mut ctors = vec![ctor("OkLog", "??0OkLog@@QEAA@XZ")];
+        let ir = vec![empty_ir_func("\"??0OkLog@@QEAA@XZ\"")];
+        filter_ctors_by_ir_symbols(&mut ctors, &ir);
+        assert_eq!(ctors.len(), 1, "must not drop a ctor whose symbol exists with quotes");
+    }
 
     #[test]
     fn test_parse_simple_function() {
