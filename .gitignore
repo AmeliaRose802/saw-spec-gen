@@ -25,6 +25,9 @@ demo/token_service_out.mir
 demo/token_service_out.linked-mir.json
 demo/token_service.mir.json
 
+# SAW demo runner failure logs
+tests/saw_demos/last-fail-*.log
+
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db
