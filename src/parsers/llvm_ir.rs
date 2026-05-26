@@ -17,6 +17,7 @@
 //! - [`load`] — file I/O with OOM guard.
 
 mod attrs;
+pub mod callgraph;
 mod function_sig;
 mod load;
 mod params;

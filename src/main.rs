@@ -118,6 +118,21 @@ enum Commands {
         /// Also generate Cryptol type constraint files
         #[arg(long)]
         cryptol: bool,
+
+        /// Emit override scaffolding for external calls made by filtered functions.
+        ///
+        /// Walks the callgraph of each matched function, identifies calls to
+        /// `declare`d (external) symbols, and emits `llvm_unsafe_assume_spec`
+        /// scaffold stubs with the correct mangled names and parameter types.
+        /// Use this to bootstrap compositional verification of Rust async
+        /// functions that call into stdlib/external crates.
+        #[arg(long)]
+        emit_overrides: bool,
+
+        /// Target function for callgraph analysis (used with --emit-overrides).
+        /// Emits overrides only for external calls reachable from this function.
+        #[arg(long)]
+        target: Option<String>,
     },
 
     /// Generate a complete SAW verification script that checks a C++ function
@@ -416,6 +431,8 @@ fn main() -> Result<()> {
             output,
             filter,
             cryptol,
+            emit_overrides,
+            target,
         } => {
             eprintln!("Reading LLVM IR from: {}", input.display());
             let ir = llvm_ir::parse_llvm_ir(&input)?;
@@ -429,6 +446,77 @@ fn main() -> Result<()> {
             if cryptol {
                 cryptol_emit::emit_cryptol_constraints(&functions, &output)?;
                 eprintln!("Generated Cryptol constraints in {}", output.display());
+            }
+
+            if emit_overrides {
+                use crate::parsers::llvm_ir::callgraph;
+                let cg = callgraph::build_callgraph(&ir);
+                let target_name = target.as_deref().or(filter.as_deref())
+                    .unwrap_or("");
+                let external = callgraph::external_callees(&cg, target_name);
+
+                if external.is_empty() {
+                    eprintln!("No external calls found for target '{}'", target_name);
+                    if !target_name.is_empty() {
+                        // Show available functions with callees
+                        let with_calls: Vec<_> = cg.iter()
+                            .filter(|(_, v)| !v.is_empty())
+                            .map(|(k, v)| format!("  {} ({} calls)", k.chars().take(80).collect::<String>(), v.len()))
+                            .collect();
+                        if !with_calls.is_empty() {
+                            eprintln!("Functions with calls (showing first 10):");
+                            for f in with_calls.iter().take(10) {
+                                eprintln!("{}", f);
+                            }
+                        }
+                    }
+                } else {
+                    // Generate scaffold override specs for external calls
+                    let overrides_dir = output.join("overrides");
+                    std::fs::create_dir_all(&overrides_dir)?;
+
+                    let mut all_overrides = String::new();
+                    all_overrides.push_str("// Auto-generated override scaffolding for external calls\n");
+                    all_overrides.push_str(&format!("// Target: {}\n", target_name));
+                    all_overrides.push_str(&format!("// {} external calls identified\n\n", external.len()));
+
+                    for (i, callee) in external.iter().enumerate() {
+                        let spec_name = format!("override_{}", i);
+                        let spec = format!(
+                            "// Override for: {name}\n\
+                             // Mangled: {mangled}\n\
+                             // TODO: Tighten this contract — currently returns any value.\n\
+                             //       For Option<T>, constrain discriminant to 0 or 1.\n\
+                             //       For Result<T,E>, constrain discriminant to valid range.\n\
+                             let {spec_name}_spec : LLVMSetup () = do {{\n\
+                             \n\
+                             // TODO: Add parameter allocations matching the LLVM signature.\n\
+                             //       Check the function signature in the .ll file:\n\
+                             //         grep 'declare.*{short}' module.ll\n\
+                             \n\
+                             llvm_execute_func [];\n\
+                             \n\
+                             // TODO: Specify return value.\n\
+                             //   ret <- llvm_fresh_var \"ret\" (llvm_int 32);\n\
+                             //   llvm_return (llvm_term ret);\n\
+                             }};\n\n\
+                             // ov_{spec_name} <- llvm_unsafe_assume_spec m \"{mangled}\" {spec_name}_spec;\n\n",
+                            name = callee.name,
+                            mangled = callee.mangled_name,
+                            spec_name = spec_name,
+                            short = callee.mangled_name.chars().take(40).collect::<String>(),
+                        );
+                        all_overrides.push_str(&spec);
+                    }
+
+                    let overrides_path = overrides_dir.join("external_overrides.saw");
+                    std::fs::write(&overrides_path, &all_overrides)?;
+                    eprintln!(
+                        "Generated {} external override scaffolds in {}",
+                        external.len(),
+                        overrides_path.display()
+                    );
+                }
             }
         }
         Commands::GenVerify {
