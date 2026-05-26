@@ -91,6 +91,23 @@ if (-not (Test-Path $bcFile)) { Write-Error "rustc failed"; exit 1 }
 & $llvmDis $bcFile -o $llFile | Out-Null
 Write-Host "  → $bcFile" -ForegroundColor Green
 
+# ── Step 1.5: poison → undef rewrite ────────────────────────────
+# rustc emits `insertvalue { i32 0, i32 poison }, i32 %x, 1` style
+# aggregates for `Poll<u32>` returns. Crucible's llvmExtensionEval
+# panics with "Attempting to evaluate poison value" when it
+# materialises the partial-aggregate constant. `undef` is
+# semantically weaker (commutes cleanly with insertvalue) and
+# Crucible accepts it. The rewrite is a no-op when the IR has no
+# `poison` tokens, so it's safe to run unconditionally.
+$llvmAs = Join-Path $llvmBin "llvm-as.exe"
+& $specGen patch-llvm-ir `
+    --input  $llFile `
+    --output $llFile `
+    --poison-to-undef 2>&1 | Write-Host
+if ($LASTEXITCODE -ne 0) { Write-Error "patch-llvm-ir failed"; exit 1 }
+& $llvmAs $llFile -o $bcFile 2>&1
+if ($LASTEXITCODE -ne 0) { Write-Error "llvm-as (post-patch) failed"; exit 1 }
+
 # Show the async-relevant symbols rustc emitted (the proof of the
 # coroutine lowering: there's a separate resume fn and ReadyU32::poll).
 Write-Host ""

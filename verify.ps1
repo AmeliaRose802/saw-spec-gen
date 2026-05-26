@@ -142,6 +142,34 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "  → $llFile" -ForegroundColor Green
 }
 
+# ── Step 1.5: Patch IR for SAW/Crucible quirks ────────────────────────────────
+# Two textual passes run on the .ll, then we re-assemble the .bc:
+#   * --strip-msvc-eh : replace MSVC C++ exception-handling metadata
+#       globals (`_TI*`, `_CTA*`, `_CT??_R0*` in `section ".xdata"`)
+#       with `external constant` declarations. Their initialisers use
+#       `ptrtoint(@__ImageBase)` differences, which Crucible rejects
+#       at module-load time ("Illegal operation applied to pointer
+#       argument"). The metadata is only ever read by the OS unwinder
+#       so dropping the initialiser is sound for SAW's purposes.
+#   * --poison-to-undef : replace `poison` literals with `undef`.
+#       Crucible's llvmExtensionEval panics when it materialises a
+#       partial-aggregate constant containing `poison` (which clang
+#       emits in `insertvalue` chains); `undef` is handled cleanly.
+# Both passes are no-ops when the IR doesn't trigger them, so it's
+# safe to run unconditionally for every C++ verify job.
+if ($llFile) {
+    $patchedLl = $llFile  # in-place rewrite
+    & $specGen patch-llvm-ir `
+        --input $llFile `
+        --output $patchedLl `
+        --strip-msvc-eh `
+        --poison-to-undef 2>&1 | Write-Host
+    if ($LASTEXITCODE -ne 0) { Write-Error "patch-llvm-ir failed"; exit 1 }
+    # Re-assemble the .bc so SAW sees the patched module.
+    & $llvmAs $patchedLl -o $bcFile 2>&1
+    if ($LASTEXITCODE -ne 0) { Write-Error "llvm-as (post-patch) failed"; exit 1 }
+}
+
 # ── Step 2: Dump clang AST → JSON ─────────────────────────────────────────────
 Write-Host ""
 Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
@@ -349,9 +377,17 @@ print (str_concat "CRYPTOL_RESULT=" (show r));
 $origSrc
 
 #include <cstdio>
+#include <cstring>
 int main() {
     auto result = ${Function}($cppArgs);
-    printf("CPP_RESULT=%llu\n", (unsigned long long)result);
+    // memcpy zero-fills any padding so signed return types don't get
+    // sign-extended into the upper bits of the printed u64. Matches the
+    // bit pattern SAW sees, so the poison-detection heuristic below
+    // can compare it apples-to-apples against the Cryptol spec value.
+    unsigned long long _bits = 0;
+    size_t _n = sizeof(result) < sizeof(_bits) ? sizeof(result) : sizeof(_bits);
+    std::memcpy(&_bits, &result, _n);
+    printf("CPP_RESULT=%llu\n", _bits);
     return 0;
 }
 "@ | Set-Content $testCpp -Encoding utf8
@@ -373,6 +409,30 @@ int main() {
             if ($actualVal) {
                 Write-Host "    C++     $Function($displayArgs)  = $actualVal" -ForegroundColor Red
             }
+            Write-Host ""
+        }
+
+        # ── Poison / UB heuristic ─────────────────────────────────
+        # If the Cryptol spec and a concrete recompile-and-run of the C++
+        # produce the *same* value at the counterexample inputs, the proof
+        # almost certainly failed not because of a logic disagreement but
+        # because the LLVM IR carries an `nsw` / `nuw` / `inbounds` flag,
+        # or an `sdiv` / `udiv` whose UB-on-overflow case is reachable,
+        # which turns the operation into *poison* at those inputs. SAW
+        # compares LLVM semantics (poison ≠ any concrete spec value), so
+        # the obligation fails even though both sides agree on the value.
+        if ($expectedVal -and $actualVal -and $expectedVal -eq $actualVal) {
+            Write-Host "  NOTE: Expected and Actual agree at the counterexample." -ForegroundColor Yellow
+            Write-Host "        This is the signature of an LLVM UB / poison failure," -ForegroundColor Yellow
+            Write-Host "        not a logic disagreement. Common causes in C++:" -ForegroundColor Yellow
+            Write-Host "          - signed arithmetic with nsw       (signed overflow -> poison)" -ForegroundColor DarkYellow
+            Write-Host "          - unsigned arithmetic with nuw     (unsigned overflow -> poison)" -ForegroundColor DarkYellow
+            Write-Host "          - sdiv / udiv on a path where the divisor or overflow" -ForegroundColor DarkYellow
+            Write-Host "            corner is reachable (sdiv INT_MIN,-1 / udiv x,0 -> poison)" -ForegroundColor DarkYellow
+            Write-Host "          - getelementptr with inbounds      (out-of-bounds -> poison)" -ForegroundColor DarkYellow
+            Write-Host "        Inspect the emitted .ll for the relevant flag, and either" -ForegroundColor DarkYellow
+            Write-Host "        recompile with -fwrapv / cast through unsigned, or fix" -ForegroundColor DarkYellow
+            Write-Host "        the underlying bug the flag is warning about." -ForegroundColor DarkYellow
             Write-Host ""
         }
     }

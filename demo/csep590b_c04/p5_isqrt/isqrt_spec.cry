@@ -1,0 +1,13 @@
+// Cryptol spec: integer square root (floor(sqrt(n))) for n in [1, 255].
+//
+// Returns 0 for inputs outside the supported range (a sentinel used
+// by the C++/Rust ports so SAW can keep the loop bound finite). For
+// n in [1, 255], floor(sqrt(n)) lies in [1, 15], so it is the
+// number of positive integers j with j*j <= n.
+//
+// Reference: Problem 5 of CSEP590B 26sp Coding Assignment 4.
+
+isqrt_spec : [32] -> [32]
+isqrt_spec n =
+  if (n < 1) \/ (n > 255) then 0
+  else sum [ if j * j <= n then 1 else 0 | j <- [1 .. 15] : [_][32] ]

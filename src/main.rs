@@ -16,7 +16,9 @@ mod transform;
 // a layout-only change.
 pub(crate) use emit::{cryptol_emit, rust_trait_emit, saw_emit};
 pub(crate) use parsers::{clang_ast, llvm_ir, mir_json};
-pub(crate) use transform::{alias_fallbacks, alias_fallbacks_ir, spec_rewrite, type_resolve};
+pub(crate) use transform::{
+    alias_fallbacks, alias_fallbacks_ir, patch_llvm_ir, spec_rewrite, type_resolve,
+};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -239,6 +241,44 @@ enum Commands {
         #[arg(long, num_args = 1.., action = clap::ArgAction::Append, required = true)]
         keep: Vec<PathBuf>,
     },
+
+    /// Patch an LLVM IR `.ll` file so SAW 1.5 / Crucible can load it.
+    ///
+    /// Two independent passes, each opt-in:
+    ///
+    /// * `--strip-msvc-eh` -- replace MSVC C++ exception-handling
+    ///   metadata globals (`_TI*`, `_CTA*`, `_CT??_R0*` in
+    ///   `section ".xdata"`) with `external constant` declarations.
+    ///   Their initializers use `ptrtoint(@__ImageBase)` differences
+    ///   which Crucible rejects at module-load time.
+    ///
+    /// * `--poison-to-undef` -- replace LLVM `poison` literals with
+    ///   `undef`. Recent rustc/clang emit `insertvalue
+    ///   { ..., T poison }, T %x, N` patterns; Crucible panics when
+    ///   the partial aggregate is materialised.
+    ///
+    /// Pipeline: `clang -S -emit-llvm` -> `patch-llvm-ir` ->
+    /// `llvm-as` -> SAW.
+    ///
+    /// Usage: saw-spec-gen patch-llvm-ir --input in.ll --output out.ll \
+    ///          --strip-msvc-eh --poison-to-undef
+    PatchLlvmIr {
+        /// Input `.ll` file.
+        #[arg(long)]
+        input: PathBuf,
+
+        /// Output `.ll` file. May be the same path as `--input`.
+        #[arg(long)]
+        output: PathBuf,
+
+        /// Strip MSVC C++ EH metadata globals.
+        #[arg(long)]
+        strip_msvc_eh: bool,
+
+        /// Replace `poison` literals with `undef`.
+        #[arg(long)]
+        poison_to_undef: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -441,6 +481,41 @@ fn main() -> Result<()> {
                 "Filter result: kept {}, dropped {}, no-loc {}",
                 stats.kept, stats.dropped, stats.no_loc,
             );
+        }
+        Commands::PatchLlvmIr {
+            input,
+            output,
+            strip_msvc_eh,
+            poison_to_undef,
+        } => {
+            if !strip_msvc_eh && !poison_to_undef {
+                anyhow::bail!(
+                    "patch-llvm-ir: pass at least one of \
+                     --strip-msvc-eh / --poison-to-undef",
+                );
+            }
+            eprintln!(
+                "Patching LLVM IR: {} -> {}",
+                input.display(),
+                output.display(),
+            );
+            let opts = patch_llvm_ir::PatchOptions {
+                strip_msvc_eh,
+                poison_to_undef,
+            };
+            let stats = patch_llvm_ir::patch_llvm_ir_file(&input, &output, opts)?;
+            if strip_msvc_eh {
+                eprintln!(
+                    "  stripped {} MSVC EH metadata global(s)",
+                    stats.eh_globals_stripped,
+                );
+            }
+            if poison_to_undef {
+                eprintln!(
+                    "  replaced {} poison literal(s) with undef",
+                    stats.poison_replaced,
+                );
+            }
         }
     }
 

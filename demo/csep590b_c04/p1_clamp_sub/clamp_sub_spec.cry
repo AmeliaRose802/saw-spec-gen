@@ -1,0 +1,25 @@
+// Cryptol spec: signed-saturating subtraction on 32-bit ints.
+//
+// Given two i32 values a, b: if (a - b) is representable as a signed
+// 32-bit int return it; otherwise saturate to INT32_MAX (positive
+// overflow) or INT32_MIN (negative overflow).
+//
+// The spec models this purely at the bit level on [32]:
+//   r = a - b           -- modular 32-bit subtraction
+//   overflow iff signs of (a, b) differ AND sign of r differs from a
+// This avoids sign-extension to [64] and matches the classical
+// two's-complement overflow rule used in hardware ALUs.
+//
+// Reference: Problem 1 of CSEP590B 26sp Coding Assignment 4.
+
+clamp_sub_spec : [32] -> [32] -> [32]
+clamp_sub_spec a b =
+  if overflow
+    then (if a_sign == False then 0x7fffffff else 0x80000000)
+    else r
+  where
+    r        = a - b
+    a_sign   = a @ 0    // MSB = sign bit
+    b_sign   = b @ 0
+    r_sign   = r @ 0
+    overflow = (a_sign != b_sign) /\ (r_sign != a_sign)

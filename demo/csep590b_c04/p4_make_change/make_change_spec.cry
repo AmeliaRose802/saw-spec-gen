@@ -1,0 +1,29 @@
+// Cryptol spec: greedy US-coin change for amounts in [0, 99] cents.
+//
+// Returns 0 (out-of-contract sentinel) for amount > 99. Otherwise
+// returns a packed result with one byte per denomination:
+//
+//   bits 31..24 : quarters
+//   bits 23..16 : dimes
+//   bits 15.. 8 : nickels
+//   bits  7.. 0 : pennies
+//
+// The greedy decomposition is closed-form via div/mod since the US
+// denominations 25/10/5/1 admit the greedy strategy as optimal.
+//
+// The reference Python program in Problem 4 of CSEP590B 26sp / c04
+// uses repeated subtraction loops with `invariant(...)` holes —
+// closed-form division here makes the spec total without any
+// loop-invariant reasoning.
+
+make_change_spec : [32] -> [32]
+make_change_spec amount =
+  if amount > 99 then 0
+  else (q << 24) || (d << 16) || (n << 8) || p
+  where
+    q  = amount / 25
+    r1 = amount % 25
+    d  = r1 / 10
+    r2 = r1 % 10
+    n  = r2 / 5
+    p  = r2 % 5

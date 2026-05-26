@@ -1,0 +1,22 @@
+// Cryptol spec: count "groups" (maximal runs of two or more consecutive
+// 1-bits) in a 32-bit unsigned integer x.
+//
+// The spec counts the number of indices i in [0, 30] such that
+//   * bit(i)   == 1
+//   * bit(i+1) == 1   -- the run is at least length 2
+//   * either i == 0 or bit(i-1) == 0   -- i begins the run
+// i.e., it counts the "left edges" of all runs of length >= 2.
+//
+// The Python pseudocode in the homework treats the input as a
+// signed nonneg int, but at the bit level (and in our [32]
+// formulation) it is exactly an unsigned 32-bit value.
+//
+// Reference: Problem 3 of CSEP590B 26sp Coding Assignment 4.
+
+count_groups_spec : [32] -> [32]
+count_groups_spec x =
+  sum [ if isStart i then 1 else 0 | i <- [0 .. 30] : [_][32] ]
+  where
+    bit i      = (x >> i) && 1
+    leftZero i = (i == 0) \/ (bit (i - 1) == 0)
+    isStart i  = (leftZero i) /\ (bit i == 1) /\ (bit (i + 1) == 1)
