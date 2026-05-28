@@ -1,134 +1,208 @@
 # saw-spec-gen
 
-Auto-generate [SAW](https://saw.galois.com/) verification specs from C++ and Rust type information.
+End-to-end formal verification pipeline that proves a C++ or Rust function
+matches a hand-written [Cryptol](https://cryptol.net/) spec — or proves
+two implementations equivalent — using
+[SAW](https://saw.galois.com/).
 
-Reads compiler-provided type info and generates SAW override specs that model external functions as **adversarial**: they can do anything the type system allows. Mutable memory reachable from parameters is havoced (solver picks any value). Const memory is preserved. The SAW verifier then proves callers are correct for **all possible implementations** of the overridden functions.
+You write the spec once. The wrapper scripts compile your source,
+auto-generate the SAW override scaffolding from the compiler-provided
+type info, and hand the whole thing to SAW. You never write a `.saw`
+file by hand.
 
-## The Problem
+```powershell
+./verify.ps1 -CppFile add_one.cpp `
+             -CryptolSpec add_one_spec.cry `
+             -CryptolFn add_one_spec -Function add_one
+# → RESULT: SAT / VERIFIED by z3
+```
 
-When verifying C++ or Rust code with SAW, you need override specs for every function you don't want to (or can't) verify directly: interface methods, OS calls, crypto libraries, allocators, callbacks.
+## What's in the box
 
-Writing these by hand is error-prone:
+- **`verify.ps1`** — prove a C++ function matches a Cryptol spec.
+  `clang → bitcode → AST → saw-spec-gen → SAW`.
+- **`verify-rust.ps1`** — same, for a Rust function. `rustc → bitcode →
+  resolve mangled symbol → SAW`. The Rust source needs **no**
+  `#[no_mangle]` or `pub extern "C"`.
+- **`verify-equiv.ps1`** — prove a C++ function and a Rust function both
+  match the same Cryptol spec (and therefore each other). Reports
+  `EQUIVALENT` / `NOT EQUIVALENT` and shows the counterexample side-by-side
+  when they disagree.
+- **`saw-spec-gen`** — the Rust CLI underneath. Reads
+  clang `-ast-dump=json` / mir-json / `.ll` and emits adversarial SAW
+  override specs that model external functions as **as-pessimistic-as-the-type-system-allows**:
+  mutable memory is havoced, const memory is preserved.
 
-- **Too loose**: fresh unconstrained return, but forget to havoc mutable memory — SAW misses bugs where the callee corrupts state
-- **Too tight**: hardcoded return values — SAW misses bugs that only appear with certain return values
-- **Wrong shape**: forget to account for `const`, miscount struct fields, wrong LLVM type — spec silently doesn't match
+The verify scripts work on Windows, Linux and macOS through a shared
+discovery layer (`scripts/discover-tools.ps1`) — see
+[Installation](#installation).
 
-This tool extracts constraints from the type system, SAL annotations, and compiler attributes, and generates the **maximally adversarial** spec consistent with those constraints.
+## Quick start
 
-Note: STD functions are assumed not to be evil and safe assume specs are auto generated for them. Maybe evil std mode is a future feature.
+```powershell
+# Clone + run the one-shot installer (downloads clang, SAW, z3).
+git clone https://github.com/AmeliaRose802/saw-spec-gen
+cd saw-spec-gen
+pwsh scripts/init.ps1            # or:  bash scripts/init.sh
 
-## What It Generates
+# Verify a C++ function against a Cryptol spec.
+./verify.ps1 `
+    -CppFile     demo/bounded_loop/add_one.cpp `
+    -CryptolSpec demo/bounded_loop/add_one_spec.cry `
+    -CryptolFn   add_one_spec `
+    -Function    add_one
 
-### Regular specs (`from-clang-ast` / `from-mir-json`)
+# Same for Rust.
+./verify-rust.ps1 `
+    -RustFile    demo/bounded_loop/add_one.rs `
+    -CryptolSpec demo/bounded_loop/add_one_spec.cry `
+    -CryptolFn   add_one_spec `
+    -Function    add_one
 
-For each function, a `.saw` file with:
-- `llvm_alloc_readonly` for const pointers, `llvm_alloc` for mutable
-- `llvm_fresh_var` for scalar parameters
-- Return type with appropriate SAW type
-- Postconditions: readonly params unchanged, mangled name in the usage comment
+# Prove both implementations match the same spec (and so each other).
+./verify-equiv.ps1 `
+    -CppFile     demo/rust_equalivence_demo/nothing_sketchy/add_one_sat.cpp `
+    -RustFile    demo/rust_equalivence_demo/nothing_sketchy/add_one_sat.rs `
+    -CryptolSpec demo/rust_equalivence_demo/nothing_sketchy/add_one_spec.cry `
+    -CryptolFn   add_one_spec `
+    -Function    add_one
+```
 
-### Adversarial interface stubs (`--emit-stubs`)
+The output directory (`out_<basename>/`) contains every intermediate file
+— the `.bc`, the AST JSON, every generated override spec, the
+`verify.saw` script, and a structured `result.json` machine-readable
+verdict.
 
-For virtual methods in C++ classes:
+## The verification model
 
-| File | Purpose |
-|------|---------|
-| `vtable_stubs.ll` | LLVM IR with stub functions + vtable globals. SAW resolves `this->vptr->vtable[slot]->stub` |
-| `*_havoc_spec.saw` | Per-method adversarial spec: mutable memory havoced, const memory preserved |
-| `interface_overrides.saw` | `llvm_unsafe_assume_spec` calls + `alloc_this` helper for vtable wiring |
+For each function you don't (or can't) verify directly — interface
+methods, OS calls, allocators, callbacks — SAW needs an *override
+spec* that says what the function is allowed to do. Writing these by
+hand is error-prone:
 
-The adversarial model:
+- **Too loose**: fresh return value, but forget to havoc mutable
+  memory → SAW misses bugs where the callee corrupts state.
+- **Too tight**: hardcoded return values → SAW misses bugs that
+  only appear with certain return values.
+- **Wrong shape**: forget `const`, miscount struct fields, wrong LLVM
+  type → spec silently doesn't match.
 
-| Constraint source | Preserved or havoced? |
+`saw-spec-gen` derives the **maximally adversarial** spec consistent
+with the type system, SAL annotations, and compiler attributes.
+
+| Constraint source | Treated as |
 |---|---|
 | `const T*` / `const T&` | **Preserved** — `llvm_alloc_readonly`, postcondition asserts unchanged |
 | `_In_` / `_In_reads_(n)` | **Preserved** — SAL says input-only |
-| Non-const `T*` / `T&` | **Havoced** — every reachable byte gets a fresh symbolic after the call |
-| `_Out_` / `_Out_writes_(n)` | **Havoced** — SAL says output |
-| `_Inout_` | **Havoced** — SAL says read-write |
-| Non-const `this` | **Havoced** — method can modify any field |
-| `const` method `this` | **Preserved** |
+| Non-const `T*` / `T&` / non-const `this` | **Havoced** — every reachable byte gets a fresh symbolic after the call |
+| `_Out_` / `_Out_writes_(n)` / `_Inout_` | **Havoced** |
 | Return value | **Unconstrained** — solver picks any value of the right type |
-| **Conflict** (e.g. `const` + `_Inout_`) | **Strictest wins** — preserved |
+| Conflict (`const` + `_Inout_`) | **Strictest wins** (preserved) |
 
-Struct fields with known types are decomposed: each scalar field gets its own fresh var, each pointer field gets a separate allocation that is individually havoced or preserved.
+Struct fields with known layout are decomposed: each scalar field gets
+its own fresh var, each pointer field gets a separate allocation that
+is individually havoced or preserved. STL types use known MSVC x64
+sizes (`std::string`=32, `std::vector`=24, …).
 
-## Usage
+The SAW verifier then proves your function is correct for **every
+possible implementation** of every overridden function.
 
-### Basic: generate specs from C++ AST
+> STL functions are assumed not to be adversarial — safe assume-specs are
+> auto-generated for them. A "STL might be evil" mode is on the
+> roadmap.
 
-```bash
-# Dump the AST
-clang -Xclang -ast-dump=json -fsyntax-only MyFile.cpp > ast.json
+## Installation
 
-# Generate SAW specs
-saw-spec-gen from-clang-ast --input ast.json --output specs/
+The `scripts/init.*` installers download and configure every external
+tool under `~/.saw-spec-gen/`:
 
-# Also generate Cryptol type predicates
-saw-spec-gen from-clang-ast --input ast.json --output specs/ --cryptol
+```powershell
+pwsh scripts/init.ps1          # Windows
 ```
 
-### Interface stubs: adversarial overrides for virtual methods
+```bash
+bash scripts/init.sh           # Linux / macOS
+```
+
+What they do:
+
+1. Verify `rustc`/`cargo` are on PATH (prompts to install via
+   [rustup](https://rustup.rs) if not).
+2. Run `cargo build --release` to produce the `saw-spec-gen` CLI.
+3. Locate `clang` + `llvm-as`. On Windows, download the official LLVM
+   tarball if missing. On Linux/macOS, print the package-manager
+   command (`apt install clang llvm`, `brew install llvm`, …).
+4. Download SAW + bundled solvers (z3 etc.) from the
+   [GaloisInc/saw-script releases](https://github.com/GaloisInc/saw-script/releases).
+5. Write `~/.saw-spec-gen/env.ps1` (and `env.sh` on Unix) which the
+   verify scripts auto-discover on every run.
+
+The installers are idempotent. Pass `-Force` (PowerShell) or `FORCE=1`
+(bash) to redownload everything.
+
+### Manual configuration
+
+To point at tools installed elsewhere, set any of:
+
+| Variable                       | What it points to                                       |
+|--------------------------------|---------------------------------------------------------|
+| `SAW_SPEC_GEN_LLVM_BIN`        | Directory containing `clang`, `llvm-as`, `llvm-dis`     |
+| `SAW_SPEC_GEN_SAW`             | Full path to the `saw` binary                           |
+| `SAW_SPEC_GEN_SOLVER_BIN`      | Directory containing `z3` (and optional yices/cvc4)     |
+| `SAW_SPEC_GEN_RUSTC`           | Full path to `rustc` (defaults to `rustc` on PATH)      |
+| `SAW_SPEC_GEN_LLVM_TARGET`     | Override the default LLVM target tuple                  |
+
+These take precedence over `~/.saw-spec-gen/env.ps1`, which in turn
+takes precedence over PATH lookup.
+
+## CLI reference
+
+The verify scripts orchestrate the `saw-spec-gen` CLI internally —
+you only need these commands directly if you're embedding the tool
+into a different pipeline.
+
+```text
+saw-spec-gen <SUBCOMMAND>
+  from-clang-ast        Generate SAW specs from a clang AST dump (C/C++)
+  from-mir-json         Generate SAW specs from mir-json output (Rust)
+  from-llvm-ir          Generate SAW specs from LLVM IR text (any language)
+  gen-verify            Generate a complete, runnable .saw file end-to-end
+                        (specs + vtable stubs + Cryptol equivalence check)
+  gen-rust-trait-stubs  Generate Rust trait vtable stubs + havoc specs
+                        for `&dyn Trait` parameters
+  filter-ast            Strip system-header decls from a clang AST dump
+                        (used internally to keep AST size under control)
+  patch-llvm-ir         Patch a .ll file so SAW 1.5 / Crucible can load it
+                        (strips MSVC EH metadata, rewrites poison → undef)
+  coverage              Report spec coverage for a verified codebase
+```
+
+`gen-verify` is the one the verify scripts use. Example:
 
 ```bash
-# Generate everything: specs + vtable stubs + havoc overrides
+saw-spec-gen gen-verify \
+    --ast      ast.json \
+    --bitcode  code.bc \
+    --llvm-ir  code.ll \
+    --cryptol-spec add_one_spec.cry \
+    --cryptol-fn   add_one_spec \
+    --function     add_one \
+    --output       out_add_one/
+```
+
+`from-clang-ast` and friends are still available if you want raw
+specs to drop into your own SAW script:
+
+```bash
+clang -Xclang -ast-dump=json -fsyntax-only MyFile.cpp > ast.json
 saw-spec-gen from-clang-ast --input ast.json --output specs/ --emit-stubs
 ```
 
-This produces:
-```
-specs/
-├── auto_specs.saw              # Index: includes all regular specs
-├── validate_auto_spec.saw      # Regular spec for each function
-├── vtable_stubs.ll             # LLVM IR: stub functions + vtable globals
-├── IValidator_validate_havoc_spec.saw   # Adversarial havoc spec
-├── IValidator_error_code_havoc_spec.saw
-└── interface_overrides.saw     # Override setup + alloc_this helper
-```
+That produces `vtable_stubs.ll`, `interface_overrides.saw`, and a
+per-method `*_havoc_spec.saw` for every virtual method, ready to
+`include` from your verification script.
 
-In your SAW script:
-```saw
-enable_experimental;
-m_main  <- llvm_load_module "your_code.bc";
-m_stubs <- llvm_load_module "specs/vtable_stubs.ll";
-m       <- llvm_combine_modules m_main [m_stubs];
-include "specs/interface_overrides.saw";
-
-// Now verify — overrides model ANY implementation of the interface
-llvm_verify m "?your_function@@..." [ov_ivalidator_validate_stub] false your_spec z3;
-```
-
-### From Rust (mir-json)
-
-```bash
-# Build with saw-rustc
-cargo saw-build
-
-# Generate SAW specs (LLVM mode)
-saw-spec-gen from-mir-json --input target/crate.linked-mir.json --output specs/
-
-# Or MIR verify mode
-saw-spec-gen from-mir-json --input crate.mir.json --output specs/ --mir-verify
-```
-
-### From LLVM IR (any language)
-
-```bash
-# Disassemble bitcode
-llvm-dis module.bc -o module.ll
-
-# Generate specs — resolves struct types, detects sret
-saw-spec-gen from-llvm-ir --input module.ll --output specs/
-```
-
-### Filtering
-
-```bash
-saw-spec-gen from-clang-ast --input ast.json --output specs/ --filter "Validate"
-```
-
-## Constraint Sources
+## Constraint sources
 
 | Source | What it tells us | How it's used |
 |--------|-----------------|---------------|
@@ -137,8 +211,7 @@ saw-spec-gen from-clang-ast --input ast.json --output specs/ --filter "Validate"
 | SAL `_In_` / `_In_reads_(n)` | Input-only | Preserved; buffer sized to `n` |
 | SAL `_Out_` / `_Out_writes_(n)` | Output-only | Havoced; buffer sized to `n` |
 | SAL `_Inout_` | Read-write | Havoced (unless const overrides) |
-| `noexcept` / `nounwind` | Cannot throw | No exception path warning |
-| `nonnull` / Rust `&T` | Pointer never null | Non-null precondition |
+| `noexcept` / `nounwind` | Cannot throw | No exception-path warning |
 | Rust `enum` | Finite variants | Discriminant range constraint |
 | Rust `Option<T>` / `Result<T,E>` | Two-variant enum | Discriminant ∈ {0, 1} |
 | LLVM `sret` | Return via pointer | Modeled as output parameter |
@@ -146,93 +219,75 @@ saw-spec-gen from-clang-ast --input ast.json --output specs/ --filter "Validate"
 | Struct size | Byte-level layout | `llvm_array N (llvm_int 8)` |
 | STL types | Known MSVC x64 sizes | `std::string`=32, `std::vector`=24, etc. |
 
-## How the Adversarial Model Works
+## Examples
 
-When `--emit-stubs` encounters a virtual method like:
-```cpp
-class IValidator {
-    virtual bool validate(const SessionToken &token) const noexcept = 0;
-};
-```
+Working end-to-end demos live in [demo/](demo/):
 
-It generates a spec where:
-1. `this` is `llvm_alloc_readonly` (const method → preserved)
-2. `token` is `llvm_alloc_readonly` (const ref → preserved)
-3. Return is `llvm_fresh_var "ret" (llvm_int 1)` (unconstrained bool)
-4. Postconditions assert `this` and `token` are unchanged
+| Directory | What it shows |
+|---|---|
+| `bounded_loop/` | The hello-world: prove `add_one`/`sum_first_n` in C++ and Rust against the same Cryptol spec |
+| `string_ops/` | C string handling with SAT/UNSAT pairs |
+| `strings/` | `std::string` and C-string equivalents, both verifying and counterexample-producing |
+| `async_rust/` | Verify a Rust `async fn` by targeting its coroutine `resume` symbol |
+| `rust_equalivence_demo/` | Cross-language equivalence — same logic in C++ and Rust |
+| `rust_adversarial_holes/` | "Sneaky" Rust patterns (interior mutability, raw aliasing, drop side effects, unreachable_unchecked, …) — every disproved case shows the harness catching what unit tests would miss |
+| `vtable_havoc_spec_demos/` | C++ virtual-dispatch verification: prove correctness for *any* implementation of an interface |
+| `csep590b_c04/` | Course-problem suite (clamp_sub, safe_mul, count_groups, make_change, isqrt) |
 
-For a non-const method like `int process(Config *cfg)`:
-1. `this` is `llvm_alloc` (mutable → havoced)
-2. `cfg` fields are decomposed: `flags` gets `cfg_flags_after`, pointer fields get new allocations
-3. Every mutable field gets an independent fresh symbolic in the postcondition
-4. The solver can set any of them to any value
-
-This means: if a caller reads `cfg->counter` after calling `process()`, and the proof depends on `counter` being unchanged, **the proof fails** — because the adversarial override models `process()` as potentially trashing it.
+Each directory's `out_*/verify.saw` is fully readable — useful for
+learning what a hand-written SAW proof of the corresponding pattern
+would look like.
 
 ## Architecture
 
 ```
 Input                   Constraint Engine         Output
 ─────                   ─────────────────         ──────
-
-clang_ast.rs            constraints.rs            saw_emit.rs
-  Parse AST               FunctionInfo              .saw specs
-  Extract virtuals         ParamInfo                 vtable_stubs.ll
-  Resolve struct IDs       TypeInfo                  havoc specs
-  Parse SAL annotations    Mutability                interface_overrides.saw
-                           derive_constraints()
-mir_json.rs                                       cryptol_emit.rs
-  Parse MIR JSON                                    .cry predicates
-  Resolve ADTs
-
-llvm_ir.rs
-  Parse .ll text
-  Resolve struct types
-  Detect sret
+clang AST  (C/C++)        FunctionInfo              .saw specs
+mir-json   (Rust)         ParamInfo                 vtable_stubs.ll
+LLVM IR    (any)          TypeInfo                  havoc specs
+                          Mutability                interface_overrides.saw
+                          derive_constraints()      .cry predicates
 ```
 
-The constraint engine (`constraints.rs`) is language-independent. All three parsers produce the same `FunctionInfo` structs. The SAW emitter doesn't know which language the input came from.
-
-## Building
-
-```bash
-cargo build --release
-```
-
-## Examples
-
-The `demo/` directory contains working examples:
-
-- `checksum.cpp` / `verify.saw` — Basic verification of C++ functions with z3
-- `interface_example.cpp` / `prove_cpp.saw` — Virtual dispatch through IValidator, proved equivalent to Cryptol spec
-- `adversarial.h` / `prove_adversarial.saw` — Adversarial havoc model: safe vs unsafe patterns after unknown function calls
+The constraint engine (`src/constraints.rs`) is language-independent.
+All three parsers produce the same `FunctionInfo` structs and the SAW
+emitter doesn't know which language the input came from.
 
 ## Tests
 
-Cargo tests cover the Rust crate:
-
 ```bash
+# Rust crate tests.
 cargo test --release
-```
 
-End-to-end SAW demo regressions live under `tests/saw_demos/`:
-
-```powershell
-# Run the full demo suite (auto-skips if SAW isn't installed).
+# Full end-to-end SAW demo regressions (auto-skips if SAW not installed).
 pwsh tests/saw_demos/Run-SawDemos.ps1
 
 # Filter by tag.
 pwsh tests/saw_demos/Run-SawDemos.ps1 -Tag cpp_havoc,bounded_loop
 
-# Show what would run.
+# Dry-run.
 pwsh tests/saw_demos/Run-SawDemos.ps1 -List
 ```
 
+Add new demos by appending entries to
+[tests/saw_demos/cases.psd1](tests/saw_demos/cases.psd1) — don't write
+bespoke runner scripts.
+
 The pre-commit hook (`git config core.hooksPath .githooks`) runs the
-line-count check **and** the SAW demo suite. Skip the SAW portion
-with `SKIP_SAW_TESTS=1` if you need a fast amend. See
-[tests/saw_demos/README.md](tests/saw_demos/README.md) for the case
-manifest and how to add new demos.
+line-count check and the demo suite. Skip the SAW portion with
+`SKIP_SAW_TESTS=1` for a fast amend.
+
+## Project rules
+
+See [.github/copilot-instructions.md](.github/copilot-instructions.md):
+
+- **500 non-whitespace lines per source file**, enforced by
+  `scripts/check-line-count.sh` (and the `line-count` CI job). Split
+  files along clear seams (parser vs emitter, per-target backends,
+  …) rather than appending past the limit.
+- Don't add new entries to `.linecount-allow`. Shrink files in it
+  when you touch them.
 
 ## License
 

@@ -44,23 +44,23 @@ $llFile     = Join-Path $outDir "add_one_sat.ll"
 $sawScript  = Join-Path $outDir "verify_async.saw"
 
 # Tool discovery (same convention as verify-rust.ps1).
-$llvmBin = "C:\Users\ameliapayne\clang+llvm-20.1.6-x86_64-pc-windows-msvc\bin"
-if (-not (Test-Path "$llvmBin\llvm-dis.exe")) { $llvmBin = "C:\Program Files\LLVM\bin" }
-$llvmDis = Join-Path $llvmBin "llvm-dis.exe"
+. (Join-Path $repoRoot 'scripts/discover-tools.ps1')
+$tools = Find-SawSpecGenTools -RepoRoot $repoRoot
+Assert-SawSpecGenTools -Tools $tools -Require @('LlvmDis', 'Saw', 'Rustc')
+Add-SolverDirToPath -Tools $tools
+$llvmBin    = $tools.LlvmBin
+$llvmDis    = $tools.LlvmDis
+$saw        = $tools.Saw
+$llvmTarget = $tools.LlvmTarget
 
-$saw = "C:\Users\ameliapayne\saw-script\dist-newstyle\build\x86_64-windows\ghc-9.6.7\saw-1.5.0.99\x\saw\build\saw\saw.exe"
-if (-not (Test-Path $saw)) { $saw = (Get-Command saw -ErrorAction SilentlyContinue).Source }
-if (-not $saw) { Write-Error "Could not find saw.exe"; exit 1 }
-
-$solverDir = "C:\Users\ameliapayne\saw-1.5-windows-2022-X64-with-solvers\bin"
-if (Test-Path $solverDir) { $env:PATH = "$solverDir;$env:PATH" }
-
-$specGen = Join-Path $repoRoot "target\release\saw-spec-gen.exe"
-if (-not (Test-Path $specGen)) {
+$specGen = $tools.SpecGen
+if (-not $specGen) {
     Write-Host "Building saw-spec-gen (release)..." -ForegroundColor Yellow
     Push-Location $repoRoot
     cargo build --release | Out-Null
     Pop-Location
+    $tools = Find-SawSpecGenTools -RepoRoot $repoRoot
+    $specGen = $tools.SpecGen
 }
 
 # ── Fresh output dir ─────────────────────────────────────────────
@@ -76,7 +76,7 @@ Write-Host "══════════════════════�
     --emit=llvm-bc="$bcFile" `
     --crate-type=lib `
     --edition=2021 `
-    --target x86_64-pc-windows-msvc `
+    --target $llvmTarget `
     -C opt-level=0 `
     -C link-dead-code=yes `
     -C symbol-mangling-version=v0 `

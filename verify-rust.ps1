@@ -63,32 +63,21 @@ New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
 $OutputDir = Resolve-Path $OutputDir
 
 # ── Tool discovery ────────────────────────────────────────────────────────────
-$llvmCandidates = @(
-    "C:\Users\ameliapayne\clang+llvm-20.1.6-x86_64-pc-windows-msvc\bin"
-    "C:\Program Files\LLVM\bin"
-)
-$llvmBin = $null
-foreach ($dir in $llvmCandidates) {
-    if (Test-Path "$dir\llvm-dis.exe") { $llvmBin = $dir; break }
-}
-if (-not $llvmBin) { Write-Error "Could not find llvm-dis"; exit 1 }
-$llvmDis = Join-Path $llvmBin "llvm-dis.exe"
+# All tool discovery (rustc, llvm-dis, saw, z3) goes through the shared
+# helper so verify.ps1, verify-rust.ps1 and the demo scripts agree on
+# search order and cross-platform behaviour. Env vars or
+# ~/.saw-spec-gen/env.ps1 override the defaults; run scripts/init.ps1
+# (Windows) or scripts/init.sh (Linux/macOS) to populate that file.
+$ScriptRoot = Split-Path -Parent $PSCommandPath
+. (Join-Path $ScriptRoot 'scripts/discover-tools.ps1')
+$tools = Find-SawSpecGenTools -RepoRoot $ScriptRoot
+Assert-SawSpecGenTools -Tools $tools -Require @('LlvmDis', 'Saw', 'Rustc')
+Add-SolverDirToPath -Tools $tools
 
-$rustc = (Get-Command rustc -ErrorAction SilentlyContinue).Source
-if (-not $rustc) { Write-Error "Could not find rustc on PATH"; exit 1 }
-
-$sawCandidates = @(
-    "C:\Users\ameliapayne\saw-script\dist-newstyle\build\x86_64-windows\ghc-9.6.7\saw-1.5.0.99\x\saw\build\saw\saw.exe"
-    (Get-Command saw -ErrorAction SilentlyContinue).Source
-)
-$saw = $null
-foreach ($s in $sawCandidates) {
-    if ($s -and (Test-Path $s)) { $saw = $s; break }
-}
-if (-not $saw) { Write-Error "Could not find SAW"; exit 1 }
-
-$solverDir = "C:\Users\ameliapayne\saw-1.5-windows-2022-X64-with-solvers\bin"
-if (Test-Path $solverDir) { $env:PATH = "$solverDir;$env:PATH" }
+$llvmDis    = $tools.LlvmDis
+$rustc      = $tools.Rustc
+$saw        = $tools.Saw
+$llvmTarget = $tools.LlvmTarget
 
 # ── Step 1: rustc → LLVM bitcode (private fn preserved via link-dead-code) ────
 Write-Host ""
@@ -120,7 +109,7 @@ $bcFile = Join-Path $OutputDir "$baseName.bc"
     --emit=llvm-bc="$bcFile" `
     --crate-type=lib `
     --edition=2021 `
-    --target x86_64-pc-windows-msvc `
+    --target $llvmTarget `
     -C opt-level=0 `
     -C link-dead-code=yes `
     -C symbol-mangling-version=v0 `
@@ -473,7 +462,7 @@ fn main() {
     println!("RUST_RESULT={}", bits);
 }
 "@ | Set-Content $harness -Encoding utf8
-        & $rustc --crate-type=bin --edition=2021 --target x86_64-pc-windows-msvc `
+        & $rustc --crate-type=bin --edition=2021 --target $llvmTarget `
             -C opt-level=0 -C overflow-checks=off -C debug-assertions=off `
             -C panic=abort -C codegen-units=1 -C debuginfo=0 `
             -A dead_code -A unused `

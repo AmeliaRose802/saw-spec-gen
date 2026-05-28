@@ -42,33 +42,18 @@ if (Test-Path $outDir) { Remove-Item -Recurse -Force $outDir }
 New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 
 # ── Tool discovery (mirrors verify.ps1). ─────────────────────────────────
-$clangCandidates = @(
-    'C:\Users\ameliapayne\clang+llvm-20.1.6-x86_64-pc-windows-msvc\bin'
-    'C:\Program Files\LLVM\bin'
-)
-$llvmBin = $null
-foreach ($dir in $clangCandidates) {
-    if (Test-Path "$dir\clang.exe") { $llvmBin = $dir; break }
-}
-if (-not $llvmBin) { Write-Error 'clang.exe not found'; exit 1 }
-$clang = Join-Path $llvmBin 'clang.exe'
-
-$sawCandidates = @(
-    'C:\Users\ameliapayne\saw-script\dist-newstyle\build\x86_64-windows\ghc-9.6.7\saw-1.5.0.99\x\saw\build\saw\saw.exe'
-    (Get-Command saw -ErrorAction SilentlyContinue).Source
-)
-$saw = $null
-foreach ($s in $sawCandidates) {
-    if ($s -and (Test-Path $s)) { $saw = $s; break }
-}
-if (-not $saw) { Write-Error 'saw.exe not found'; exit 1 }
-
-# Make sure SAW can find z3 / yices on PATH.
-$env:PATH = "C:\Users\ameliapayne\saw-1.5-windows-2022-X64-with-solvers\bin;$env:PATH"
+# ── Tool discovery (mirrors verify.ps1). ─────────────────────────────────
+. (Join-Path $RepoRoot 'scripts/discover-tools.ps1')
+$tools = Find-SawSpecGenTools -RepoRoot $RepoRoot
+Assert-SawSpecGenTools -Tools $tools -Require @('Clang', 'Saw')
+Add-SolverDirToPath -Tools $tools
+$clang      = $tools.Clang
+$saw        = $tools.Saw
+$llvmTarget = $tools.LlvmTarget
 
 # ── Stage workspace. ─────────────────────────────────────────────────────
 $bcFile = Join-Path $outDir 'count_digits_string.bc'
-& $clang -c -emit-llvm -target x86_64-pc-windows-msvc $CppFile -o $bcFile 2>&1 | Out-Null
+& $clang -c -emit-llvm -target $llvmTarget $CppFile -o $bcFile 2>&1 | Out-Null
 if (-not (Test-Path $bcFile)) { Write-Error 'clang failed'; exit 1 }
 
 Copy-Item (Join-Path $ScriptRoot 'count_digits_string_spec.cry') (Join-Path $outDir 'count_digits_string_spec.cry') -Force

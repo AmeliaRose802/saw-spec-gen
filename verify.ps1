@@ -70,54 +70,36 @@ New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
 $OutputDir = Resolve-Path $OutputDir
 
 # ── Find tools ─────────────────────────────────────────────────────────────────
-# Clang / LLVM tools
-$clangCandidates = @(
-    "C:\Users\ameliapayne\clang+llvm-20.1.6-x86_64-pc-windows-msvc\bin"
-    "C:\Program Files\LLVM\bin"
-)
-$llvmBin = $null
-foreach ($dir in $clangCandidates) {
-    if (Test-Path "$dir\clang.exe") { $llvmBin = $dir; break }
-}
-if (-not $llvmBin) {
-    Write-Error "Could not find clang. Searched: $($clangCandidates -join ', ')"
-    exit 1
-}
-$clang  = Join-Path $llvmBin "clang.exe"
-$llvmAs = Join-Path $llvmBin "llvm-as.exe"
+# All tool discovery (clang, llvm-as, saw, z3, saw-spec-gen) lives in the
+# shared helper so verify.ps1 / verify-rust.ps1 / demo scripts agree on
+# search order and cross-platform behaviour. The helper consults env
+# vars, ~/.saw-spec-gen/env.ps1, PATH, then platform-specific defaults.
+# Run scripts/init.ps1 (Windows) or scripts/init.sh (Linux/macOS) once
+# to populate the env file with auto-downloaded toolchain paths.
+. (Join-Path $ScriptRoot 'scripts/discover-tools.ps1')
 
-# saw-spec-gen (built from this repo)
-$specGen = Join-Path $ScriptRoot "target\release\saw-spec-gen.exe"
+# saw-spec-gen is built from this repo, so build it on demand before the
+# rest of discovery runs (Find-SawSpecGenTools looks for the binary at
+# target/release/saw-spec-gen$ExeExt).
+$exeExt  = if ($IsWindows -or ($null -eq $IsWindows -and $env:OS -eq 'Windows_NT')) { '.exe' } else { '' }
+$specGen = Join-Path $ScriptRoot "target/release/saw-spec-gen$exeExt"
 if (-not (Test-Path $specGen)) {
     Write-Host "[*] Building saw-spec-gen..." -ForegroundColor Cyan
     Push-Location $ScriptRoot
     cargo build --release 2>&1 | Write-Host
     Pop-Location
-    if (-not (Test-Path $specGen)) {
-        Write-Error "Failed to build saw-spec-gen"
-        exit 1
-    }
+    if (-not (Test-Path $specGen)) { Write-Error "Failed to build saw-spec-gen"; exit 1 }
 }
 
-# SAW
-$sawCandidates = @(
-    "C:\Users\ameliapayne\saw-script\dist-newstyle\build\x86_64-windows\ghc-9.6.7\saw-1.5.0.99\x\saw\build\saw\saw.exe"
-    (Get-Command saw -ErrorAction SilentlyContinue).Source
-)
-$saw = $null
-foreach ($s in $sawCandidates) {
-    if ($s -and (Test-Path $s)) { $saw = $s; break }
-}
-if (-not $saw) {
-    Write-Error "Could not find SAW executable"
-    exit 1
-}
+$tools = Find-SawSpecGenTools -RepoRoot $ScriptRoot
+Assert-SawSpecGenTools -Tools $tools -Require @('Clang', 'LlvmAs', 'Saw')
+Add-SolverDirToPath -Tools $tools
 
-# z3 on PATH (SAW needs it)
-$solverDir = "C:\Users\ameliapayne\saw-1.5-windows-2022-X64-with-solvers\bin"
-if (Test-Path $solverDir) {
-    $env:PATH = "$solverDir;$env:PATH"
-}
+$clang     = $tools.Clang
+$llvmAs    = $tools.LlvmAs
+$saw       = $tools.Saw
+$llvmTarget= $tools.LlvmTarget   # e.g. x86_64-pc-windows-msvc / -unknown-linux-gnu
+$isMsvc    = $llvmTarget -match 'windows-msvc'
 
 # ── All artifacts go under $OutputDir ──────────────────────────────────────────
 $bcFile   = Join-Path $OutputDir "$baseName.bc"
@@ -129,12 +111,12 @@ Write-Host ""
 Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
 Write-Host " Step 1: Compile $baseName.cpp → bitcode" -ForegroundColor Cyan
 Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
-& $clang -c -emit-llvm -O0 -fno-rtti -target x86_64-pc-windows-msvc $CppFile -o $bcFile 2>&1
+& $clang -c -emit-llvm -O0 -fno-rtti -target $llvmTarget $CppFile -o $bcFile 2>&1
 if ($LASTEXITCODE -ne 0) { Write-Error "clang failed"; exit 1 }
 Write-Host "  → $bcFile ($((Get-Item $bcFile).Length) bytes)" -ForegroundColor Green
 
 # Also emit IR text so gen-verify can resolve fully qualified struct names.
-& $clang -S -emit-llvm -O0 -fno-rtti -target x86_64-pc-windows-msvc $CppFile -o $llFile 2>&1
+& $clang -S -emit-llvm -O0 -fno-rtti -target $llvmTarget $CppFile -o $llFile 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  warning: failed to emit .ll (continuing without struct-size resolution)" -ForegroundColor Yellow
     $llFile = $null
@@ -159,11 +141,12 @@ if ($LASTEXITCODE -ne 0) {
 # safe to run unconditionally for every C++ verify job.
 if ($llFile) {
     $patchedLl = $llFile  # in-place rewrite
-    & $specGen patch-llvm-ir `
-        --input $llFile `
-        --output $patchedLl `
-        --strip-msvc-eh `
-        --poison-to-undef 2>&1 | Write-Host
+    # --strip-msvc-eh is only meaningful for the MSVC ABI; Itanium
+    # (Linux/macOS) uses landingpad which Crucible handles natively,
+    # and there are no `_TI*`/`_CTA*` xdata globals to strip.
+    $patchArgs = @('patch-llvm-ir', '--input', $llFile, '--output', $patchedLl, '--poison-to-undef')
+    if ($isMsvc) { $patchArgs += '--strip-msvc-eh' }
+    & $specGen @patchArgs 2>&1 | Write-Host
     if ($LASTEXITCODE -ne 0) { Write-Error "patch-llvm-ir failed"; exit 1 }
     # Re-assemble the .bc so SAW sees the patched module.
     & $llvmAs $patchedLl -o $bcFile 2>&1
@@ -175,7 +158,7 @@ Write-Host ""
 Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
 Write-Host " Step 2: Dump clang AST → JSON" -ForegroundColor Cyan
 Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
-& $clang -Xclang -ast-dump=json -fsyntax-only -target x86_64-pc-windows-msvc $CppFile 2>$null | Out-File -Encoding utf8 $astFile
+& $clang -Xclang -ast-dump=json -fsyntax-only -target $llvmTarget $CppFile 2>$null | Out-File -Encoding utf8 $astFile
 if (-not (Test-Path $astFile) -or (Get-Item $astFile).Length -eq 0) {
     Write-Error "AST dump failed"; exit 1
 }
@@ -254,26 +237,29 @@ $sawOutput = & $saw ([System.IO.Path]::GetFileName($verifySaw)) 2>&1 | Out-Strin
 Pop-Location
 
 # ── Demangle helper ───────────────────────────────────────────────────────────
-# Find Microsoft's undname.exe for MSVC name demangling
-$undname = (Get-ChildItem "C:\Program Files (x86)\Microsoft Visual Studio\*" `
-    -Recurse -Filter "undname.exe" -ErrorAction SilentlyContinue |
-    Where-Object { $_.FullName -match 'Hostx64\\x64|Hostx64\\arm64' } |
-    Select-Object -Index 0).FullName
+# undname.exe (MSVC ABI) and c++filt / llvm-cxxfilt (Itanium ABI) differ
+# both in output framing and supported manglings, so we branch once and
+# treat them uniformly afterwards.
+$undname = $tools.CxxFilt
 
 function Demangle([string]$mangled) {
     if (-not $mangled -or -not $undname) { return $mangled }
-    # undname outputs: 'is :- "demangled name"'
-    $raw = & $undname $mangled 2>$null | Out-String
-    if ($raw -match 'is :- "(.+)"') {
-        $result = $Matches[1].Trim()
-        # Clean up MSVC noise: __cdecl, __ptr64, public:, etc.
-        $result = $result -replace '\s*__cdecl\s*', ' '
-        $result = $result -replace '\s*__ptr64\s*', ''
-        $result = $result -replace '^\s*public:\s*', ''
-        $result = $result -replace '^\s*private:\s*', ''
-        $result = $result -replace '^\s*protected:\s*', ''
-        $result = $result -replace '\s+', ' '
-        return $result.Trim()
+    if ($isMsvc) {
+        # undname outputs: 'is :- "demangled name"'
+        $raw = & $undname $mangled 2>$null | Out-String
+        if ($raw -match 'is :- "(.+)"') {
+            $result = $Matches[1].Trim()
+            # Clean up MSVC noise: __cdecl, __ptr64, public:, etc.
+            $result = $result -replace '\s*__cdecl\s*', ' '
+            $result = $result -replace '\s*__ptr64\s*', ''
+            $result = $result -replace '^\s*(public|private|protected):\s*', ''
+            $result = $result -replace '\s+', ' '
+            return $result.Trim()
+        }
+    } else {
+        # c++filt / llvm-cxxfilt: echo-style, demangled name on stdout.
+        $raw = (& $undname $mangled 2>$null | Out-String).Trim()
+        if ($raw -and $raw -ne $mangled) { return $raw }
     }
     return $mangled
 }
@@ -370,7 +356,7 @@ print (str_concat "CRYPTOL_RESULT=" (show r));
 
         # Compile + run C++ function at counterexample values
         $testCpp = Join-Path $OutputDir "_test_cex.cpp"
-        $testExe = Join-Path $OutputDir "_test_cex.exe"
+        $testExe = Join-Path $OutputDir ("_test_cex" + $exeExt)
         $cppArgs = ($cexPairs | ForEach-Object { "$($_.Value)u" }) -join ", "
         $origSrc = Get-Content $CppFile -Raw
         @"
@@ -392,7 +378,7 @@ int main() {
 }
 "@ | Set-Content $testCpp -Encoding utf8
 
-        & $clang -O0 -target x86_64-pc-windows-msvc $testCpp -o $testExe 2>$null
+        & $clang -O0 -target $llvmTarget $testCpp -o $testExe 2>$null
         $actualVal = $null
         if (Test-Path $testExe) {
             $cppOut = & $testExe 2>&1 | Out-String

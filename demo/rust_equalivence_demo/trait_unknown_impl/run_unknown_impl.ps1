@@ -43,22 +43,17 @@ if (Test-Path $outDir) { Remove-Item -Recurse -Force $outDir }
 New-Item -ItemType Directory -Path $outDir | Out-Null
 
 # ── Tool discovery (mirrors verify-rust.ps1) ──────────────────────────
-$llvmBin = "C:\Users\ameliapayne\clang+llvm-20.1.6-x86_64-pc-windows-msvc\bin"
-$llvmDis  = Join-Path $llvmBin "llvm-dis.exe"
-$llvmAs   = Join-Path $llvmBin "llvm-as.exe"
-$llvmLink = Join-Path $llvmBin "llvm-link.exe"
-foreach ($t in @($llvmDis, $llvmAs, $llvmLink)) {
-    if (-not (Test-Path $t)) { Write-Error "Missing tool: $t"; exit 1 }
-}
-$rustc = (Get-Command rustc).Source
-
-$saw = "C:\Users\ameliapayne\saw-script\dist-newstyle\build\x86_64-windows\ghc-9.6.7\saw-1.5.0.99\x\saw\build\saw\saw.exe"
-if (-not (Test-Path $saw)) {
-    $saw = (Get-Command saw -ErrorAction SilentlyContinue).Source
-}
-if (-not $saw) { Write-Error "Could not find SAW"; exit 1 }
-$solverDir = "C:\Users\ameliapayne\saw-1.5-windows-2022-X64-with-solvers\bin"
-if (Test-Path $solverDir) { $env:PATH = "$solverDir;$env:PATH" }
+$repoRoot = Resolve-Path (Join-Path $here "..\..\..")
+. (Join-Path $repoRoot 'scripts/discover-tools.ps1')
+$tools = Find-SawSpecGenTools -RepoRoot $repoRoot
+Assert-SawSpecGenTools -Tools $tools -Require @('LlvmDis', 'LlvmAs', 'LlvmLink', 'Saw', 'Rustc')
+Add-SolverDirToPath -Tools $tools
+$llvmDis    = $tools.LlvmDis
+$llvmAs     = $tools.LlvmAs
+$llvmLink   = $tools.LlvmLink
+$rustc      = $tools.Rustc
+$saw        = $tools.Saw
+$llvmTarget = $tools.LlvmTarget
 
 # ── Step 1: rustc ─────────────────────────────────────────────────────
 Write-Host ""
@@ -68,7 +63,7 @@ $rsBc = Join-Path $outDir "add_step.bc"
     --emit=llvm-bc="$rsBc" `
     --crate-type=lib `
     --edition=2021 `
-    --target x86_64-pc-windows-msvc `
+    --target $llvmTarget `
     -C opt-level=0 `
     -C link-dead-code=yes `
     -C symbol-mangling-version=v0 `
@@ -84,12 +79,12 @@ if (-not (Test-Path $rsBc)) { Write-Error "rustc failed"; exit 1 }
 # ── Step 2: saw-spec-gen → trait_stubs.ll + interface_overrides.saw ──
 Write-Host ""
 Write-Host "═══ Step 2: saw-spec-gen gen-rust-trait-stubs ═══" -ForegroundColor Cyan
-$repoRoot = Resolve-Path (Join-Path $here "..\..\..")
-$specGen  = Join-Path $repoRoot "target\release\saw-spec-gen.exe"
-if (-not (Test-Path $specGen)) {
+$specGen = $tools.SpecGen
+if (-not $specGen) {
     Push-Location $repoRoot
     & cargo build --release 2>&1 | Write-Host
     Pop-Location
+    $specGen = (Find-SawSpecGenTools -RepoRoot $repoRoot).SpecGen
 }
 $schema = Join-Path $here "trait_schema.json"
 & $specGen gen-rust-trait-stubs --schema $schema --output $outDir 2>&1 | Write-Host

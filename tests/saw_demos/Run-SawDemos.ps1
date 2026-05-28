@@ -61,18 +61,12 @@ if (-not $ManifestPath) {
     $ManifestPath = Join-Path $ScriptRoot 'cases.psd1'
 }
 
-# ── Auto-skip if SAW isn't installed (CI runners, fresh clones). ──────────
-$sawCandidates = @(
-    'C:\Users\ameliapayne\saw-script\dist-newstyle\build\x86_64-windows\ghc-9.6.7\saw-1.5.0.99\x\saw\build\saw\saw.exe'
-    (Get-Command saw -ErrorAction SilentlyContinue).Source
-)
-$sawFound = $false
-foreach ($s in $sawCandidates) {
-    if ($s -and (Test-Path $s)) { $sawFound = $true; break }
-}
-if (-not $sawFound) {
+# Auto-skip if SAW isn't installed (CI runners, fresh clones).
+. (Join-Path $RepoRoot 'scripts/discover-tools.ps1')
+$tools = Find-SawSpecGenTools -RepoRoot $RepoRoot
+if (-not $tools.Saw) {
     Write-Host "SAW not found on this machine; skipping SAW demo suite." -ForegroundColor Yellow
-    Write-Host "  (Set SKIP_SAW_TESTS=0 with SAW on PATH to force a run.)" -ForegroundColor DarkGray
+    Write-Host "  (Run scripts/init.ps1 / scripts/init.sh to install, or set SAW_SPEC_GEN_SAW.)" -ForegroundColor DarkGray
     exit 0
 }
 
