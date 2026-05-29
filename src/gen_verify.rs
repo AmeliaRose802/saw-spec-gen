@@ -9,7 +9,7 @@
 
 use crate::alias_fallbacks::{apply_cli_overrides, dump_fallback_diagnostics};
 use crate::spec_rewrite::{apply_alias_rewrites, collect_type_sizes};
-use crate::type_resolve::resolve_saw_type;
+use crate::type_resolve::resolve_spec_types_quiet;
 use crate::{alias_fallbacks_ir, clang_ast, constraints, llvm_ir, saw_emit};
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
@@ -58,7 +58,7 @@ pub fn run(
     // pointer arithmetic in virtual constructors, and every dispatch
     // would fall through to the unmodified real method body — defeating
     // havoc-based verification.
-    let target_triple = llvm_ir_path.and_then(read_target_triple);
+    let target_triple = llvm_ir_path.and_then(llvm_ir::read_target_triple);
 
     // Find the target function (FunctionInfo with call graph)
     let target_fn = all_functions
@@ -465,25 +465,13 @@ pub fn run(
     // externals), not just the target.  Without this the override files
     // contain `llvm_alias "ShortName"` references that SAW can't load
     // against the bitcode's mangled struct table.
-    let resolve_spec_inplace = |spec: &mut constraints::SpecConstraint| {
-        for p in &mut spec.params {
-            if let Some(r) = resolve_saw_type(&p.saw_type, &ir_struct_sizes, p.dereferenceable_size)
-            {
-                p.saw_type = r;
-            }
-        }
-        if let Some(r) = resolve_saw_type(&spec.return_constraint.saw_type, &ir_struct_sizes, None)
-        {
-            spec.return_constraint.saw_type = r;
-        }
-    };
     for spec in &mut sub_callee_specs {
-        resolve_spec_inplace(spec);
+        resolve_spec_types_quiet(spec, &ir_struct_sizes);
     }
     let mut external_calls_owned: Vec<constraints::SpecConstraint> =
         external_calls.iter().map(|s| (*s).clone()).collect();
     for spec in &mut external_calls_owned {
-        resolve_spec_inplace(spec);
+        resolve_spec_types_quiet(spec, &ir_struct_sizes);
     }
 
     saw_emit::emit_verification_script(
@@ -526,25 +514,4 @@ pub fn run(
     eprintln!("Generated verification script in {}", output.display());
     eprintln!("Run with: saw {}/verify.saw", output.display());
     Ok(())
-}
-
-/// Read the first ~50 lines of an `.ll` text file looking for a
-/// `target triple = "..."` directive and return its value. Returns
-/// `None` when the file is missing, the directive isn't present in the
-/// header, or quoting is malformed. Used by stub generation to choose
-/// the right C++ ABI layout for `vtable_stubs.ll`.
-fn read_target_triple(ll_path: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(ll_path).ok()?;
-    for line in text.lines().take(50) {
-        let trimmed = line.trim_start();
-        if let Some(rest) = trimmed.strip_prefix("target triple") {
-            // Expected form: `target triple = "<triple>"`.
-            let after_eq = rest.split_once('=').map(|(_, r)| r.trim())?;
-            let unquoted = after_eq.trim_matches('"');
-            if !unquoted.is_empty() {
-                return Some(unquoted.to_string());
-            }
-        }
-    }
-    None
 }

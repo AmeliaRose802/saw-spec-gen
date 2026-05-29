@@ -96,14 +96,11 @@ impl<'a> Visitor for CtorVisitor<'a> {
 ///   - C2 = base object constructor (as subobject)
 ///   - C3 = allocating constructor
 /// The clang AST exposes the C1 mangling, but the compiler often emits
-/// only C2 if no C1 call site exists. When the AST's C1 symbol is
-/// missing from the bitcode but C2 (or C3) is present, transparently
-/// substitute the available variant so the override still applies.
-/// Same logic applies for destructors (D0/D1/D2).
-pub fn filter_ctors_by_ir_symbols(
-    ctors: &mut Vec<ClassConstructor>,
-    ir_funcs: &[FunctionInfo],
-) {
+///     only C2 if no C1 call site exists. When the AST's C1 symbol is
+///     missing from the bitcode but C2 (or C3) is present, transparently
+///     substitute the available variant so the override still applies.
+///     Same logic applies for destructors (D0/D1/D2).
+pub fn filter_ctors_by_ir_symbols(ctors: &mut Vec<ClassConstructor>, ir_funcs: &[FunctionInfo]) {
     let ir_symbols: std::collections::HashSet<&str> = ir_funcs
         .iter()
         .map(|f| f.name.as_str().trim_matches('"'))
@@ -162,22 +159,23 @@ fn itanium_ctor_dtor_variants(mangled: &str) -> Vec<String> {
         let c = bytes[i];
         let d = bytes[i + 1];
         let e = bytes[i + 2];
-        if e == b'E' && ((c == b'C' && (d == b'1' || d == b'2' || d == b'3'))
-            || (c == b'D' && (d == b'0' || d == b'1' || d == b'2')))
+        if e == b'E'
+            && ((c == b'C' && (d == b'1' || d == b'2' || d == b'3'))
+                || (c == b'D' && (d == b'0' || d == b'1' || d == b'2')))
         {
             // Generate alternatives by replacing the digit.
             let alts: &[u8] = if c == b'C' {
                 match d {
-                    b'1' => &[b'2', b'3'],
-                    b'2' => &[b'1', b'3'],
-                    b'3' => &[b'1', b'2'],
+                    b'1' => b"23",
+                    b'2' => b"13",
+                    b'3' => b"12",
                     _ => &[],
                 }
             } else {
                 match d {
-                    b'0' => &[b'1', b'2'],
-                    b'1' => &[b'2', b'0'],
-                    b'2' => &[b'1', b'0'],
+                    b'0' => b"12",
+                    b'1' => b"20",
+                    b'2' => b"10",
                     _ => &[],
                 }
             };

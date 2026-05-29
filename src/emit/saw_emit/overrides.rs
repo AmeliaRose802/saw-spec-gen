@@ -256,9 +256,7 @@ fn emit_ctor_overrides(
                 out.push_str(&format!("        , llvm_int {width}\n"));
             }
             if pad_bytes > 0 {
-                out.push_str(&format!(
-                    "        , llvm_array {pad_bytes} (llvm_int 8)\n",
-                ));
+                out.push_str(&format!("        , llvm_array {pad_bytes} (llvm_int 8)\n",));
             }
             out.push_str("        ]);\n");
         } else {
