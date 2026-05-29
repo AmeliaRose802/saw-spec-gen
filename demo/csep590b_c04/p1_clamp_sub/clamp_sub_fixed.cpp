@@ -11,7 +11,7 @@ overflow rule:
         else         -> -overflow   -> return INT_MIN
     else return r
 
-Expected verdict: SAT (VERIFIED) against `clamp_sub_spec`.
+Expected verdict: VERIFIED against `clamp_sub_spec`.
 */
 
 #include <climits>

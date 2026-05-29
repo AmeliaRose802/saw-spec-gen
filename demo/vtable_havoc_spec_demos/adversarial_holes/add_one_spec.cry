@@ -2,7 +2,7 @@
 //
 // Any implementation that returns something other than x + 1
 // for some x is INCORRECT. A sound verifier MUST reject such
-// implementations (report UNSAT / find a counterexample).
+// implementations (report DISPROVED / find a counterexample).
 
 add_one_spec : [32] -> [32]
 add_one_spec x = x + 1

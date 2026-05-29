@@ -29,7 +29,7 @@ buggy branching logic — `a > 0`, `b < 0`, `r < 0` — is then
 performed on the same two's-complement bit patterns the Python
 program would see at runtime, but without the UB obstacle.
 
-Expected verdict: UNSAT (DISPROVED) against `clamp_sub_spec`.
+Expected verdict: DISPROVED against `clamp_sub_spec`.
 SAW finds counterexample a = 0, b = INT_MIN:
     a > 0   is false   (a is 0, not > 0)
     a < 0   is false

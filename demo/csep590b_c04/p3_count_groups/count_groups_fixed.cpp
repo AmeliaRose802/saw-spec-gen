@@ -10,7 +10,7 @@ Corrected version of the buggy algorithm:
 
 Loop bound is the compile-time constant 32, so SAW fully unrolls.
 
-Expected verdict: SAT (VERIFIED) against `count_groups_spec`.
+Expected verdict: VERIFIED against `count_groups_spec`.
 */
 
 #include <cstdint>

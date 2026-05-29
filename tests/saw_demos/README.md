@@ -2,8 +2,8 @@
 
 End-to-end regression suite for every `demo/` scenario. Each case runs
 the full verification pipeline (compile → spec generation → SAW) and
-asserts the verdict matches an expected `SAT` / `UNSAT` / `VERIFIED` /
-`DISPROVED` / `EQUIVALENT` / `NOT EQUIVALENT`.
+asserts the verdict matches an expected `VERIFIED` / `DISPROVED` /
+`EQUIVALENT` / `NOT EQUIVALENT` / `UNKNOWN`.
 
 ## Files
 

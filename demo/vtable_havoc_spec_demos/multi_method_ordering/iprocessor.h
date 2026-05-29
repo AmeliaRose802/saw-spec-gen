@@ -16,7 +16,7 @@ method through an `IProcessor*`.  If the spec generator wires vtable
 slots in the WRONG order (e.g. attaches the "prepare" havoc spec to
 the slot that the compiler emits for "validate"), then calling
 `validate()` would mysteriously fail and calling `prepare()` would
-mysteriously succeed — i.e. the SAT/UNSAT pattern would invert.
+mysteriously succeed — i.e. the VERIFIED/DISPROVED pattern would invert.
 
 BadProcessor adds a FIFTH virtual method `extra()` that is NOT on the
 parent interface.  This exercises the "new method on a derived class"

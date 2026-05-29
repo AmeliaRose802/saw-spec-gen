@@ -16,10 +16,10 @@
         SAW unrolls the symbolic loop to a finite depth.
 
     The same verify_count_digits_string.saw driver works for both
-    the SAT (correct) and UNSAT (broken) variants.
+    the verified (correct) and disproved (broken) variants.
 
 .PARAMETER CppFile
-    Path to the .cpp to verify (sat or unsat variant).
+    Path to the .cpp to verify (verified or disproved variant).
 .PARAMETER ExpectedResult
     "VERIFIED" or "DISPROVED" -- passed through into the RESULT
     line emitted at the end.

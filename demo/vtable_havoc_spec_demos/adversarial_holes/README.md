@@ -7,14 +7,14 @@ CI run should immediately notice.
 
 | File | Spec direction | Tool result | Real answer | Status |
 |------|----------------|-------------|-------------|--------|
-| [add_one_false_unsat_ctor_stub.cpp](add_one_false_unsat_ctor_stub.cpp) | should be **SAT** | reports **SAT** | code is correct | fixed |
-| [add_one_false_sat_mutable.cpp](add_one_false_sat_mutable.cpp) | should be **UNSAT** | reports **UNSAT** (real CEX) | code is wrong | fixed |
+| [add_one_false_disproved_ctor_stub.cpp](add_one_false_disproved_ctor_stub.cpp) | should be **VERIFIED** | reports **VERIFIED** | code is correct | fixed |
+| [add_one_false_verified_mutable.cpp](add_one_false_verified_mutable.cpp) | should be **DISPROVED** | reports **DISPROVED** (real CEX) | code is wrong | fixed |
 
 Both share [add_one_spec.cry](add_one_spec.cry) and run through `verify.ps1`.
 
 ## Hole #1 — fixed: ctor stubs now initialize data members
 
-Demonstrated by [add_one_false_unsat_ctor_stub.cpp](add_one_false_unsat_ctor_stub.cpp).
+Demonstrated by [add_one_false_disproved_ctor_stub.cpp](add_one_false_disproved_ctor_stub.cpp).
 
 **Before:** the auto-generated `<class>_ctor_override` allocated only 8
 bytes (`llvm_alloc_aligned 8 (llvm_int 64)`) and wrote only the vptr.
@@ -42,7 +42,7 @@ Files touched:
 
 ## Hole #2 — fixed: `mutable` keyword soundly downgrades `const this`
 
-Demonstrated by [add_one_false_sat_mutable.cpp](add_one_false_sat_mutable.cpp).
+Demonstrated by [add_one_false_verified_mutable.cpp](add_one_false_verified_mutable.cpp).
 
 **Before:** `const` virtual methods always allocated `this` as
 `llvm_alloc_readonly`, modeling "this is preserved" — unsound when the
@@ -74,13 +74,13 @@ patterns; tests that should have failed could have spuriously passed.
 ## Running the examples
 
 ```powershell
-# Should be SAT — and is.
-./verify.ps1 -CppFile demo\vtable_havoc_spec_demos\adversarial_holes\add_one_false_unsat_ctor_stub.cpp `
+# Should be VERIFIED — and is.
+./verify.ps1 -CppFile demo\vtable_havoc_spec_demos\adversarial_holes\add_one_false_disproved_ctor_stub.cpp `
              -CryptolSpec demo\vtable_havoc_spec_demos\adversarial_holes\add_one_spec.cry `
              -CryptolFn add_one_spec -Function add_one
 
-# Should be UNSAT (with a counterexample at `this_bias__post`) — and is.
-./verify.ps1 -CppFile demo\vtable_havoc_spec_demos\adversarial_holes\add_one_false_sat_mutable.cpp `
+# Should be DISPROVED (with a counterexample at `this_bias__post`) — and is.
+./verify.ps1 -CppFile demo\vtable_havoc_spec_demos\adversarial_holes\add_one_false_verified_mutable.cpp `
              -CryptolSpec demo\vtable_havoc_spec_demos\adversarial_holes\add_one_spec.cry `
              -CryptolFn add_one_spec -Function add_one
 ```

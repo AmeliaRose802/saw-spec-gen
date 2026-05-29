@@ -41,7 +41,7 @@ How the proof works
   exactly MAX_LEN times, and discharges the resulting verification
   conditions to z3. The proof completes in a couple of seconds.
 
-* The companion count_digits_string_unsat.cpp omits the upper
+* The companion count_digits_string_disproved.cpp omits the upper
   digit bound; SAW finds a counterexample (e.g. byte = ':') within
   the MAX_LEN unroll.
 

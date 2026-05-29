@@ -14,7 +14,7 @@ file by hand.
 ./verify.ps1 -CppFile add_one.cpp `
              -CryptolSpec add_one_spec.cry `
              -CryptolFn add_one_spec -Function add_one
-# → RESULT: SAT / VERIFIED by z3
+# → RESULT: VERIFIED by z3
 ```
 
 ## What's in the box
@@ -61,8 +61,8 @@ pwsh scripts/init.ps1            # or:  bash scripts/init.sh
 
 # Prove both implementations match the same spec (and so each other).
 ./verify-equiv.ps1 `
-    -CppFile     demo/rust_equalivence_demo/nothing_sketchy/add_one_sat.cpp `
-    -RustFile    demo/rust_equalivence_demo/nothing_sketchy/add_one_sat.rs `
+    -CppFile     demo/rust_equalivence_demo/nothing_sketchy/add_one_verified.cpp `
+    -RustFile    demo/rust_equalivence_demo/nothing_sketchy/add_one_verified.rs `
     -CryptolSpec demo/rust_equalivence_demo/nothing_sketchy/add_one_spec.cry `
     -CryptolFn   add_one_spec `
     -Function    add_one
@@ -226,7 +226,7 @@ Working end-to-end demos live in [demo/](demo/):
 | Directory | What it shows |
 |---|---|
 | `bounded_loop/` | The hello-world: prove `add_one`/`sum_first_n` in C++ and Rust against the same Cryptol spec |
-| `string_ops/` | C string handling with SAT/UNSAT pairs |
+| `string_ops/` | C string handling with verified/disproved pairs |
 | `strings/` | `std::string` and C-string equivalents, both verifying and counterexample-producing |
 | `async_rust/` | Verify a Rust `async fn` by targeting its coroutine `resume` symbol |
 | `rust_equalivence_demo/` | Cross-language equivalence — same logic in C++ and Rust |

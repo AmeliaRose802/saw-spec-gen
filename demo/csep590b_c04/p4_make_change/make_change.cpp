@@ -16,7 +16,7 @@ The result is packed one byte per denomination (q << 24 | d << 16 |
 n << 8 | p), which is fine because q,d,n,p all fit in 8 bits for
 this input range.
 
-Expected verdict: SAT (VERIFIED) against `make_change_spec`.
+Expected verdict: VERIFIED against `make_change_spec`.
 */
 
 #include <cstdint>

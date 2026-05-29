@@ -4,7 +4,7 @@ DEMO: Problem 2 (safe_mul) — FIXED reference.
 Multiply in a wider type (int64_t), check whether the result falls
 in the signed-i32 range, return 0 on overflow.
 
-Expected verdict: SAT (VERIFIED) against `safe_mul_spec`.
+Expected verdict: VERIFIED against `safe_mul_spec`.
 */
 
 #include <climits>

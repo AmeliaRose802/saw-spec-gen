@@ -18,7 +18,7 @@ spec generator could not see the buffer length. The shim defines
 each macro to `__attribute__((annotate(...)))` with the size
 stringized into the attribute payload.
 
-Expected RESULT: SAT.
+Expected RESULT: VERIFIED.
 */
 
 #include <cstdint>

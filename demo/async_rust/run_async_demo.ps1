@@ -35,12 +35,12 @@ $ErrorActionPreference = "Stop"
 
 $here       = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot   = Resolve-Path (Join-Path $here "..\..")
-$rustFile   = Join-Path $here "add_one_sat.rs"
+$rustFile   = Join-Path $here "add_one_verified.rs"
 $cryFile    = Join-Path $here "add_one_spec.cry"
 $outDir     = Join-Path $here "out_async_demo"
 $specsDir   = Join-Path $outDir "specs"
-$bcFile     = Join-Path $outDir "add_one_sat.bc"
-$llFile     = Join-Path $outDir "add_one_sat.ll"
+$bcFile     = Join-Path $outDir "add_one_verified.bc"
+$llFile     = Join-Path $outDir "add_one_verified.ll"
 $sawScript  = Join-Path $outDir "verify_async.saw"
 
 # Tool discovery (same convention as verify-rust.ps1).
@@ -70,7 +70,7 @@ New-Item -ItemType Directory $outDir | Out-Null
 # ── Step 1: rustc → LLVM bitcode ─────────────────────────────────
 Write-Host ""
 Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host " Step 1: rustc add_one_sat.rs → bitcode (async lowering)" -ForegroundColor Cyan
+Write-Host " Step 1: rustc add_one_verified.rs → bitcode (async lowering)" -ForegroundColor Cyan
 Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
 & rustc `
     --emit=llvm-bc="$bcFile" `
@@ -85,7 +85,7 @@ Write-Host "══════════════════════�
     -C panic=abort `
     -C codegen-units=1 `
     -C debuginfo=0 `
-    -o (Join-Path $outDir "add_one_sat.out") `
+    -o (Join-Path $outDir "add_one_verified.out") `
     $rustFile
 if (-not (Test-Path $bcFile)) { Write-Error "rustc failed"; exit 1 }
 & $llvmDis $bcFile -o $llFile | Out-Null
@@ -176,7 +176,7 @@ Copy-Item $cryFile $outDir -Force
 // matching rustc's `alloca align 4`. state_tag = 0 selects the
 // initial-entry path.
 
-m <- llvm_load_module "add_one_sat.bc";
+m <- llvm_load_module "add_one_verified.bc";
 
 import "add_one_spec.cry";
 

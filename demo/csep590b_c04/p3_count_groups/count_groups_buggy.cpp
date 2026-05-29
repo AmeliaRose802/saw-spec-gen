@@ -30,7 +30,7 @@ Two bugs in this version:
   2. If the highest-order bit is part of a run, the loop ends with
      `in_run = 1` and the final group is never tallied.
 
-Expected verdict: UNSAT (DISPROVED) against `count_groups_spec`.
+Expected verdict: DISPROVED against `count_groups_spec`.
 Counterexample from bug 1: x = 0b101 = 5 (spec says 0 groups,
 buggy says 1).
 */

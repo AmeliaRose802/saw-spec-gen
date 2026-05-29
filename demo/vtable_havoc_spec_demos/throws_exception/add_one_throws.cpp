@@ -33,7 +33,7 @@
 // The Cryptol spec in add_one_spec.cry is a total mathematical
 // function (defined on every input), so the equivalence proof
 // against it fails at exactly the input on which add_one does *not*
-// return: the counterexample x = 42. Expected RESULT: UNSAT
+// return: the counterexample x = 42. Expected RESULT: DISPROVED
 // (DISPROVED with counterexample x = 42).
 
 #include <cstdint>

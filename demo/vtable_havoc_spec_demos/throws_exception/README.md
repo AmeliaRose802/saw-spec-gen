@@ -11,8 +11,8 @@ add_one_spec x = x + 1
 
 | File | What it does | SAW RESULT |
 |------|--------------|------------|
-| [`add_one_sat.cpp`](add_one_sat.cpp) | plain `return x + 1` (no exceptions) | **SAT** — VERIFIED by z3 |
-| [`add_one_throws.cpp`](add_one_throws.cpp) | `if (x == 42) throw 1; return x + 1;` | **UNSAT** — DISPROVED with counterexample `x = 42` |
+| [`add_one_verified.cpp`](add_one_verified.cpp) | plain `return x + 1` (no exceptions) | **VERIFIED** by z3 |
+| [`add_one_throws.cpp`](add_one_throws.cpp) | `if (x == 42) throw 1; return x + 1;` | **DISPROVED** with counterexample `x = 42` |
 
 ## What clang emits for `throw`
 
@@ -84,7 +84,7 @@ This is the right outcome:
 - It catches the discrepancy between the C++ implementation
   (partial: throws on `x == 42`) and the intended mathematical
   contract (total: defined on every `x`).
-- It avoids a *false* SAT that would have been the worst possible
+- It avoids a *false* VERIFIED that would have been the worst possible
   outcome — pretending a throwing function satisfies a total spec
   silently is exactly the bug verification is supposed to find.
 
@@ -112,14 +112,14 @@ in-Crucible fix is sufficient.
 ## Running the demos
 
 ```powershell
-# Control case — SAT
+# Control case — VERIFIED
 ./verify.ps1 `
-    -CppFile     demo\vtable_havoc_spec_demos\throws_exception\add_one_sat.cpp `
+    -CppFile     demo\vtable_havoc_spec_demos\throws_exception\add_one_verified.cpp `
     -CryptolSpec demo\vtable_havoc_spec_demos\throws_exception\add_one_spec.cry `
     -CryptolFn   add_one_spec `
     -Function    add_one
 
-# Throws case — UNSAT (DISPROVED with counterexample x = 42)
+# Throws case — DISPROVED ( with counterexample x = 42)
 ./verify.ps1 `
     -CppFile     demo\vtable_havoc_spec_demos\throws_exception\add_one_throws.cpp `
     -CryptolSpec demo\vtable_havoc_spec_demos\throws_exception\add_one_spec.cry `

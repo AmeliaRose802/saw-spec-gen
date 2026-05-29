@@ -15,7 +15,7 @@ x stays >= 1 by induction (x starts at n >= 1, and each update sets
 x = y where y = (x_prev + ...)/2 >= 1), so the `udiv n, x` SAW sees
 is well-defined on every reachable path.
 
-Expected verdict: SAT (VERIFIED) against `isqrt_spec`.
+Expected verdict: VERIFIED against `isqrt_spec`.
 */
 
 #include <cstdint>

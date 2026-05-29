@@ -26,7 +26,7 @@
 
 .PARAMETER ExpectedResult
     "VERIFIED" (default) or "DISPROVED" — used by the harness to set
-    its exit code so callers can script SAT vs UNSAT cases.
+    its exit code so callers can script VERIFIED vs DISPROVED cases.
 #>
 param(
     [Parameter(Mandatory)][string]$RustFile,

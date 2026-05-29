@@ -9,7 +9,7 @@
       3. Invokes the script, captures all output.
       4. Extracts `RESULT: <verdict>` and compares it to `Expected`.
       5. Prints one line per case (TAP-ish):
-             ok   12 - cpp_havoc/pointer_aliasing/add_one_sat.cpp  (SAT)
+             ok   12 - cpp_havoc/pointer_aliasing/add_one_verified.cpp  (VERIFIED)
              not ok 13 - rust_havoc/...  expected=VERIFIED got=DISPROVED
 
     Exit code is 0 iff every executed case matched its expected verdict.
@@ -184,7 +184,7 @@ function Get-Verdict([string]$text) {
     # unaffected since they only emit one match.
     $matches = [regex]::Matches(
         $text,
-        'RESULT:\s*(NOT EQUIVALENT|EQUIVALENT|VERIFIED|DISPROVED|UNKNOWN|SAT|UNSAT)'
+        'RESULT:\s*(NOT EQUIVALENT|EQUIVALENT|VERIFIED|DISPROVED|UNKNOWN)'
     )
     if ($matches.Count -gt 0) {
         return $matches[$matches.Count - 1].Groups[1].Value.Trim()
