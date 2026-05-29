@@ -229,6 +229,6 @@ if (-not $ok) { exit 1 }
 
 Write-Host ''
 Write-Host 'saw-spec-gen is ready. Try:' -ForegroundColor Cyan
-Write-Host '    ./verify.ps1 -CppFile end-to-end-test/bounded_loop/add_one.cpp `' -ForegroundColor White
-Write-Host '                 -CryptolSpec end-to-end-test/bounded_loop/add_one_spec.cry `' -ForegroundColor White
+Write-Host '    ./verify.ps1 -CppFile demos/01-tutorial/bounded_loop/add_one.cpp `' -ForegroundColor White
+Write-Host '                 -CryptolSpec demos/01-tutorial/bounded_loop/add_one_spec.cry `' -ForegroundColor White
 Write-Host '                 -CryptolFn add_one_spec -Function add_one' -ForegroundColor White

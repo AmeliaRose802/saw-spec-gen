@@ -1,4 +1,0 @@
-// Cryptol spec: add_one should always return x + 1
-
-add_one_spec : [32] -> [32]
-add_one_spec x = x + 1
