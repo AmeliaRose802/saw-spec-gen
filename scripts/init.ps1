@@ -163,6 +163,10 @@ if (-not (Test-Path -LiteralPath (Join-Path $llvmBin ('clang' + $exeExt)))) {
     Write-Error "clang still not found in $llvmBin"
     exit 1
 }
+if (-not (Test-Path -LiteralPath (Join-Path $llvmBin ('llvm-as' + $exeExt)))) {
+    Write-Error "llvm-as still not found in $llvmBin (clang-only LLVM install; need the full toolchain)"
+    exit 1
+}
 Write-Host "  llvm bin: $llvmBin" -ForegroundColor Green
 
 # ── Step 4: SAW + solvers ─────────────────────────────────────────────────
