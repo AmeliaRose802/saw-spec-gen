@@ -298,8 +298,9 @@ fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
         for ann in &param.annotations {
             match ann {
                 Annotation::InReads(n) if *n > 0 => {
-                    preconditions
-                        .push(format!("// _In_reads_({n}) -- readable buffer of {n} elements"));
+                    preconditions.push(format!(
+                        "// _In_reads_({n}) -- readable buffer of {n} elements"
+                    ));
                 }
                 Annotation::OutWrites(n) if *n > 0 => {
                     preconditions.push(format!(
@@ -313,8 +314,7 @@ fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
                     preconditions.push("// noalias -- does not alias other params".into());
                 }
                 Annotation::NoCapture => {
-                    preconditions
-                        .push("// nocapture -- pointer not retained after call".into());
+                    preconditions.push("// nocapture -- pointer not retained after call".into());
                 }
                 _ => {}
             }
@@ -346,9 +346,8 @@ fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
     for ann in &func.annotations {
         match ann {
             Annotation::MustInspectResult => {
-                postconditions.push(
-                    "// _Must_inspect_result_ -- return value must be checked".into(),
-                );
+                postconditions
+                    .push("// _Must_inspect_result_ -- return value must be checked".into());
             }
             Annotation::Custom(s) => {
                 postconditions.push(format!("// annotation: {s}"));
@@ -439,13 +438,18 @@ pub fn type_to_saw(ty: &TypeInfo) -> String {
         } => format!("llvm_array {n} (llvm_int 8)"),
         TypeInfo::Struct { name, .. } => {
             // Clang emits struct types as "struct.Name" in LLVM IR
-            if name.starts_with("struct.") || name.starts_with("class.") || name.starts_with("union.") {
+            if name.starts_with("struct.")
+                || name.starts_with("class.")
+                || name.starts_with("union.")
+            {
                 format!("llvm_alias \"{name}\"")
             } else {
                 format!("llvm_alias \"struct.{name}\"")
             }
         }
-        TypeInfo::Enum { discriminant_bits, .. } => format!("llvm_int {discriminant_bits}"),
+        TypeInfo::Enum {
+            discriminant_bits, ..
+        } => format!("llvm_int {discriminant_bits}"),
         TypeInfo::Option(inner) => format!("// Option<{}>", type_to_saw(inner)),
         TypeInfo::Result(ok, err) => {
             format!("// Result<{}, {}>", type_to_saw(ok), type_to_saw(err))

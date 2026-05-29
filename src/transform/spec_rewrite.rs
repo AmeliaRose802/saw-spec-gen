@@ -103,8 +103,7 @@ pub fn rewrite_specs_dir(
     let mut unresolved: HashSet<String> = HashSet::new();
     walk_saw_files(dir, &mut |path| -> std::io::Result<()> {
         let text = std::fs::read_to_string(path)?;
-        let (rewritten, file_unresolved) =
-            rewrite_unresolved_aliases(&text, ir_sizes, fallbacks);
+        let (rewritten, file_unresolved) = rewrite_unresolved_aliases(&text, ir_sizes, fallbacks);
         if rewritten != text {
             std::fs::write(path, rewritten)?;
         }
@@ -150,9 +149,7 @@ pub fn apply_alias_rewrites(
                 "warning: {} alias type(s) could not be resolved to a byte size;",
                 unresolved.len(),
             );
-            eprintln!(
-                "         SAW may fail to load if the bitcode lacks a matching struct:"
-            );
+            eprintln!("         SAW may fail to load if the bitcode lacks a matching struct:");
             let mut names: Vec<_> = unresolved.into_iter().collect();
             names.sort();
             for n in names {
@@ -161,9 +158,7 @@ pub fn apply_alias_rewrites(
         }
         Ok(_) => {}
         Err(e) => {
-            eprintln!(
-                "warning: post-processing pass for llvm_alias resolution failed: {e}"
-            );
+            eprintln!("warning: post-processing pass for llvm_alias resolution failed: {e}");
         }
     }
 }
@@ -198,11 +193,8 @@ mod tests {
     fn rewrite_keeps_alias_when_no_size_known() {
         let ir: HashMap<String, usize> = HashMap::new();
         let fb = AliasFallbacks::default();
-        let (out, unresolved) = rewrite_unresolved_aliases(
-            "  p <- llvm_alloc (llvm_alias \"Mystery\");\n",
-            &ir,
-            &fb,
-        );
+        let (out, unresolved) =
+            rewrite_unresolved_aliases("  p <- llvm_alloc (llvm_alias \"Mystery\");\n", &ir, &fb);
         assert!(out.contains("llvm_alias \"Mystery\""));
         assert!(unresolved.contains("Mystery"));
     }
@@ -248,11 +240,8 @@ mod tests {
         let ir: HashMap<String, usize> = HashMap::new();
         let mut fb = fallbacks_with_bytes(&[("LatchResult", 4)]);
         fb.enum_bits.insert("LatchResult".into(), 32);
-        let (out, _) = rewrite_unresolved_aliases(
-            "x <- llvm_alloc (llvm_alias \"LatchResult\");",
-            &ir,
-            &fb,
-        );
+        let (out, _) =
+            rewrite_unresolved_aliases("x <- llvm_alloc (llvm_alias \"LatchResult\");", &ir, &fb);
         assert!(out.contains("llvm_int 32"), "got: {out}");
         assert!(!out.contains("llvm_array"), "got: {out}");
     }
@@ -267,11 +256,8 @@ mod tests {
         let mut ir: HashMap<String, usize> = HashMap::new();
         ir.insert("struct.Foo".into(), 64);
         let fb = fallbacks_with_bytes(&[("struct.Foo", 999)]);
-        let (out, _) = rewrite_unresolved_aliases(
-            "x <- llvm_alloc (llvm_alias \"struct.Foo\");",
-            &ir,
-            &fb,
-        );
+        let (out, _) =
+            rewrite_unresolved_aliases("x <- llvm_alloc (llvm_alias \"struct.Foo\");", &ir, &fb);
         assert!(
             out.contains("llvm_alias \"struct.Foo\""),
             "exact IR match should be preserved as alias; got: {out}"

@@ -40,11 +40,7 @@ pub fn parse_adt_def(adt: &AdtDef) -> Option<(String, TypeInfo)> {
 }
 
 fn build_enum(adt: &AdtDef) -> TypeInfo {
-    let variant_names: Vec<String> = adt
-        .variants
-        .iter()
-        .filter_map(|v| v.name.clone())
-        .collect();
+    let variant_names: Vec<String> = adt.variants.iter().filter_map(|v| v.name.clone()).collect();
     let disc_bits = adt.discriminant_bits.unwrap_or(64) as u32;
     TypeInfo::Enum {
         name: String::new(),
@@ -108,7 +104,11 @@ mod tests {
         }));
         let map = build_adt_map(&mir);
         match map.get("E").unwrap() {
-            TypeInfo::Enum { variants, discriminant_bits, .. } => {
+            TypeInfo::Enum {
+                variants,
+                discriminant_bits,
+                ..
+            } => {
                 assert_eq!(variants, &vec!["A".to_string(), "B".to_string()]);
                 assert_eq!(*discriminant_bits, 32);
             }
@@ -123,7 +123,9 @@ mod tests {
         }));
         let map = build_adt_map(&mir);
         match map.get("E").unwrap() {
-            TypeInfo::Enum { discriminant_bits, .. } => assert_eq!(*discriminant_bits, 64),
+            TypeInfo::Enum {
+                discriminant_bits, ..
+            } => assert_eq!(*discriminant_bits, 64),
             other => panic!("expected Enum, got {other:?}"),
         }
     }
@@ -146,7 +148,9 @@ mod tests {
         }));
         let map = build_adt_map(&mir);
         match map.get("S").unwrap() {
-            TypeInfo::Struct { size_bytes, fields, .. } => {
+            TypeInfo::Struct {
+                size_bytes, fields, ..
+            } => {
                 assert_eq!(*size_bytes, Some(16));
                 assert_eq!(fields.len(), 2);
                 assert_eq!(fields[0].0, "a");

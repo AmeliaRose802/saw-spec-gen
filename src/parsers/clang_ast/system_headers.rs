@@ -41,7 +41,9 @@ mod tests {
     fn matches_unix_paths() {
         assert!(is_system_include_path("/usr/include/stdio.h"));
         assert!(is_system_include_path("/usr/local/include/foo.h"));
-        assert!(is_system_include_path("/opt/clang+llvm-20.1.6/include/cstdio"));
+        assert!(is_system_include_path(
+            "/opt/clang+llvm-20.1.6/include/cstdio"
+        ));
         assert!(is_system_include_path("/something/include/c++/14/vector"));
     }
 

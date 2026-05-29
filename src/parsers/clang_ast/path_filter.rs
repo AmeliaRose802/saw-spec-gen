@@ -98,11 +98,7 @@ pub fn filter_translation_unit_value(root: &mut Value, keep_paths: &[PathBuf]) -
 /// LinkageSpecDecl/NamespaceDecl living in vcruntime.h -- are
 /// preserved even though their wrapper's `loc.file` is outside the
 /// user's `keep` paths. After recursion, an empty wrapper is dropped.
-fn filter_decl_list(
-    inner: &mut Vec<Value>,
-    normalised_keep: &[String],
-    stats: &mut FilterStats,
-) {
+fn filter_decl_list(inner: &mut Vec<Value>, normalised_keep: &[String], stats: &mut FilterStats) {
     let mut current_file: Option<String> = None;
     inner.retain_mut(|node| {
         let file = first_loc_file(node).map(|f| f.to_string());
@@ -197,9 +193,9 @@ fn is_pure_function_declaration(node: &Value) -> bool {
         // No `inner` at all: it's a forward declaration.
         return true;
     };
-    !inner.iter().any(|c| {
-        c.get("kind").and_then(|k| k.as_str()) == Some("CompoundStmt")
-    })
+    !inner
+        .iter()
+        .any(|c| c.get("kind").and_then(|k| k.as_str()) == Some("CompoundStmt"))
 }
 
 /// Find the first source-file string in any of the conventional spots
@@ -257,18 +253,14 @@ fn normalise_path(p: &Path) -> String {
 /// as described on [`filter_translation_unit_value`].
 ///
 /// Returns the [`FilterStats`] so callers can report what was dropped.
-pub fn filter_ast_file(
-    input: &Path,
-    output: &Path,
-    keep_paths: &[PathBuf],
-) -> Result<FilterStats> {
+pub fn filter_ast_file(input: &Path, output: &Path, keep_paths: &[PathBuf]) -> Result<FilterStats> {
     let content = std::fs::read_to_string(input)
         .with_context(|| format!("Failed to read {}", input.display()))?;
     let mut value: Value = serde_json::from_str(&content)
         .with_context(|| format!("Failed to parse JSON from {}", input.display()))?;
     let stats = filter_translation_unit_value(&mut value, keep_paths);
     let pretty = serde_json::to_string(&value)
-        .with_context(|| format!("Failed to re-serialise filtered AST"))?;
+        .with_context(|| "Failed to re-serialise filtered AST".to_string())?;
     std::fs::write(output, pretty)
         .with_context(|| format!("Failed to write {}", output.display()))?;
     Ok(stats)
@@ -310,8 +302,7 @@ mod tests {
                 fn_def("bar", r"C:\Users\me\proj\bar.h"),
             ]
         });
-        let stats =
-            filter_translation_unit_value(&mut ast, &[project_dir()]);
+        let stats = filter_translation_unit_value(&mut ast, &[project_dir()]);
         assert_eq!(stats.kept, 2);
         assert_eq!(stats.dropped, 1);
         assert_eq!(stats.no_loc, 0);
@@ -338,8 +329,14 @@ mod tests {
             ]
         });
         let stats = filter_translation_unit_value(&mut ast, &[project_dir()]);
-        assert_eq!(stats.dropped, 2, "both stl entries (line 10 + elided line 20) dropped");
-        assert_eq!(stats.kept, 2, "both project entries (line 1 + elided line 2) kept");
+        assert_eq!(
+            stats.dropped, 2,
+            "both stl entries (line 10 + elided line 20) dropped"
+        );
+        assert_eq!(
+            stats.kept, 2,
+            "both project entries (line 1 + elided line 2) kept"
+        );
     }
 
     #[test]
@@ -384,10 +381,7 @@ mod tests {
                 fn_def("stl_thing", "/usr/include/c++/13/string"),
             ]
         });
-        let stats = filter_translation_unit_value(
-            &mut ast,
-            &[PathBuf::from("/home/me/proj")],
-        );
+        let stats = filter_translation_unit_value(&mut ast, &[PathBuf::from("/home/me/proj")]);
         assert_eq!(stats.kept, 1);
         assert_eq!(stats.dropped, 1);
     }
@@ -487,7 +481,8 @@ mod tests {
         assert_eq!(stats.kept, 2, "rand decl + my_func kept");
         assert_eq!(stats.dropped, 1, "abort_impl with body dropped");
         let kept_names: Vec<&str> = ast["inner"]
-            .as_array().unwrap()
+            .as_array()
+            .unwrap()
             .iter()
             .map(|n| n["name"].as_str().unwrap())
             .collect();

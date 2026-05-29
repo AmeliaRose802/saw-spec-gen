@@ -104,12 +104,14 @@ impl<'a> Visitor for GlobalResolver<'a> {
         }
         ids.sort();
         ids.dedup();
-        if let Some(func) = self.functions.iter_mut().find(|f| {
-            match (mangled, f.mangled_name.as_deref()) {
-                (Some(a), Some(b)) => a == b,
-                _ => f.name == fname,
-            }
-        }) {
+        if let Some(func) =
+            self.functions
+                .iter_mut()
+                .find(|f| match (mangled, f.mangled_name.as_deref()) {
+                    (Some(a), Some(b)) => a == b,
+                    _ => f.name == fname,
+                })
+        {
             for id in ids {
                 if let Some(g) = self.globals.get(&id) {
                     if !func

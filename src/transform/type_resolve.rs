@@ -121,9 +121,7 @@ pub fn resolve_spec_aliases(
 ) {
     let mut unresolved: Vec<String> = Vec::new();
     for p in &mut spec.params {
-        if let Some(replacement) =
-            resolve_saw_type(&p.saw_type, ir_sizes, p.dereferenceable_size)
-        {
+        if let Some(replacement) = resolve_saw_type(&p.saw_type, ir_sizes, p.dereferenceable_size) {
             eprintln!(
                 "  resolved param '{}' type {} → {}",
                 p.name, p.saw_type, replacement
@@ -133,19 +131,14 @@ pub fn resolve_spec_aliases(
             unresolved.push(format!("param '{}' type {}", p.name, p.saw_type));
         }
     }
-    if let Some(replacement) =
-        resolve_saw_type(&spec.return_constraint.saw_type, ir_sizes, None)
-    {
+    if let Some(replacement) = resolve_saw_type(&spec.return_constraint.saw_type, ir_sizes, None) {
         eprintln!(
             "  resolved return type {} → {}",
             spec.return_constraint.saw_type, replacement
         );
         spec.return_constraint.saw_type = replacement;
     } else if needs_resolution(&spec.return_constraint.saw_type) {
-        unresolved.push(format!(
-            "return type {}",
-            spec.return_constraint.saw_type
-        ));
+        unresolved.push(format!("return type {}", spec.return_constraint.saw_type));
     }
     if unresolved.is_empty() {
         return;
@@ -158,12 +151,8 @@ pub fn resolve_spec_aliases(
         for u in &unresolved {
             eprintln!("  - {u}");
         }
-        eprintln!(
-            "  hint: ensure the .ll file contains a matching `%struct.X = type {{...}}`,"
-        );
-        eprintln!(
-            "        or pass an additional --ast file with the struct's full definition."
-        );
+        eprintln!("  hint: ensure the .ll file contains a matching `%struct.X = type {{...}}`,");
+        eprintln!("        or pass an additional --ast file with the struct's full definition.");
     } else {
         eprintln!(
             "warning: {} opaque struct type(s) in target spec; pass --llvm-ir <path>",

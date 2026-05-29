@@ -64,27 +64,18 @@ fn test_cpp_validate_request_spec_content() {
         .unwrap();
 
     // ValidateRequest: const method with noexcept, const pointer param with _In_
-    let spec = std::fs::read_to_string(
-        output_dir.join("ValidateRequest_auto_spec.saw"),
-    )
-    .unwrap();
+    let spec = std::fs::read_to_string(output_dir.join("ValidateRequest_auto_spec.saw")).unwrap();
     assert!(spec.contains("LLVMSetup ()"));
     assert!(spec.contains("llvm_alloc_readonly")); // this is const, header is _In_
     assert!(!spec.contains("WARNING: Function may throw")); // noexcept
 
     // CopyHeaderData: non-const method with _In_ and _Out_writes_
-    let spec = std::fs::read_to_string(
-        output_dir.join("CopyHeaderData_auto_spec.saw"),
-    )
-    .unwrap();
+    let spec = std::fs::read_to_string(output_dir.join("CopyHeaderData_auto_spec.saw")).unwrap();
     assert!(spec.contains("llvm_alloc_readonly")); // src is _In_
     assert!(spec.contains("llvm_alloc (")); // dst is _Out_writes_ (mutable)
 
     // ComputeChecksum: has NoThrowAttr and _In_reads_bytes_
-    let spec = std::fs::read_to_string(
-        output_dir.join("ComputeChecksum_auto_spec.saw"),
-    )
-    .unwrap();
+    let spec = std::fs::read_to_string(output_dir.join("ComputeChecksum_auto_spec.saw")).unwrap();
     assert!(!spec.contains("WARNING: Function may throw"));
 
     let _ = std::fs::remove_dir_all(&output_dir);
@@ -135,10 +126,7 @@ fn test_cpp_struct_field_resolution() {
         .status()
         .unwrap();
 
-    let spec = std::fs::read_to_string(
-        output_dir.join("ValidateRequest_auto_spec.saw"),
-    )
-    .unwrap();
+    let spec = std::fs::read_to_string(output_dir.join("ValidateRequest_auto_spec.saw")).unwrap();
 
     // The struct types should be resolved, not just "Opaque"
     assert!(spec.contains("this")); // implicit this parameter
@@ -220,9 +208,7 @@ fn test_rust_latch_local_spec_content() {
         .unwrap();
 
     // latch_local takes &mut LatchState, returns Result<LatchState, ValidationError>
-    let spec =
-        std::fs::read_to_string(output_dir.join("latch_local_auto_spec.saw"))
-            .unwrap();
+    let spec = std::fs::read_to_string(output_dir.join("latch_local_auto_spec.saw")).unwrap();
     assert!(spec.contains("LLVMSetup ()"));
     assert!(spec.contains("llvm_alloc (")); // mutable ref
 
@@ -231,8 +217,7 @@ fn test_rust_latch_local_spec_content() {
 
 #[test]
 fn test_rust_enum_discriminant_constraints() {
-    let output_dir =
-        std::env::temp_dir().join("saw_spec_gen_integ_rust_enum");
+    let output_dir = std::env::temp_dir().join("saw_spec_gen_integ_rust_enum");
     let _ = std::fs::remove_dir_all(&output_dir);
 
     Command::new(saw_spec_gen_binary())
@@ -248,10 +233,7 @@ fn test_rust_enum_discriminant_constraints() {
         .unwrap();
 
     // Cryptol constraints should have enum predicates
-    let cry = std::fs::read_to_string(
-        output_dir.join("auto_constraints.cry"),
-    )
-    .unwrap();
+    let cry = std::fs::read_to_string(output_dir.join("auto_constraints.cry")).unwrap();
     assert!(cry.contains("LatchState"));
     assert!(cry.contains("ValidationError"));
 
@@ -277,9 +259,7 @@ fn test_rust_mir_verify_mode() {
 
     assert!(status.success());
 
-    let spec =
-        std::fs::read_to_string(output_dir.join("latch_local_auto_spec.saw"))
-            .unwrap();
+    let spec = std::fs::read_to_string(output_dir.join("latch_local_auto_spec.saw")).unwrap();
     assert!(spec.contains("MIRSetup ()"));
     assert!(spec.contains("mir_alloc"));
     assert!(spec.contains("mir_execute_func"));
@@ -292,8 +272,7 @@ fn test_rust_mir_verify_mode() {
 
 #[test]
 fn test_rust_async_function_handling() {
-    let output_dir =
-        std::env::temp_dir().join("saw_spec_gen_integ_rust_async");
+    let output_dir = std::env::temp_dir().join("saw_spec_gen_integ_rust_async");
     let _ = std::fs::remove_dir_all(&output_dir);
 
     Command::new(saw_spec_gen_binary())
@@ -310,10 +289,7 @@ fn test_rust_async_function_handling() {
         .unwrap();
 
     // validate_request is async, should generate a spec with coroutine return type
-    let spec = std::fs::read_to_string(
-        output_dir.join("validate_request_auto_spec.saw"),
-    )
-    .unwrap();
+    let spec = std::fs::read_to_string(output_dir.join("validate_request_auto_spec.saw")).unwrap();
     assert!(spec.contains("LLVMSetup ()"));
 
     let _ = std::fs::remove_dir_all(&output_dir);
@@ -321,8 +297,7 @@ fn test_rust_async_function_handling() {
 
 #[test]
 fn test_rust_filter_functions() {
-    let output_dir =
-        std::env::temp_dir().join("saw_spec_gen_integ_rust_filter");
+    let output_dir = std::env::temp_dir().join("saw_spec_gen_integ_rust_filter");
     let _ = std::fs::remove_dir_all(&output_dir);
 
     let status = Command::new(saw_spec_gen_binary())

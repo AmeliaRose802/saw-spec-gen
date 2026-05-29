@@ -65,9 +65,7 @@ impl<'a> Visitor for CtorVisitor<'a> {
                         if param_count == 0 {
                             let (layout_type_name, layout_fields) =
                                 compute_class_layout(class_name, self.ctx)
-                                    .unwrap_or_else(|| {
-                                        (format!("class.{class_name}"), Vec::new())
-                                    });
+                                    .unwrap_or_else(|| (format!("class.{class_name}"), Vec::new()));
                             self.out.push(ClassConstructor {
                                 class_name: class_name.to_string(),
                                 mangled_name: mangled.to_string(),
@@ -92,10 +90,7 @@ impl<'a> Visitor for CtorVisitor<'a> {
 /// The LLVM IR-text parser keeps surrounding quotes on MSVC-mangled
 /// names; we strip them before comparison so quoted and unquoted forms
 /// match.
-pub fn filter_ctors_by_ir_symbols(
-    ctors: &mut Vec<ClassConstructor>,
-    ir_funcs: &[FunctionInfo],
-) {
+pub fn filter_ctors_by_ir_symbols(ctors: &mut Vec<ClassConstructor>, ir_funcs: &[FunctionInfo]) {
     let ir_symbols: std::collections::HashSet<&str> = ir_funcs
         .iter()
         .map(|f| f.name.as_str().trim_matches('"'))
@@ -183,8 +178,7 @@ mod tests {
                 ]
             }]
         }));
-        let ctors =
-            extract_constructors(&ast, &["OkLog".to_string()]).unwrap();
+        let ctors = extract_constructors(&ast, &["OkLog".to_string()]).unwrap();
         assert_eq!(ctors.len(), 1);
         assert_eq!(ctors[0].mangled_name, "??0OkLog@@QEAA@XZ");
     }
