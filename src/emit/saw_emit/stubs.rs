@@ -3,7 +3,18 @@
 //! For each polymorphic class found by the AST walker we emit:
 //!
 //! * one LLVM IR stub function per *originating* virtual method, and
-//! * a `@class_vtable` global whose slots point at those stubs.
+//! * a `@class_vtable` global whose slots point at those stubs
+//!   (referenced by the per-class `alloc_<class>_this` helper in
+//!   `interface_overrides.saw`), and
+//! * on Itanium-ABI targets (Linux / macOS / *BSD), an *additional*
+//!   `@_ZTV<mangled>` global with the Itanium leader-slot layout
+//!   (`[null offset-to-top, null RTTI, stub1, stub2, ...]`) and
+//!   `linkonce_odr` linkage. When the stub bitcode is linked into the
+//!   compiled C++ bitcode via `llvm-link --override`, this global
+//!   *replaces* the compiler-emitted vtable. Constructors that
+//!   compute `this->vptr = _ZTV<C> + 16` therefore land on stub
+//!   function pointers, and SAW's virtual dispatch resolves to the
+//!   havoc spec instead of the real method body.
 //!
 //! Derived classes whose methods carry `OverrideAttr` reuse the
 //! originating class's stub — every level of the hierarchy stores
@@ -32,6 +43,11 @@ use std::path::Path;
 /// - `vtable_stubs.ll`: stubs + concrete vtable globals (LLVM text IR).
 /// - `<class>_<method>_havoc_spec.saw`: one havoc spec per originating method.
 /// - `interface_overrides.saw`: override bindings + per-class `alloc_<class>_this`.
+///
+/// `target_triple` is the `target triple = "..."` string from the
+/// compiled C++ bitcode (None ⇒ assume MSVC). It selects the vtable
+/// ABI layout — Itanium emits additional `_ZTV<mangled>` globals that
+/// override the compiler's vtables; see the module-level docs.
 pub fn emit_interface_stubs(
     methods: &[InterfaceMethod],
     constructors: &[ClassConstructor],
@@ -39,6 +55,7 @@ pub fn emit_interface_stubs(
     classes_with_vdtor: &HashSet<String>,
     output_dir: &Path,
     cryptol_fn: Option<&str>,
+    target_triple: Option<&str>,
 ) -> Result<()> {
     if methods.is_empty() {
         return Ok(());
@@ -62,7 +79,7 @@ pub fn emit_interface_stubs(
 
     // Write the LLVM IR stub file (no C compiler needed).
     let ll_path = output_dir.join("vtable_stubs.ll");
-    let ll_content = generate_llvm_ir_stubs(&by_class, classes_with_vdtor);
+    let ll_content = generate_llvm_ir_stubs(&by_class, classes_with_vdtor, target_triple);
     fs::write(&ll_path, &ll_content)
         .with_context(|| format!("Failed to write {}", ll_path.display()))?;
 
@@ -170,7 +187,18 @@ pub fn link_stubs_with_main(
     let combined_path = output_dir.join(combined_filename);
     let candidates: &[&str] = &["llvm-link", "llvm-link.exe"];
     for cmd in candidates {
+        // `--override=<stubs.bc>` tells llvm-link to take the
+        // definitions of any symbols present in the stub bitcode as
+        // canonical, overriding the same-named symbols in the main
+        // bitcode. This is what makes the Itanium-ABI `_ZTV<C>`
+        // override actually win over the compiler-emitted vtable —
+        // without it, llvm-link sees both as `linkonce_odr` and is
+        // free to pick either. For MSVC-shaped stubs (which use
+        // disjoint symbol names like `@<class>_vtable`) the flag is a
+        // harmless no-op.
+        let override_arg = format!("--override={}", stubs_bc_path.display());
         match std::process::Command::new(cmd)
+            .arg(&override_arg)
             .arg(main_bitcode)
             .arg(&stubs_bc_path)
             .arg("-o")
@@ -225,10 +253,28 @@ impl AssembledStubs {
 
 /// Generate the LLVM IR text (`vtable_stubs.ll`) with stub functions and
 /// concrete vtable globals for every class in `by_class`.
+///
+/// Always emits:
+///   * one stub function per originating virtual method,
+///   * an `@<class>_vtable = global [N x ptr] [...]` (used by the
+///     per-class `alloc_<class>_this` SAW helper).
+///
+/// On Itanium-ABI targets, additionally emits:
+///   * `@_ZTV<mangled> = linkonce_odr unnamed_addr constant
+///     { [<N+2> x ptr] } { [<N+2> x ptr] [ptr null, ptr null, stub1,
+///     stub2, ...] }, align 8` — a layout-matching override for the
+///     compiler-emitted vtable that virtual constructors load from
+///     (`store ptr getelementptr inbounds (..., @_ZTV<C>, ..., i32 2),
+///     ptr %this`). When the stub bitcode is linked into the C++
+///     bitcode via `llvm-link --override`, our stub `_ZTV<C>` wins and
+///     virtual dispatch resolves to the stub function (which has a
+///     havoc spec bound) instead of the real method.
 pub fn generate_llvm_ir_stubs(
     by_class: &BTreeMap<String, Vec<&InterfaceMethod>>,
     classes_with_vdtor: &HashSet<String>,
+    target_triple: Option<&str>,
 ) -> String {
+    let abi = TargetAbi::from_triple(target_triple);
     let originating = compute_originating_classes(by_class);
     let resolve_stub_class = |m: &InterfaceMethod| -> String {
         if m.is_override {
@@ -256,8 +302,9 @@ pub fn generate_llvm_ir_stubs(
     out.push_str(";\n");
     out.push_str("; SAW resolves indirect vtable calls through these:\n");
     out.push_str(";   this->vptr -> vtable[slot] -> stub function -> havoc spec\n\n");
-    out.push_str("target datalayout = \"e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"\n");
-    out.push_str("target triple = \"x86_64-pc-windows-msvc\"\n\n");
+    out.push_str(abi.datalayout());
+    out.push('\n');
+    out.push_str(&format!("target triple = \"{}\"\n\n", abi.triple()));
 
     for (class_name, class_methods) in by_class {
         let safe_class = sanitize_name(class_name).to_lowercase();
@@ -269,9 +316,23 @@ pub fn generate_llvm_ir_stubs(
         // a virtual dtor. Itanium would carry a pair (complete + deleting);
         // matching the wrong ABI shifts every method slot by one.
         if has_vdtor {
-            out.push_str(&format!(
-                "define void @{safe_class}_deleting_dtor_stub(ptr %self, i32 %flags) {{\n  ret void\n}}\n\n"
-            ));
+            match abi {
+                TargetAbi::Msvc => {
+                    out.push_str(&format!(
+                        "define void @{safe_class}_deleting_dtor_stub(ptr %self, i32 %flags) {{\n  ret void\n}}\n\n"
+                    ));
+                }
+                TargetAbi::Itanium => {
+                    // Itanium has two dtor slots: D1 (complete object)
+                    // at slot 0, D0 (deleting) at slot 1.
+                    out.push_str(&format!(
+                        "define void @{safe_class}_complete_dtor_stub(ptr %self) {{\n  ret void\n}}\n\n"
+                    ));
+                    out.push_str(&format!(
+                        "define void @{safe_class}_deleting_dtor_stub(ptr %self) {{\n  ret void\n}}\n\n"
+                    ));
+                }
+            }
         }
 
         for method in class_methods {
@@ -281,11 +342,15 @@ pub fn generate_llvm_ir_stubs(
             emit_stub_for_method(&mut out, class_name, &stub_name_for(method), method);
         }
 
-        let dtor_slots = if has_vdtor { 1 } else { 0 };
-        let slot_count = class_methods.len() + dtor_slots;
-        out.push_str(&format!("; Concrete vtable for {class_name}\n"));
+        // MSVC-style flat vtable. Kept on every target — the
+        // `alloc_<class>_this` SAW helper references this global via
+        // `llvm_global_initializer "<class>_vtable"` and is portable
+        // across ABIs.
+        let msvc_dtor_slots = if has_vdtor { 1 } else { 0 };
+        let msvc_slot_count = class_methods.len() + msvc_dtor_slots;
+        out.push_str(&format!("; Concrete vtable for {class_name} (MSVC-style, used by alloc_{safe_class}_this)\n"));
         out.push_str(&format!(
-            "@{safe_class}_vtable = global [{slot_count} x ptr] [\n"
+            "@{safe_class}_vtable = global [{msvc_slot_count} x ptr] [\n"
         ));
         let mut first = true;
         if has_vdtor {
@@ -302,8 +367,130 @@ pub fn generate_llvm_ir_stubs(
             }
         }
         out.push_str("\n]\n\n");
+
+        // Itanium ABI: also emit a `_ZTV<MangledClass>` override with
+        // leader slots `[offset-to-top, RTTI]` followed by (D1, D0)
+        // dtor slots when applicable, then methods in declaration
+        // order. Linking with `llvm-link --override=vtable_stubs.bc`
+        // makes this definition win over the compiler-emitted one so
+        // virtual dispatch from `new C()` resolves to stubs.
+        if matches!(abi, TargetAbi::Itanium) {
+            let itanium_dtor_slots = if has_vdtor { 2 } else { 0 };
+            let itanium_slot_count = 2 + itanium_dtor_slots + class_methods.len();
+            let mangled = itanium_mangle_class_name(class_name);
+            let symbol = format!("_ZTV{mangled}");
+            out.push_str(&format!(
+                "; Itanium-ABI vtable override for {class_name} ({symbol}).\n"
+            ));
+            out.push_str(&format!(
+                "; Replaces the compiler-emitted vtable when linked via `llvm-link --override`.\n"
+            ));
+            out.push_str(&format!(
+                "@{symbol} = linkonce_odr unnamed_addr constant {{ [{itanium_slot_count} x ptr] }} {{ [{itanium_slot_count} x ptr] [\n"
+            ));
+            // Leader slots: offset-to-top and RTTI pointer. We emit
+            // `null` for both — RTTI is only consulted by `dynamic_cast`
+            // / `typeid`, neither of which appear in havoc proofs, and
+            // offset-to-top is unused outside of multi-inheritance
+            // adjustor thunks.
+            out.push_str("  ptr null,\n");
+            out.push_str("  ptr null");
+            if has_vdtor {
+                out.push_str(&format!(
+                    ",\n  ptr @{safe_class}_complete_dtor_stub,\n  ptr @{safe_class}_deleting_dtor_stub"
+                ));
+            }
+            for method in class_methods {
+                let stub_name = stub_name_for(method);
+                out.push_str(&format!(",\n  ptr @{stub_name}"));
+            }
+            out.push_str("\n] }, align 8\n\n");
+        }
     }
     out
+}
+
+/// LLVM target ABI flavour.  Selected from the input bitcode's
+/// `target triple` line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TargetAbi {
+    /// Windows-MSVC C++ ABI. Flat vtable, single deleting-dtor slot,
+    /// MSVC-style mangled vtable symbols (`??_7C@@6B@`).
+    Msvc,
+    /// Itanium C++ ABI (Linux / macOS / *BSD / MinGW). Vtable has two
+    /// leader slots (offset-to-top, RTTI), two dtor slots (D1, D0),
+    /// `_ZTV<mangled>` mangled symbol.
+    Itanium,
+}
+
+impl TargetAbi {
+    fn from_triple(triple: Option<&str>) -> Self {
+        match triple {
+            // Explicit MSVC stays MSVC. Cygwin / MinGW (`windows-gnu`)
+            // actually uses Itanium for vtable layout, so don't lump it
+            // in with MSVC here.
+            Some(t) if t.contains("windows-msvc") => TargetAbi::Msvc,
+            // Anything else with a triple → Itanium. Most common cases:
+            // `x86_64-unknown-linux-gnu`, `aarch64-apple-darwin`,
+            // `x86_64-pc-windows-gnu` (MinGW).
+            Some(_) => TargetAbi::Itanium,
+            // No triple given → preserve historical default. The
+            // original `vtable_stubs.ll` hard-coded the MSVC triple and
+            // every existing test exercises the MSVC layout.
+            None => TargetAbi::Msvc,
+        }
+    }
+
+    fn triple(self) -> &'static str {
+        match self {
+            TargetAbi::Msvc => "x86_64-pc-windows-msvc",
+            TargetAbi::Itanium => "x86_64-unknown-linux-gnu",
+        }
+    }
+
+    fn datalayout(self) -> &'static str {
+        match self {
+            // MSVC datalayout — matches `clang -target x86_64-pc-windows-msvc`.
+            TargetAbi::Msvc =>
+                "target datalayout = \"e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"",
+            // Itanium / SysV datalayout — matches `clang -target x86_64-unknown-linux-gnu`.
+            // The `m:` mangling token (`m:e` vs `m:w`) is what differs
+            // most visibly from MSVC and is the only piece llvm-link
+            // cares about when merging modules.
+            TargetAbi::Itanium =>
+                "target datalayout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"",
+        }
+    }
+}
+
+/// Mangle a C++ class name into the Itanium-ABI form that follows the
+/// `_ZTV` prefix.  Handles top-level (`BadProcessor` → `12BadProcessor`)
+/// and `::`-namespaced (`foo::Bar` → `N3foo3BarE`) cases.  Stripped of
+/// any leading `class `/`struct ` keyword that clang may attach.
+///
+/// Does **not** handle templates (`Foo<int>`), anonymous namespaces, or
+/// non-ASCII identifiers — none of which appear in the C++ verification
+/// demos. If a future demo needs them, switch to a real Itanium mangler
+/// (e.g. via `cpp_demangle`'s inverse) instead of extending this.
+fn itanium_mangle_class_name(class_name: &str) -> String {
+    let name = class_name
+        .trim_start_matches("class ")
+        .trim_start_matches("struct ")
+        .trim();
+    if name.contains("::") {
+        let mut out = String::from("N");
+        for part in name.split("::") {
+            // ASCII byte length matches what Itanium expects for plain
+            // identifiers; reject (silently fall back to byte-count)
+            // for anything weirder.
+            out.push_str(&part.len().to_string());
+            out.push_str(part);
+        }
+        out.push('E');
+        out
+    } else {
+        format!("{}{}", name.len(), name)
+    }
 }
 
 /// Build `method_name → originating_class` for use when redirecting
@@ -411,7 +598,7 @@ mod tests {
         ];
         let dir = std::env::temp_dir().join("saw_spec_gen_vtable_order");
         let _ = fs::remove_dir_all(&dir);
-        emit_interface_stubs(&methods, &[], &[], &HashSet::new(), &dir, None).unwrap();
+        emit_interface_stubs(&methods, &[], &[], &HashSet::new(), &dir, None, None).unwrap();
         let ll = fs::read_to_string(dir.join("vtable_stubs.ll")).unwrap();
         let vtable_section = ll.split("@irv_vtable").nth(1).expect("vtable missing");
         let valid_pos = vtable_section
@@ -434,7 +621,7 @@ mod tests {
         let methods = vec![make_iface_method("IKeyStore", "Read", large, 100)];
         let dir = std::env::temp_dir().join("saw_spec_gen_vtable_sret");
         let _ = fs::remove_dir_all(&dir);
-        emit_interface_stubs(&methods, &[], &[], &HashSet::new(), &dir, None).unwrap();
+        emit_interface_stubs(&methods, &[], &[], &HashSet::new(), &dir, None, None).unwrap();
         let ll = fs::read_to_string(dir.join("vtable_stubs.ll")).unwrap();
         let stub_line = ll
             .lines()
@@ -456,7 +643,7 @@ mod tests {
         )];
         let dir = std::env::temp_dir().join("saw_spec_gen_vtable_no_sret");
         let _ = fs::remove_dir_all(&dir);
-        emit_interface_stubs(&methods, &[], &[], &HashSet::new(), &dir, None).unwrap();
+        emit_interface_stubs(&methods, &[], &[], &HashSet::new(), &dir, None, None).unwrap();
         let ll = fs::read_to_string(dir.join("vtable_stubs.ll")).unwrap();
         let stub_line = ll
             .lines()
@@ -476,7 +663,7 @@ mod tests {
         let methods = vec![make_iface_method("IKeyStore", "Read", tuple_ret, 100)];
         let dir = std::env::temp_dir().join("saw_spec_gen_vtable_sret_unsized");
         let _ = fs::remove_dir_all(&dir);
-        emit_interface_stubs(&methods, &[], &[], &HashSet::new(), &dir, None).unwrap();
+        emit_interface_stubs(&methods, &[], &[], &HashSet::new(), &dir, None, None).unwrap();
         let ll = fs::read_to_string(dir.join("vtable_stubs.ll")).unwrap();
         let stub_line = ll
             .lines()
@@ -497,7 +684,7 @@ mod tests {
         let methods = vec![make_iface_method("IKeyStore", "Read", large, 100)];
         let dir = std::env::temp_dir().join("saw_spec_gen_vtable_sret_order");
         let _ = fs::remove_dir_all(&dir);
-        emit_interface_stubs(&methods, &[], &[], &HashSet::new(), &dir, None).unwrap();
+        emit_interface_stubs(&methods, &[], &[], &HashSet::new(), &dir, None, None).unwrap();
         let ll = fs::read_to_string(dir.join("vtable_stubs.ll")).unwrap();
         let stub_line = ll
             .lines()
@@ -506,5 +693,99 @@ mod tests {
         let this_pos = stub_line.find("%arg0").expect("this missing");
         let sret_pos = stub_line.find("%retptr").expect("sret missing");
         assert!(this_pos < sret_pos);
+    }
+
+    #[test]
+    fn test_itanium_emits_ztv_override_with_leader_slots() {
+        // Itanium triple → emit `_ZTV<mangled>` with `[null, null,
+        // stub1, stub2, ...]` layout in addition to the MSVC-style
+        // `@<class>_vtable`.
+        let methods = vec![
+            make_iface_method("BadProcessor", "validate", TypeInfo::Void, 100),
+            make_iface_method("BadProcessor", "audit", TypeInfo::Void, 200),
+        ];
+        let dir = std::env::temp_dir().join("saw_spec_gen_itanium_ztv");
+        let _ = fs::remove_dir_all(&dir);
+        emit_interface_stubs(
+            &methods,
+            &[],
+            &[],
+            &HashSet::new(),
+            &dir,
+            None,
+            Some("x86_64-unknown-linux-gnu"),
+        )
+        .unwrap();
+        let ll = fs::read_to_string(dir.join("vtable_stubs.ll")).unwrap();
+        assert!(
+            ll.contains("target triple = \"x86_64-unknown-linux-gnu\""),
+            "expected Itanium triple, got:\n{ll}",
+        );
+        assert!(
+            ll.contains("@badprocessor_vtable"),
+            "MSVC-style helper vtable should still be emitted (used by alloc_<class>_this)",
+        );
+        // 2 leader slots + 2 methods = 4 slots wrapped in a struct.
+        assert!(
+            ll.contains("@_ZTV12BadProcessor = linkonce_odr unnamed_addr constant { [4 x ptr] }"),
+            "expected Itanium `_ZTV12BadProcessor` override with 4 slots, got:\n{ll}",
+        );
+        // Leader-slot signature: two `ptr null` entries before any stub.
+        let ztv_section = ll
+            .split("@_ZTV12BadProcessor")
+            .nth(1)
+            .expect("ZTV body missing");
+        let leader_block = &ztv_section[..ztv_section.find("], align").unwrap_or(ztv_section.len())];
+        assert!(
+            leader_block.matches("ptr null").count() >= 2,
+            "expected two `ptr null` leader slots, got:\n{leader_block}",
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_msvc_default_omits_ztv_override() {
+        // No triple → MSVC default → no `_ZTV` symbol should appear.
+        let methods = vec![
+            make_iface_method("BadProcessor", "validate", TypeInfo::Void, 100),
+        ];
+        let dir = std::env::temp_dir().join("saw_spec_gen_msvc_no_ztv");
+        let _ = fs::remove_dir_all(&dir);
+        emit_interface_stubs(&methods, &[], &[], &HashSet::new(), &dir, None, None).unwrap();
+        let ll = fs::read_to_string(dir.join("vtable_stubs.ll")).unwrap();
+        assert!(ll.contains("target triple = \"x86_64-pc-windows-msvc\""));
+        assert!(!ll.contains("_ZTV"), "MSVC mode should not emit Itanium `_ZTV` symbols:\n{ll}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_itanium_mangle_class_name_simple_and_namespaced() {
+        assert_eq!(itanium_mangle_class_name("BadProcessor"), "12BadProcessor");
+        assert_eq!(itanium_mangle_class_name("foo::Bar"), "N3foo3BarE");
+        // Tolerates `class `/`struct ` keyword prefix from clang.
+        assert_eq!(itanium_mangle_class_name("class BadProcessor"), "12BadProcessor");
+    }
+
+    #[test]
+    fn test_target_abi_from_triple_picks_correct_flavour() {
+        assert_eq!(
+            TargetAbi::from_triple(Some("x86_64-pc-windows-msvc")),
+            TargetAbi::Msvc,
+        );
+        assert_eq!(
+            TargetAbi::from_triple(Some("x86_64-unknown-linux-gnu")),
+            TargetAbi::Itanium,
+        );
+        assert_eq!(
+            TargetAbi::from_triple(Some("aarch64-apple-darwin")),
+            TargetAbi::Itanium,
+        );
+        // MinGW (windows-gnu) uses the Itanium ABI for vtable layout
+        // even though the OS is Windows.
+        assert_eq!(
+            TargetAbi::from_triple(Some("x86_64-pc-windows-gnu")),
+            TargetAbi::Itanium,
+        );
+        assert_eq!(TargetAbi::from_triple(None), TargetAbi::Msvc);
     }
 }

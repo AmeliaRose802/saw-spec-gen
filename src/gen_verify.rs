@@ -50,6 +50,15 @@ pub fn run(
     // match short C++ names against `%\"struct.Foo::Bar::Baz\"`.
     let (ir_struct_sizes, ir_funcs) = llvm_ir::load_optional(llvm_ir_path)?;
 
+    // Sniff the bitcode's `target triple = "..."` line so vtable stub
+    // generation can pick the correct ABI layout. Without this, an
+    // Itanium-compiled binary (Linux / macOS) would get MSVC-shaped
+    // stubs that never line up with the compiler's `_ZTV<C> + 16`
+    // pointer arithmetic in virtual constructors, and every dispatch
+    // would fall through to the unmodified real method body — defeating
+    // havoc-based verification.
+    let target_triple = llvm_ir_path.and_then(read_target_triple);
+
     // Find the target function (FunctionInfo with call graph)
     let target_fn = all_functions
         .iter()
@@ -297,6 +306,7 @@ pub fn run(
             &classes_with_vdtor,
             output,
             Some(cryptol_fn),
+            target_triple.as_deref(),
         )?;
         eprintln!(
             "Generated {} havoc specs + {} constructor overrides",
@@ -514,4 +524,25 @@ pub fn run(
     eprintln!("Generated verification script in {}", output.display());
     eprintln!("Run with: saw {}/verify.saw", output.display());
     Ok(())
+}
+
+/// Read the first ~50 lines of an `.ll` text file looking for a
+/// `target triple = "..."` directive and return its value. Returns
+/// `None` when the file is missing, the directive isn't present in the
+/// header, or quoting is malformed. Used by stub generation to choose
+/// the right C++ ABI layout for `vtable_stubs.ll`.
+fn read_target_triple(ll_path: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(ll_path).ok()?;
+    for line in text.lines().take(50) {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("target triple") {
+            // Expected form: `target triple = "<triple>"`.
+            let after_eq = rest.split_once('=').map(|(_, r)| r.trim())?;
+            let unquoted = after_eq.trim_matches('"');
+            if !unquoted.is_empty() {
+                return Some(unquoted.to_string());
+            }
+        }
+    }
+    None
 }

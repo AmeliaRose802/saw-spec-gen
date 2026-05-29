@@ -400,7 +400,7 @@ fn main() -> Result<()> {
                     // Detect which classes have explicit virtual destructors
                     let classes_with_vdtor = clang_ast::classes_with_virtual_dtor(&ast);
 
-                    saw_emit::emit_interface_stubs(&vmethods, &ctors, &all_globals, &classes_with_vdtor, &output, None)?;
+                    saw_emit::emit_interface_stubs(&vmethods, &ctors, &all_globals, &classes_with_vdtor, &output, None, None)?;
                     eprintln!(
                         "Generated {} interface stubs in {}",
                         vmethods.len(),
