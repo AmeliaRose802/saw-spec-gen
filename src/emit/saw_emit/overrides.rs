@@ -93,7 +93,9 @@ fn emit_override_bindings(out: &mut String, methods: &[InterfaceMethod]) -> Vec<
     let mut all_overrides = Vec::new();
     out.push_str("// --- Override bindings ---\n");
     out.push_str("// For vtable dispatch: binds to stub function names (from vtable_stubs.ll)\n");
-    out.push_str("// For direct calls: binds to the mangled C++ name (already in your bitcode)\n\n");
+    out.push_str(
+        "// For direct calls: binds to the mangled C++ name (already in your bitcode)\n\n",
+    );
     for method in methods {
         if method.is_override {
             continue;
@@ -139,7 +141,9 @@ fn emit_per_class_helpers(
         out.push_str("// ===========================================================\n");
         out.push_str("//\n");
         out.push_str("// Allocates a `this` pointer (8 bytes for vptr) with the vtable\n");
-        out.push_str(&format!("// pointer wired to {safe_class}_vtable. SAW resolves:\n"));
+        out.push_str(&format!(
+            "// pointer wired to {safe_class}_vtable. SAW resolves:\n"
+        ));
         out.push_str(&format!(
             "//   this -> vptr -> {safe_class}_vtable[slot] -> stub -> havoc spec\n"
         ));
@@ -324,7 +328,9 @@ pub fn container_layout_for(
     ty: &TypeInfo,
     interface_classes: &HashSet<String>,
 ) -> Option<Vec<FieldKind>> {
-    let TypeInfo::Pointer(inner) = ty else { return None };
+    let TypeInfo::Pointer(inner) = ty else {
+        return None;
+    };
     let TypeInfo::Struct { name, fields, .. } = inner.as_ref() else {
         return None;
     };
@@ -333,15 +339,14 @@ pub fn container_layout_for(
     }
     let kinds: Vec<FieldKind> = fields
         .iter()
-        .map(|(fname, fty)| match field_interface_name(fty, interface_classes) {
-            Some(iface) => FieldKind::Interface(fname.clone(), iface),
-            None => FieldKind::Other(fname.clone()),
-        })
+        .map(
+            |(fname, fty)| match field_interface_name(fty, interface_classes) {
+                Some(iface) => FieldKind::Interface(fname.clone(), iface),
+                None => FieldKind::Other(fname.clone()),
+            },
+        )
         .collect();
-    if kinds
-        .iter()
-        .any(|k| matches!(k, FieldKind::Interface(..)))
-    {
+    if kinds.iter().any(|k| matches!(k, FieldKind::Interface(..))) {
         Some(kinds)
     } else {
         None
@@ -351,10 +356,7 @@ pub fn container_layout_for(
 /// Extract the interface class name from a field type. Recognises raw
 /// pointers and the standard smart-pointer wrappers whose templated
 /// type name embeds the pointee.
-pub fn field_interface_name(
-    ty: &TypeInfo,
-    interface_classes: &HashSet<String>,
-) -> Option<String> {
+pub fn field_interface_name(ty: &TypeInfo, interface_classes: &HashSet<String>) -> Option<String> {
     if let TypeInfo::Pointer(inner) = ty {
         let pointee = match inner.as_ref() {
             TypeInfo::Struct { name, .. } | TypeInfo::Opaque { name, .. } => Some(name.as_str()),
@@ -371,7 +373,12 @@ pub fn field_interface_name(
         _ => None,
     };
     if let Some(name) = wrapped {
-        for wrap in ["std::unique_ptr<", "unique_ptr<", "std::shared_ptr<", "shared_ptr<"] {
+        for wrap in [
+            "std::unique_ptr<",
+            "unique_ptr<",
+            "std::shared_ptr<",
+            "shared_ptr<",
+        ] {
             if let Some(rest) = name.strip_prefix(wrap) {
                 if let Some(end) = rest.find('>') {
                     let inner = rest[..end].trim().trim_end_matches('*').trim();

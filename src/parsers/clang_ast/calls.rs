@@ -36,7 +36,8 @@ fn build_function_id_map(ast: &AstNode) -> HashMap<String, (String, String)> {
             let mangled = n.mangled_name.as_deref().unwrap_or("");
             if !id.is_empty() && (!name.is_empty() || !mangled.is_empty()) {
                 let m = if mangled.is_empty() { name } else { mangled };
-                self.0.insert(id.to_string(), (name.to_string(), m.to_string()));
+                self.0
+                    .insert(id.to_string(), (name.to_string(), m.to_string()));
             }
             WalkAction::Continue
         }
@@ -63,12 +64,14 @@ impl<'a> Visitor for CallResolver<'a> {
         collect_call_refs(node, &mut calls, self.id_to_fn);
         calls.sort_by(|a, b| a.mangled_name.cmp(&b.mangled_name));
         calls.dedup_by(|a, b| a.mangled_name == b.mangled_name);
-        if let Some(func) = self.functions.iter_mut().find(|f| {
-            match (mangled, f.mangled_name.as_deref()) {
-                (Some(a), Some(b)) => a == b,
-                _ => f.name == fname,
-            }
-        }) {
+        if let Some(func) =
+            self.functions
+                .iter_mut()
+                .find(|f| match (mangled, f.mangled_name.as_deref()) {
+                    (Some(a), Some(b)) => a == b,
+                    _ => f.name == fname,
+                })
+        {
             func.called_functions = calls;
         }
         WalkAction::Continue
@@ -237,10 +240,7 @@ mod tests {
         resolve_called_functions(&ast, &mut funcs);
         assert_eq!(funcs[0].called_functions.len(), 1);
         assert_eq!(funcs[0].called_functions[0].name, "callee");
-        assert_eq!(
-            funcs[0].called_functions[0].mangled_name,
-            "?callee@@YAXXZ"
-        );
+        assert_eq!(funcs[0].called_functions[0].mangled_name, "?callee@@YAXXZ");
     }
 
     #[test]

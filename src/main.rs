@@ -1,24 +1,7 @@
-// Top-level utilities that stay at the crate root.
-mod constraints;
-mod gen_verify;
-mod mangle;
-
-// Grouped subsystems. Each is a folder under `src/` with its own
-// module root file. Re-exported below so existing `crate::clang_ast::`
-// (etc.) call sites keep working without churn.
-mod emit;
-mod parsers;
-mod transform;
-
-// Re-exports keep the public-from-main.rs view flat: the rest of the
-// crate can still write `crate::clang_ast::parse_ast(...)` rather than
-// `crate::parsers::clang_ast::parse_ast(...)`. The folder grouping is
-// a layout-only change.
-pub(crate) use emit::{cryptol_emit, rust_trait_emit, saw_emit};
-pub(crate) use parsers::{clang_ast, llvm_ir, mir_json};
-pub(crate) use transform::{
-    alias_fallbacks, alias_fallbacks_ir, patch_llvm_ir, spec_rewrite, type_resolve,
-};
+// All module bodies live in the library crate (`src/lib.rs`) so that
+// `cargo test --lib` has a target to build. This binary just parses
+// CLI args and dispatches into `saw_spec_gen::commands::*`.
+use saw_spec_gen::commands;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -326,125 +309,14 @@ fn main() -> Result<()> {
             cryptol,
             emit_stubs,
             experimental,
-        } => {
-            eprintln!("Reading clang AST from: {}", input.display());
-            let ast = clang_ast::parse_ast(&input)?;
-            let functions = clang_ast::extract_functions(&ast, filter.as_deref())?;
-            eprintln!("Found {} functions", functions.len());
-
-            let specs = constraints::derive_constraints(&functions)?;
-
-            // When experimental, collect ALL globals from the translation unit
-            // so virtual/external specs can declare they may modify any of them.
-            let all_globals = if experimental {
-                clang_ast::extract_all_globals(&ast)?
-            } else {
-                vec![]
-            };
-            saw_emit::emit_saw_specs_with_globals(&specs, &output, experimental, &all_globals)?;
-            eprintln!("Generated {} specs in {}", specs.len(), output.display());
-
-            if cryptol {
-                cryptol_emit::emit_cryptol_constraints(&functions, &output)?;
-                eprintln!("Generated Cryptol constraints in {}", output.display());
-            }
-
-            if emit_stubs {
-                let vmethods = clang_ast::extract_virtual_methods(&ast, filter.as_deref())?;
-                if vmethods.is_empty() {
-                    eprintln!("No virtual methods found");
-
-                    // Check if there are missing interface types that weren't in the AST
-                    let missing = clang_ast::detect_missing_interfaces(&ast);
-                    if !missing.is_empty() {
-                        eprintln!();
-                        eprintln!(
-                            "WARNING: Found {} interface type(s) referenced by class fields but missing from this AST:",
-                            missing.len(),
-                        );
-                        for m in &missing {
-                            eprintln!(
-                                "  - {} (via field {}.{}, type {})",
-                                m.interface_name, m.owning_class, m.field_name, m.wrapper,
-                            );
-                        }
-                        eprintln!();
-                        eprintln!("To generate vtable stubs for these, run additional passes:");
-                        for m in &missing {
-                            eprintln!(
-                                "  clang -Xclang -ast-dump=json -Xclang -ast-dump-filter={} ... > {}_ast.json",
-                                m.interface_name, m.interface_name,
-                            );
-                        }
-                        eprintln!();
-                    }
-                } else {
-                    // Collect class names that have virtual methods.
-                    // `extract_virtual_methods` recognises both clang
-                    // `virtual: true` and `OverrideAttr` markers, so this
-                    // already covers derived classes overriding base methods.
-                    let class_names: Vec<String> = vmethods
-                        .iter()
-                        .map(|m| m.class_name.clone())
-                        .collect::<std::collections::HashSet<_>>()
-                        .into_iter()
-                        .collect();
-                    let ctors = clang_ast::extract_constructors(&ast, &class_names)?;
-
-                    // Collect all file-scope globals from the AST directly.
-                    // Any virtual method could write to any global, so havoc
-                    // specs need the full list — not just ones referenced by
-                    // filtered functions.
-                    let all_globals = clang_ast::extract_all_globals(&ast)?;
-
-                    // Detect which classes have explicit virtual destructors
-                    let classes_with_vdtor = clang_ast::classes_with_virtual_dtor(&ast);
-
-                    saw_emit::emit_interface_stubs(&vmethods, &ctors, &all_globals, &classes_with_vdtor, &output, None, None)?;
-                    eprintln!(
-                        "Generated {} interface stubs in {}",
-                        vmethods.len(),
-                        output.display(),
-                    );
-                    if !ctors.is_empty() {
-                        eprintln!(
-                            "Generated {} constructor overrides",
-                            ctors.len(),
-                        );
-                    }
-                }
-            }
-        }
+        } => commands::from_clang_ast(input, output, filter, cryptol, emit_stubs, experimental),
         Commands::FromMirJson {
             input,
             output,
             filter,
             mir_verify,
             cryptol,
-        } => {
-            eprintln!("Reading MIR JSON from: {}", input.display());
-            let mir = mir_json::parse_mir(&input)?;
-            let functions = mir_json::extract_functions(&mir, filter.as_deref())?;
-            eprintln!("Found {} functions", functions.len());
-
-            let specs = constraints::derive_constraints(&functions)?;
-            if mir_verify {
-                saw_emit::emit_mir_saw_specs(&specs, &output)?;
-                eprintln!(
-                    "Generated {} MIR specs in {}",
-                    specs.len(),
-                    output.display()
-                );
-            } else {
-                saw_emit::emit_saw_specs(&specs, &output, false)?;
-                eprintln!("Generated {} specs in {}", specs.len(), output.display());
-            }
-
-            if cryptol {
-                cryptol_emit::emit_cryptol_constraints(&functions, &output)?;
-                eprintln!("Generated Cryptol constraints in {}", output.display());
-            }
-        }
+        } => commands::from_mir_json(input, output, filter, mir_verify, cryptol),
         Commands::FromLlvmIr {
             input,
             output,
@@ -452,92 +324,7 @@ fn main() -> Result<()> {
             cryptol,
             emit_overrides,
             target,
-        } => {
-            eprintln!("Reading LLVM IR from: {}", input.display());
-            let ir = llvm_ir::parse_llvm_ir(&input)?;
-            let functions = llvm_ir::extract_functions(&ir, filter.as_deref())?;
-            eprintln!("Found {} functions", functions.len());
-
-            let specs = constraints::derive_constraints(&functions)?;
-            saw_emit::emit_saw_specs(&specs, &output, false)?;
-            eprintln!("Generated {} specs in {}", specs.len(), output.display());
-
-            if cryptol {
-                cryptol_emit::emit_cryptol_constraints(&functions, &output)?;
-                eprintln!("Generated Cryptol constraints in {}", output.display());
-            }
-
-            if emit_overrides {
-                use crate::parsers::llvm_ir::callgraph;
-                let cg = callgraph::build_callgraph(&ir);
-                let target_name = target.as_deref().or(filter.as_deref())
-                    .unwrap_or("");
-                let external = callgraph::external_callees(&cg, target_name);
-
-                if external.is_empty() {
-                    eprintln!("No external calls found for target '{}'", target_name);
-                    if !target_name.is_empty() {
-                        // Show available functions with callees
-                        let with_calls: Vec<_> = cg.iter()
-                            .filter(|(_, v)| !v.is_empty())
-                            .map(|(k, v)| format!("  {} ({} calls)", k.chars().take(80).collect::<String>(), v.len()))
-                            .collect();
-                        if !with_calls.is_empty() {
-                            eprintln!("Functions with calls (showing first 10):");
-                            for f in with_calls.iter().take(10) {
-                                eprintln!("{}", f);
-                            }
-                        }
-                    }
-                } else {
-                    // Generate scaffold override specs for external calls
-                    let overrides_dir = output.join("overrides");
-                    std::fs::create_dir_all(&overrides_dir)?;
-
-                    let mut all_overrides = String::new();
-                    all_overrides.push_str("// Auto-generated override scaffolding for external calls\n");
-                    all_overrides.push_str(&format!("// Target: {}\n", target_name));
-                    all_overrides.push_str(&format!("// {} external calls identified\n\n", external.len()));
-
-                    for (i, callee) in external.iter().enumerate() {
-                        let spec_name = format!("override_{}", i);
-                        let spec = format!(
-                            "// Override for: {name}\n\
-                             // Mangled: {mangled}\n\
-                             // TODO: Tighten this contract — currently returns any value.\n\
-                             //       For Option<T>, constrain discriminant to 0 or 1.\n\
-                             //       For Result<T,E>, constrain discriminant to valid range.\n\
-                             let {spec_name}_spec : LLVMSetup () = do {{\n\
-                             \n\
-                             // TODO: Add parameter allocations matching the LLVM signature.\n\
-                             //       Check the function signature in the .ll file:\n\
-                             //         grep 'declare.*{short}' module.ll\n\
-                             \n\
-                             llvm_execute_func [];\n\
-                             \n\
-                             // TODO: Specify return value.\n\
-                             //   ret <- llvm_fresh_var \"ret\" (llvm_int 32);\n\
-                             //   llvm_return (llvm_term ret);\n\
-                             }};\n\n\
-                             // ov_{spec_name} <- llvm_unsafe_assume_spec m \"{mangled}\" {spec_name}_spec;\n\n",
-                            name = callee.name,
-                            mangled = callee.mangled_name,
-                            spec_name = spec_name,
-                            short = callee.mangled_name.chars().take(40).collect::<String>(),
-                        );
-                        all_overrides.push_str(&spec);
-                    }
-
-                    let overrides_path = overrides_dir.join("external_overrides.saw");
-                    std::fs::write(&overrides_path, &all_overrides)?;
-                    eprintln!(
-                        "Generated {} external override scaffolds in {}",
-                        external.len(),
-                        overrides_path.display()
-                    );
-                }
-            }
-        }
+        } => commands::from_llvm_ir(input, output, filter, cryptol, emit_overrides, target),
         Commands::GenVerify {
             ast,
             bitcode,
@@ -549,84 +336,31 @@ fn main() -> Result<()> {
             alias_size,
             alias_enum,
             use_llvm_combine_modules,
-        } => {
-            gen_verify::run(
-                &ast,
-                &bitcode,
-                llvm_ir.as_deref(),
-                &cryptol_spec,
-                &cryptol_fn,
-                &function,
-                &output,
-                &alias_size,
-                &alias_enum,
-                use_llvm_combine_modules,
-            )?;
-        }
+        } => commands::gen_verify_cmd(
+            ast,
+            bitcode,
+            llvm_ir,
+            cryptol_spec,
+            cryptol_fn,
+            function,
+            output,
+            alias_size,
+            alias_enum,
+            use_llvm_combine_modules,
+        ),
         Commands::GenRustTraitStubs { schema, output } => {
-            eprintln!("Reading trait schema: {}", schema.display());
-            rust_trait_emit::emit_trait_stubs(&schema, &output)?;
-            eprintln!(
-                "Wrote trait_stubs.ll and interface_overrides.saw to {}",
-                output.display(),
-            );
+            commands::gen_rust_trait_stubs(schema, output)
         }
-        Commands::FilterAst { input, output, keep } => {
-            let size_mb = std::fs::metadata(&input)
-                .map(|m| m.len() / (1024 * 1024))
-                .unwrap_or(0);
-            eprintln!(
-                "Filtering AST: {} ({} MB) -> {}",
-                input.display(),
-                size_mb,
-                output.display(),
-            );
-            eprintln!("Keep prefixes:");
-            for p in &keep {
-                eprintln!("  {}", p.display());
-            }
-            let stats = clang_ast::filter_ast_file(&input, &output, &keep)?;
-            eprintln!(
-                "Filter result: kept {}, dropped {}, no-loc {}",
-                stats.kept, stats.dropped, stats.no_loc,
-            );
-        }
+        Commands::FilterAst {
+            input,
+            output,
+            keep,
+        } => commands::filter_ast(input, output, keep),
         Commands::PatchLlvmIr {
             input,
             output,
             strip_msvc_eh,
             poison_to_undef,
-        } => {
-            if !strip_msvc_eh && !poison_to_undef {
-                anyhow::bail!(
-                    "patch-llvm-ir: pass at least one of \
-                     --strip-msvc-eh / --poison-to-undef",
-                );
-            }
-            eprintln!(
-                "Patching LLVM IR: {} -> {}",
-                input.display(),
-                output.display(),
-            );
-            let opts = patch_llvm_ir::PatchOptions {
-                strip_msvc_eh,
-                poison_to_undef,
-            };
-            let stats = patch_llvm_ir::patch_llvm_ir_file(&input, &output, opts)?;
-            if strip_msvc_eh {
-                eprintln!(
-                    "  stripped {} MSVC EH metadata global(s)",
-                    stats.eh_globals_stripped,
-                );
-            }
-            if poison_to_undef {
-                eprintln!(
-                    "  replaced {} poison literal(s) with undef",
-                    stats.poison_replaced,
-                );
-            }
-        }
+        } => commands::patch_llvm_ir_cmd(input, output, strip_msvc_eh, poison_to_undef),
     }
-
-    Ok(())
 }

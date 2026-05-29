@@ -27,9 +27,11 @@
 //! (see [`assemble_vtable_stubs`]).
 
 use super::havoc::generate_havoc_spec;
-use super::names::{sanitize_name};
+use super::names::sanitize_name;
 use super::overrides::generate_override_index_with_vtable;
-use super::types::{ir_default_return, method_param_ir_pieces, sret_inner_ir_type, type_to_llvm_ir};
+use super::types::{
+    ir_default_return, method_param_ir_pieces, sret_inner_ir_type, type_to_llvm_ir,
+};
 use crate::clang_ast::{ClassConstructor, InterfaceMethod};
 use crate::constraints::GlobalVarInfo;
 use anyhow::{Context, Result};
@@ -102,7 +104,10 @@ pub fn emit_interface_stubs(
         );
         let filepath = output_dir.join(&filename);
         let layout = layout_by_class.get(method.class_name.as_str()).copied();
-        fs::write(&filepath, generate_havoc_spec(method, globals, layout, cryptol_fn))?;
+        fs::write(
+            &filepath,
+            generate_havoc_spec(method, globals, layout, cryptol_fn),
+        )?;
     }
 
     let index_path = output_dir.join("interface_overrides.saw");
@@ -223,12 +228,18 @@ pub enum AssembledStubs {
     /// `vtable_stubs.ll` was not present; nothing to assemble.
     NoStubs,
     /// Successfully assembled to bitcode.
-    Bitcode { bc_filename: String, assembler: String },
+    Bitcode {
+        bc_filename: String,
+        assembler: String,
+    },
     /// `vtable_stubs.bc` was further pre-linked with the main bitcode
     /// into a single combined module. The emitted verify script can do
     /// one `llvm_load_module` and skip `llvm_combine_modules` (which
     /// the v1.5 SAW release tarball doesn't ship).
-    LinkedBitcode { combined_filename: String, linker: String },
+    LinkedBitcode {
+        combined_filename: String,
+        linker: String,
+    },
     /// No assembler was available; the user must run `llvm-as` or
     /// `clang -c -emit-llvm` manually before running SAW.
     TextOnly { ll_filename: String },
@@ -245,7 +256,9 @@ impl AssembledStubs {
         match self {
             AssembledStubs::NoStubs => None,
             AssembledStubs::Bitcode { bc_filename, .. } => Some(bc_filename.as_str()),
-            AssembledStubs::LinkedBitcode { combined_filename, .. } => Some(combined_filename.as_str()),
+            AssembledStubs::LinkedBitcode {
+                combined_filename, ..
+            } => Some(combined_filename.as_str()),
             AssembledStubs::TextOnly { .. } => Some("vtable_stubs.bc"),
         }
     }
@@ -541,11 +554,13 @@ fn emit_stub_for_method(
     out.push_str(&format!(
         "; {class_name}::{} [{}]\n",
         method.method.name,
-        if method.is_pure { "pure virtual" } else { "virtual" },
+        if method.is_pure {
+            "pure virtual"
+        } else {
+            "virtual"
+        },
     ));
-    out.push_str(&format!(
-        "define {ret_ir} @{stub_name}({params_ir}) {{\n"
-    ));
+    out.push_str(&format!("define {ret_ir} @{stub_name}({params_ir}) {{\n"));
     out.push_str(&format!("  {}\n", ir_default_return(&ret_ir)));
     out.push_str("}\n\n");
 }
@@ -554,9 +569,7 @@ fn emit_stub_for_method(
 mod tests {
     use super::*;
     use crate::clang_ast::InterfaceMethod;
-    use crate::constraints::{
-        FunctionInfo, Mutability, Nullability, ParamInfo, TypeInfo,
-    };
+    use crate::constraints::{FunctionInfo, Mutability, Nullability, ParamInfo, TypeInfo};
     use std::collections::HashSet;
 
     fn make_iface_method(class: &str, name: &str, ret: TypeInfo, offset: u64) -> InterfaceMethod {

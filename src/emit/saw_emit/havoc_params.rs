@@ -133,9 +133,7 @@ pub fn emit_adversarial_param(
     if name == "this" && matches!(inner_ty, TypeInfo::Opaque { size_bytes: 0, .. }) {
         let saw_type = type_to_saw(inner_ty);
         setup.push_str(&format!("\n    // Parameter: {name} ({ann_label})\n"));
-        setup.push_str(&format!(
-            "    {name}_ptr <- {alloc_kind} ({saw_type});\n"
-        ));
+        setup.push_str(&format!("    {name}_ptr <- {alloc_kind} ({saw_type});\n"));
         return;
     }
 
@@ -146,7 +144,14 @@ pub fn emit_adversarial_param(
     });
     if let Some(n) = buffer_size {
         emit_sized_buffer(
-            name, inner_ty, n, is_preserved, alloc_kind, &ann_label, setup, postconds,
+            name,
+            inner_ty,
+            n,
+            is_preserved,
+            alloc_kind,
+            &ann_label,
+            setup,
+            postconds,
         );
         return;
     }
@@ -199,9 +204,7 @@ fn emit_opaque_pointer(
 ) {
     let saw_type = type_to_saw(inner_ty);
     setup.push_str(&format!("\n    // Parameter: {name} ({ann_label})\n"));
-    setup.push_str(&format!(
-        "    {name}_ptr <- {alloc_kind} ({saw_type});\n"
-    ));
+    setup.push_str(&format!("    {name}_ptr <- {alloc_kind} ({saw_type});\n"));
     if is_preserved {
         setup.push_str(&format!(
             "    {name}_val <- llvm_fresh_var \"{name}\" ({saw_type});\n"
@@ -371,9 +374,7 @@ pub fn emit_struct_decomposed(
         let mut post_terms = Vec::new();
         for (var_name, saw_type, is_ptr) in &nested_ptrs {
             if *is_ptr {
-                postconds.push_str(&format!(
-                    "    // {var_name}: pointer target → HAVOCED\n"
-                ));
+                postconds.push_str(&format!("    // {var_name}: pointer target → HAVOCED\n"));
                 postconds.push_str(&format!(
                     "    {var_name}_after <- llvm_fresh_var \"{var_name}_after\" ({saw_type});\n"
                 ));
@@ -381,9 +382,7 @@ pub fn emit_struct_decomposed(
                     "    llvm_points_to {var_name}_ptr (llvm_term {var_name}_after);\n"
                 ));
                 let ptr_after = format!("{var_name}_ptr_after");
-                postconds.push_str(&format!(
-                    "    {ptr_after} <- llvm_alloc ({saw_type});\n"
-                ));
+                postconds.push_str(&format!("    {ptr_after} <- llvm_alloc ({saw_type});\n"));
                 post_terms.push(ptr_after);
             } else {
                 postconds.push_str(&format!(

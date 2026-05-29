@@ -73,7 +73,9 @@ pub fn compute_ir_type_size(ty: &str, struct_map: &HashMap<String, IrStructDef>)
         "i128" => Some(16),
         t if t.ends_with('*') => Some(8),
         t if t.starts_with('[') => array_size(t, struct_map),
-        t if t.starts_with('%') => struct_map.get(t).and_then(|d| compute_struct_size(d, struct_map)),
+        t if t.starts_with('%') => struct_map
+            .get(t)
+            .and_then(|d| compute_struct_size(d, struct_map)),
         _ => None,
     }
 }

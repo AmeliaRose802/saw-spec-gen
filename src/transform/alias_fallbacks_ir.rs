@@ -63,9 +63,7 @@ fn merge_via_ast_match(
         };
 
         if sret_offset == 1 {
-            if let (Some(sret), Some(name)) =
-                (ir.params.first(), pointee_name(&ast.return_type))
-            {
+            if let (Some(sret), Some(name)) = (ir.params.first(), pointee_name(&ast.return_type)) {
                 if let Some(n) = deref_annotation(&sret.annotations) {
                     fb.insert_bytes(name, n);
                 }
@@ -288,8 +286,7 @@ mod tests {
         // AST has `std::tuple<…> foo()`.  IR rewrites to
         // `void @foo(sret(%struct.std::tuple<…>) dereferenceable(48) ptr %ret)`.
         // The merge must record `std::tuple<…> → 48` via the sret slot.
-        let tuple_name =
-            "std::tuple<KeyStoreOperationResult, LatchableKey>".to_string();
+        let tuple_name = "std::tuple<KeyStoreOperationResult, LatchableKey>".to_string();
         let ast = ast_func(
             "?foo@@YA?AU?$tuple@UKeyStoreOperationResult@@ULatchableKey@@@std@@XZ",
             vec![],
@@ -407,9 +404,7 @@ mod tests {
         add_ir_deref_fallbacks(&mut fb, &[], &[ir]);
         assert_eq!(fb.bytes.get("HttpRequest").copied(), Some(112));
         assert_eq!(
-            fb.bytes
-                .get("Microsoft::Azure::Host::HttpRequest")
-                .copied(),
+            fb.bytes.get("Microsoft::Azure::Host::HttpRequest").copied(),
             Some(112)
         );
     }

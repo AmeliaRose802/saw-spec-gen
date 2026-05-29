@@ -47,9 +47,14 @@ pub fn type_to_llvm_ir(ty: &TypeInfo) -> String {
         TypeInfo::Bool => "i1".into(),
         TypeInfo::SignedInt(bits) | TypeInfo::UnsignedInt(bits) => format!("i{bits}"),
         TypeInfo::Pointer(_) => "ptr".into(),
-        TypeInfo::Struct { size_bytes: Some(n), .. } => format!("[{n} x i8]"),
+        TypeInfo::Struct {
+            size_bytes: Some(n),
+            ..
+        } => format!("[{n} x i8]"),
         TypeInfo::ByteArray(n) => format!("[{n} x i8]"),
-        TypeInfo::Enum { discriminant_bits, .. } => format!("i{discriminant_bits}"),
+        TypeInfo::Enum {
+            discriminant_bits, ..
+        } => format!("i{discriminant_bits}"),
         TypeInfo::Opaque { size_bytes, .. } if *size_bytes > 0 && *size_bytes <= 8 => {
             format!("i{}", size_bytes * 8)
         }
@@ -71,14 +76,20 @@ pub fn type_to_llvm_ir(ty: &TypeInfo) -> String {
 /// [`looks_like_aggregate_name`]).
 pub fn sret_inner_ir_type(ty: &TypeInfo) -> Option<String> {
     match ty {
-        TypeInfo::Struct { size_bytes: Some(n), .. } => Some(format!("[{n} x i8]")),
-        TypeInfo::Struct { size_bytes: None, .. } => Some("[16 x i8]".to_string()),
+        TypeInfo::Struct {
+            size_bytes: Some(n),
+            ..
+        } => Some(format!("[{n} x i8]")),
+        TypeInfo::Struct {
+            size_bytes: None, ..
+        } => Some("[16 x i8]".to_string()),
         TypeInfo::Opaque { size_bytes, .. } if *size_bytes > 8 => {
             Some(format!("[{size_bytes} x i8]"))
         }
-        TypeInfo::Opaque { size_bytes: 0, name } if looks_like_aggregate_name(name) => {
-            Some("[16 x i8]".to_string())
-        }
+        TypeInfo::Opaque {
+            size_bytes: 0,
+            name,
+        } if looks_like_aggregate_name(name) => Some("[16 x i8]".to_string()),
         _ => None,
     }
 }

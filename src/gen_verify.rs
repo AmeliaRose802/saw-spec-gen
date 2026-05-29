@@ -15,6 +15,7 @@ use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     ast: &[std::path::PathBuf],
     bitcode: &Path,
@@ -74,10 +75,12 @@ pub fn run(
             .into_iter()
             .filter(|s| s.function_name == function)
             .collect();
-        matches.into_iter().min_by_key(|s| if s.is_virtual { 1 } else { 0 })
+        matches
+            .into_iter()
+            .min_by_key(|s| if s.is_virtual { 1 } else { 0 })
     };
-    let mut target_spec = target_spec
-        .ok_or_else(|| anyhow::anyhow!("Function '{}' not found in AST", function))?;
+    let mut target_spec =
+        target_spec.ok_or_else(|| anyhow::anyhow!("Function '{}' not found in AST", function))?;
     let target_mangled = target_spec
         .mangled_name
         .clone()
@@ -250,7 +253,12 @@ pub fn run(
             }
 
             let is_system = fn_info.map(|f| f.is_system).unwrap_or(false);
-            saw_emit::emit_single_experimental_spec(spec, &all_globals, is_system, &experimental_dir)?;
+            saw_emit::emit_single_experimental_spec(
+                spec,
+                &all_globals,
+                is_system,
+                &experimental_dir,
+            )?;
         }
         eprintln!("Generated {} external function specs", external_calls.len());
     }
@@ -331,7 +339,10 @@ pub fn run(
     let stubs_status = if has_interfaces {
         let assembled = saw_emit::assemble_vtable_stubs(output);
         match &assembled {
-            saw_emit::AssembledStubs::Bitcode { bc_filename, assembler } => {
+            saw_emit::AssembledStubs::Bitcode {
+                bc_filename,
+                assembler,
+            } => {
                 eprintln!(
                     "Assembled vtable stubs to {} via `{assembler}`",
                     bc_filename,
@@ -342,9 +353,7 @@ pub fn run(
                     "warning: could not find llvm-as / clang on PATH — \
                      {ll_filename} was NOT assembled to bitcode.",
                 );
-                eprintln!(
-                    "         SAW's llvm_load_module rejects text IR. Run one of:",
-                );
+                eprintln!("         SAW's llvm_load_module rejects text IR. Run one of:",);
                 eprintln!(
                     "           llvm-as {} -o {}/vtable_stubs.bc",
                     output.join(ll_filename).display(),
@@ -355,9 +364,7 @@ pub fn run(
                     output.join(ll_filename).display(),
                     output.display(),
                 );
-                eprintln!(
-                    "         before invoking saw on verify.saw.",
-                );
+                eprintln!("         before invoking saw on verify.saw.",);
             }
             saw_emit::AssembledStubs::LinkedBitcode { .. } => { /* unreachable here */ }
             saw_emit::AssembledStubs::NoStubs => {}
@@ -369,7 +376,10 @@ pub fn run(
         } else {
             let linked = saw_emit::link_stubs_with_main(bitcode, output, assembled);
             match &linked {
-                saw_emit::AssembledStubs::LinkedBitcode { combined_filename, linker } => {
+                saw_emit::AssembledStubs::LinkedBitcode {
+                    combined_filename,
+                    linker,
+                } => {
                     eprintln!(
                         "Pre-linked main + vtable stubs into {} via `{linker}` \
                          (verify.saw will not need llvm_combine_modules).",
@@ -457,17 +467,13 @@ pub fn run(
     // against the bitcode's mangled struct table.
     let resolve_spec_inplace = |spec: &mut constraints::SpecConstraint| {
         for p in &mut spec.params {
-            if let Some(r) =
-                resolve_saw_type(&p.saw_type, &ir_struct_sizes, p.dereferenceable_size)
+            if let Some(r) = resolve_saw_type(&p.saw_type, &ir_struct_sizes, p.dereferenceable_size)
             {
                 p.saw_type = r;
             }
         }
-        if let Some(r) = resolve_saw_type(
-            &spec.return_constraint.saw_type,
-            &ir_struct_sizes,
-            None,
-        ) {
+        if let Some(r) = resolve_saw_type(&spec.return_constraint.saw_type, &ir_struct_sizes, None)
+        {
             spec.return_constraint.saw_type = r;
         }
     };
@@ -507,11 +513,7 @@ pub fn run(
         fallbacks.enum_bits.entry(name).or_insert(bits);
     }
     if !ir_funcs.is_empty() {
-        alias_fallbacks_ir::add_ir_deref_fallbacks(
-            &mut fallbacks,
-            &all_functions,
-            &ir_funcs,
-        );
+        alias_fallbacks_ir::add_ir_deref_fallbacks(&mut fallbacks, &all_functions, &ir_funcs);
     }
     // CLI overrides take priority over inferred sizes.
     apply_cli_overrides(&mut fallbacks, alias_size_overrides, alias_enum_overrides)?;

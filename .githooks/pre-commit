@@ -3,7 +3,9 @@
 #
 # Runs:
 #   1. scripts/check-line-count.sh on staged source files (always).
-#   2. tests/saw_demos/Run-SawDemos.ps1, the end-to-end SAW demo suite.
+#   2. cargo fmt -- --check (matches CI; skip with SKIP_FMT=1).
+#   3. cargo clippy -- -D warnings (matches CI; skip with SKIP_CLIPPY=1).
+#   4. tests/saw_demos/Run-SawDemos.ps1, the end-to-end SAW demo suite.
 #      The runner auto-skips when SAW is not installed on the machine.
 #      Set SKIP_SAW_TESTS=1 in the environment to skip explicitly.
 #
@@ -26,7 +28,27 @@ if [ "${#staged[@]}" -gt 0 ]; then
     bash scripts/check-line-count.sh "${staged[@]}"
 fi
 
-# ── 2. SAW demo suite (skippable) ─────────────────────────────────────────
+# ── 2. rustfmt (matches CI: cargo fmt -- --check) ─────────────────────────
+if [ "${SKIP_FMT:-0}" = "1" ]; then
+    echo "pre-commit: SKIP_FMT=1 set; skipping rustfmt."
+elif ! command -v cargo >/dev/null 2>&1; then
+    echo "pre-commit: cargo not found; skipping rustfmt."
+else
+    echo "pre-commit: running cargo fmt -- --check"
+    cargo fmt --all -- --check
+fi
+
+# ── 3. Clippy (matches CI: cargo clippy -- -D warnings) ───────────────────
+if [ "${SKIP_CLIPPY:-0}" = "1" ]; then
+    echo "pre-commit: SKIP_CLIPPY=1 set; skipping clippy."
+elif ! command -v cargo >/dev/null 2>&1; then
+    echo "pre-commit: cargo not found; skipping clippy."
+else
+    echo "pre-commit: running cargo clippy -- -D warnings"
+    cargo clippy --quiet -- -D warnings
+fi
+
+# ── 4. SAW demo suite (skippable) ─────────────────────────────────────────
 if [ "${SKIP_SAW_TESTS:-0}" = "1" ]; then
     echo "pre-commit: SKIP_SAW_TESTS=1 set; skipping SAW demo suite."
     exit 0
