@@ -334,48 +334,18 @@ EXCEPTION_LOWER=""
 if [[ "$SKIP_EXCEPTION_LOWER" == "1" ]]; then
     echo '  skipped (SKIP_EXCEPTION_LOWER=1)'
 else
-    EL_ROOT="${INSTALL_ROOT}/exception-lower"
-    EL_BIN="${EL_ROOT}/build/exception-lower"
-    if [[ -x "$EL_BIN" && "$FORCE" != "1" ]]; then
-        echo "  already built: $EL_BIN"
-        EXCEPTION_LOWER="$EL_BIN"
-    elif ! have cmake || ! have git; then
-        echo '  cmake or git not on PATH; skipping exception-lower install.'
-        echo '  Install both and re-run scripts/init.sh, or build the pass manually:'
-        echo '    https://github.com/AmeliaRose802/llvm-exception-lower'
+    # Delegate to the shared installer; verify.ps1 invokes the same
+    # script on first need so the install path stays in one place.
+    install_script="${SCRIPT_DIR}/install-exception-lower.sh"
+    install_env=(INSTALL_ROOT="$INSTALL_ROOT"
+                 EXCEPTION_LOWER_REF="$EXCEPTION_LOWER_REF"
+                 LLVM_BIN="$LLVM_BIN")
+    [[ "$FORCE" == "1" ]] && install_env+=(FORCE=1)
+    if EXCEPTION_LOWER="$(env "${install_env[@]}" bash "$install_script")"; then
+        :
     else
-        EL_SRC="${EL_ROOT}/src"
-        if [[ ! -d "${EL_SRC}/.git" ]]; then
-            rm -rf "$EL_SRC"
-            echo "  cloning https://github.com/AmeliaRose802/llvm-exception-lower@$EXCEPTION_LOWER_REF"
-            git clone --depth 1 --branch "$EXCEPTION_LOWER_REF" \
-                'https://github.com/AmeliaRose802/llvm-exception-lower' "$EL_SRC"
-        else
-            echo "  source already cloned: $EL_SRC"
-        fi
-        EL_BUILD="${EL_ROOT}/build"
-        [[ "$FORCE" == "1" && -d "$EL_BUILD" ]] && rm -rf "$EL_BUILD"
-        mkdir -p "$EL_BUILD"
-        # If the system LLVM ships a cmake config dir, point cmake at it
-        # explicitly so the build doesn't pick up an older LLVM behind it.
-        LLVM_CMAKE_DIR=""
-        if [[ -d "${LLVM_BIN}/../lib/cmake/llvm" ]]; then
-            LLVM_CMAKE_DIR="$(cd "${LLVM_BIN}/../lib/cmake/llvm" && pwd)"
-        fi
-        (
-            cd "$EL_BUILD"
-            cmake_args=("$EL_SRC" -DCMAKE_BUILD_TYPE=Release)
-            [[ -n "$LLVM_CMAKE_DIR" ]] && cmake_args+=(-DLLVM_DIR="$LLVM_CMAKE_DIR")
-            cmake "${cmake_args[@]}"
-            cmake --build . --config Release
-        )
-        if [[ -x "$EL_BIN" ]]; then
-            EXCEPTION_LOWER="$EL_BIN"
-            echo "  built: $EL_BIN"
-        else
-            echo '  build did not produce exception-lower binary; skipping'
-            echo '  (verify.ps1 will fall back to text-only MSVC EH stripping)'
-        fi
+        echo '  (verify.ps1 will fall back to text-only MSVC EH stripping)'
+        EXCEPTION_LOWER=""
     fi
 fi
 

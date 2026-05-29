@@ -152,6 +152,25 @@ demos will then fail to load with `FUNC_CODE_CATCHSWITCH`. Set
 on `PATH`, or drop it under `~/.saw-spec-gen/exception-lower/bin/`)
 to enable the pipeline.
 
+On first need, `verify.ps1` will try to auto-install the pass for you:
+
+1. Download a prebuilt binary for your host platform from
+   [llvm-exception-lower releases](https://github.com/AmeliaRose802/llvm-exception-lower/releases)
+   into `~/.saw-spec-gen/exception-lower/bin/`. Currently published:
+   `windows-x64`. Other platforms fall through to step 2.
+2. Clone + cmake-build from source if `cmake` and `git` are on `PATH`.
+
+If neither path works, verification falls back gracefully and tells you
+what to install. You can also run the installer explicitly:
+
+```powershell
+pwsh scripts/install-exception-lower.ps1
+```
+
+```bash
+bash scripts/install-exception-lower.sh
+```
+
 ## Running the tests
 
 ```powershell

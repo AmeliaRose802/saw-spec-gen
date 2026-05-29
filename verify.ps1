@@ -103,6 +103,30 @@ $exceptionLower = $tools.ExceptionLower
 $llvmTarget= $tools.LlvmTarget   # e.g. x86_64-pc-windows-msvc / -unknown-linux-gnu
 $isMsvc    = $llvmTarget -match 'windows-msvc'
 
+# Auto-install the exception-lower pass on first need. The MSVC target
+# is the one where SAW simply cannot load C++ try/catch bitcode without
+# the lowering pass (FUNC_CODE_CATCHSWITCH is unparseable); on Itanium
+# targets the throw is silently pruned which is at least a usable
+# fallback. We therefore only force the install for MSVC. Even there,
+# the pipeline still works for non-EH demos when the install fails — we
+# just lose verifiability of the `try` / `catch` cases.
+if (-not $exceptionLower -and $isMsvc) {
+    Write-Host ""
+    Write-Host "[*] exception-lower pass not found; attempting auto-install..." -ForegroundColor Cyan
+    $installScript = Join-Path $ScriptRoot 'scripts/install-exception-lower.ps1'
+    try {
+        $built = & $installScript -LlvmBin $tools.LlvmBin
+        if ($LASTEXITCODE -eq 0 -and $built -and (Test-Path -LiteralPath $built)) {
+            $exceptionLower = $built
+            $env:SAW_SPEC_GEN_EXCEPTION_LOWER = $built
+            Write-Host "[*] exception-lower installed: $built" -ForegroundColor Green
+        }
+    } catch {
+        Write-Host "[!] exception-lower auto-install failed: $_" -ForegroundColor Yellow
+        Write-Host "    Continuing with text-only MSVC EH stripping." -ForegroundColor Yellow
+    }
+}
+
 # ── All artifacts go under $OutputDir ──────────────────────────────────────────
 $bcFile   = Join-Path $OutputDir "$baseName.bc"
 $llFile   = Join-Path $OutputDir "$baseName.ll"
@@ -167,8 +191,9 @@ if ($exceptionLower) {
         }
     }
 } elseif ($isMsvc) {
-    Write-Host "  note: exception-lower binary not found; MSVC try/catch will not be reachable." -ForegroundColor DarkYellow
-    Write-Host "        See https://github.com/AmeliaRose802/llvm-exception-lower" -ForegroundColor DarkYellow
+    Write-Host "  note: exception-lower binary not available; C++ try/catch demos will not load." -ForegroundColor DarkYellow
+    Write-Host "        Run scripts/install-exception-lower.ps1 to install, or set" -ForegroundColor DarkYellow
+    Write-Host "        SAW_SPEC_GEN_EXCEPTION_LOWER to point at an existing build." -ForegroundColor DarkYellow
 }
 
 # ── Step 1.5: Patch IR for SAW/Crucible quirks ────────────────────────────────

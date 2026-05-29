@@ -216,56 +216,21 @@ $exceptionLower = $null
 if ($SkipExceptionLower) {
     Write-Host '  skipped (--SkipExceptionLower set)' -ForegroundColor Yellow
 } else {
-    $elRoot = Join-Path $installRoot 'exception-lower'
-    $elBin  = Join-Path $elRoot ('build/exception-lower' + $exeExt)
-    if ((Test-Path -LiteralPath $elBin) -and (-not $Force)) {
-        Write-Host "  already built: $elBin" -ForegroundColor DarkGreen
-        $exceptionLower = $elBin
-    } else {
-        $cmake = Find-OnPath ('cmake' + $exeExt)
-        $git   = Find-OnPath ('git' + $exeExt)
-        if (-not $cmake -or -not $git) {
-            Write-Host '  cmake or git not on PATH; skipping exception-lower install.' -ForegroundColor Yellow
-            Write-Host '  Install both and re-run scripts/init.ps1, or build the pass manually:' -ForegroundColor Yellow
-            Write-Host '    https://github.com/AmeliaRose802/llvm-exception-lower' -ForegroundColor Yellow
-        } else {
-            $srcDir = Join-Path $elRoot 'src'
-            if (-not (Test-Path -LiteralPath (Join-Path $srcDir '.git'))) {
-                if (Test-Path -LiteralPath $srcDir) { Remove-Item -Recurse -Force -LiteralPath $srcDir }
-                Write-Host "  cloning https://github.com/AmeliaRose802/llvm-exception-lower@$ExceptionLowerRef"
-                & $git clone --depth 1 --branch $ExceptionLowerRef 'https://github.com/AmeliaRose802/llvm-exception-lower' $srcDir 2>&1 | Out-Host
-                if ($LASTEXITCODE -ne 0) { Write-Host '  clone failed; skipping' -ForegroundColor Yellow; $srcDir = $null }
-            } else {
-                Write-Host "  source already cloned: $srcDir" -ForegroundColor DarkGreen
-            }
-            if ($srcDir) {
-                $buildDir = Join-Path $elRoot 'build'
-                if ($Force -and (Test-Path -LiteralPath $buildDir)) { Remove-Item -Recurse -Force -LiteralPath $buildDir }
-                New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
-                $llvmCmakeDir = $null
-                if ($llvmBin) {
-                    $candidate = Resolve-Path (Join-Path $llvmBin '../lib/cmake/llvm') -ErrorAction SilentlyContinue
-                    if ($candidate) { $llvmCmakeDir = $candidate.Path }
-                }
-                Push-Location $buildDir
-                try {
-                    $cmakeArgs = @($srcDir, '-DCMAKE_BUILD_TYPE=Release')
-                    if ($llvmCmakeDir) { $cmakeArgs += "-DLLVM_DIR=$llvmCmakeDir" }
-                    Write-Host "  cmake $($cmakeArgs -join ' ')"
-                    & $cmake @cmakeArgs 2>&1 | Out-Host
-                    if ($LASTEXITCODE -eq 0) {
-                        & $cmake --build . --config Release 2>&1 | Out-Host
-                    }
-                } finally { Pop-Location }
-                if (Test-Path -LiteralPath $elBin) {
-                    $exceptionLower = $elBin
-                    Write-Host "  built: $elBin" -ForegroundColor Green
-                } else {
-                    Write-Host '  build did not produce exception-lower binary; skipping' -ForegroundColor Yellow
-                    Write-Host '  (verify.ps1 will fall back to text-only MSVC EH stripping)' -ForegroundColor Yellow
-                }
-            }
-        }
+    # Delegate to the shared installer; verify.ps1 invokes the same
+    # script on first need so the install path stays in one place.
+    $installScript = Join-Path $ScriptRoot 'install-exception-lower.ps1'
+    $installArgs = @{
+        InstallRoot = $installRoot
+        Ref         = $ExceptionLowerRef
+        LlvmBin     = $llvmBin
+    }
+    if ($Force) { $installArgs['Force'] = $true }
+    try {
+        $exceptionLower = & $installScript @installArgs
+    } catch {
+        Write-Host "  exception-lower install failed: $_" -ForegroundColor Yellow
+        Write-Host '  (verify.ps1 will fall back to text-only MSVC EH stripping)' -ForegroundColor Yellow
+        $exceptionLower = $null
     }
 }
 # ── Step 5: write env.ps1 ─────────────────────────────────────────────────
