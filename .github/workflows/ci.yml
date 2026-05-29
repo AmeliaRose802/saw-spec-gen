@@ -5,6 +5,8 @@ on:
     branches: [ master, main ]
   pull_request:
     branches: [ master, main ]
+  # Allow re-running the (slow) SAW demo suite on demand without pushing.
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -74,3 +76,76 @@ jobs:
     - uses: actions/checkout@v4
     - name: Enforce 500 non-whitespace line limit
       run: bash scripts/check-line-count.sh
+
+  saw-demos:
+    name: SAW demo suite (end-to-end)
+    runs-on: ubuntu-latest
+    # First-run installs ~1.2 GB of tooling (LLVM 20.1.6, SAW 1.5 with
+    # bundled solvers, PowerShell 7) before the demos even start, then
+    # works through ~70 cases (cpp_havoc, rust_havoc, bounded_loop,
+    # rust_equiv, trait_unknown_impl, async_rust, rust_adversarial,
+    # string_ops, strings). 90-min cap so a runaway SAW invocation
+    # eventually fails the job instead of burning runner time.
+    timeout-minutes: 90
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo registry and target (saw-spec-gen build)
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-sawdemos-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-sawdemos-cargo-
+
+    # Split restore/save so the (slow, ~1.2 GB) tool install is cached
+    # even when the demo step itself fails — otherwise actions/cache@v4
+    # would skip the save on failure and every red run would re-download.
+    # Cache key embeds the pinned versions from scripts/init.sh; bumping
+    # them invalidates the cache automatically.
+    - name: Restore SAW + LLVM + pwsh toolchain cache
+      id: restore-tools
+      uses: actions/cache/restore@v4
+      with:
+        path: ~/.saw-spec-gen
+        key: ${{ runner.os }}-sawspecgen-tools-saw1.5-llvm20.1.6-pwsh7.6.2-${{ hashFiles('scripts/init.sh', 'scripts/init-saw-source.sh') }}
+
+    - name: Install SAW, LLVM, pwsh; build saw-spec-gen
+      env:
+        # Rust is already installed by dtolnay/rust-toolchain.
+        SKIP_RUST_INSTALL: "1"
+        # Non-interactive CI: never prompt for sudo. The default
+        # SAW_SOURCE=binary path needs no sudo anyway.
+        SKIP_SUDO_INSTALL: "1"
+      run: bash scripts/init.sh
+
+    - name: Save SAW + LLVM + pwsh toolchain cache
+      if: always() && steps.restore-tools.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ~/.saw-spec-gen
+        key: ${{ steps.restore-tools.outputs.cache-primary-key }}
+
+    - name: Run SAW demo suite
+      run: |
+        set -e
+        # discover-tools.ps1 auto-sources ~/.saw-spec-gen/env.ps1, so the
+        # runner finds clang, llvm-as, saw, z3, rustc without any extra
+        # PATH setup. Source env.sh anyway so anything else we shell out
+        # to (rustc, etc.) works too.
+        . "$HOME/.saw-spec-gen/env.sh"
+        pwsh -NoLogo -NoProfile -File tests/saw_demos/Run-SawDemos.ps1
+
+    - name: Upload failing-case logs
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: saw-demos-fail-logs
+        path: tests/saw_demos/last-fail-*.log
+        if-no-files-found: ignore
