@@ -1,7 +1,7 @@
 /*
 DEMO: Disproved — method takes `&mut self` and rewrites the struct's field.
 
-Mirrors demos/02-havoc-coverage/class_member_clobbered/add_one_disproved.cpp.
+Mirrors add_one_disproved.cpp.
 The C++ version uses a non-const virtual method that clobbers `bias_`.
 Here we do the equivalent in Rust: `prepare` takes `&mut self` and
 overwrites `self.bias`. The function then returns `x + 1 + bias`,

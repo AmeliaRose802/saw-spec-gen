@@ -1,5 +1,5 @@
 // DEMO: Problem 1 (clamp_sub) — BUGGY reference (Rust mirror of
-// clamp_sub_buggy.cpp).
+// clamp_sub_disproved.cpp).
 //
 // Literal port of the buggy Python pseudocode. `wrapping_sub` is used
 // so the subtraction has the same modular-i32 semantics as the C++

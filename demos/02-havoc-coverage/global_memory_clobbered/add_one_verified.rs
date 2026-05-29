@@ -1,7 +1,7 @@
 /*
 DEMO: Verified — SUPER_IMPORTANT is a `const`, so nothing can clobber it.
 
-Mirrors demos/02-havoc-coverage/global_memory_clobbered/add_one_verified.cpp.
+Mirrors add_one_verified.cpp.
 The C++ version makes the global `const` so the havoc model can't
 write to it. Rust's `const` is even stronger (compile-time constant,
 no addressable storage), so the bail-out branch is trivially dead.

@@ -470,7 +470,7 @@ saw-spec-gen is ready. Source the env file once per shell:
 then try a demo:
 
     pwsh ./verify.ps1 \\
-        -CppFile     demos/01-tutorial/bounded_loop/add_one.cpp \\
+        -CppFile     demos/01-tutorial/bounded_loop/add_one_verified.cpp \\
         -CryptolSpec demos/01-tutorial/bounded_loop/add_one_spec.cry \\
         -CryptolFn   add_one_spec \\
         -Function    add_one

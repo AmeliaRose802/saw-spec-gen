@@ -2,7 +2,7 @@
 DEMO: Verified — validator takes `&u32`, so it cannot write through the
 pointer.
 
-Mirrors demos/02-havoc-coverage/input_param_modified/add_one_verified.cpp,
+Mirrors add_one_verified.cpp,
 which marks the validator parameter as `const uint32_t*`. In Rust the
 equivalent is `&u32` — the borrow checker statically forbids the
 callee from mutating the value. SAW sees that `input` is unchanged

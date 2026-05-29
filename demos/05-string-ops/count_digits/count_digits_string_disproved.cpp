@@ -1,7 +1,7 @@
 /*
 DEMO: count_digits over `const std::string&` -- BROKEN.
 
-Companion to count_digits_string.cpp. Same logic-bug as the cstr
+Companion to count_digits_string_verified.cpp. Same logic-bug as the cstr
 variant: the upper-bound check on the digit range is missing, so
 any byte with value >= '0' is counted.
 

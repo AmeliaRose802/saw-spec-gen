@@ -12,7 +12,7 @@ add_one_spec x = x + 1
 | File | What it does | SAW RESULT |
 |------|--------------|------------|
 | [`add_one_verified.cpp`](add_one_verified.cpp) | plain `return x + 1` (no exceptions) | **VERIFIED** by z3 |
-| [`add_one_throws.cpp`](add_one_throws.cpp) | `if (x == 42) throw 1; return x + 1;` | **DISPROVED** with counterexample `x = 42` |
+| [`add_one_disproved.cpp`](add_one_disproved.cpp) | `if (x == 42) throw 1; return x + 1;` | **DISPROVED** with counterexample `x = 42` |
 
 ## What clang emits for `throw`
 
@@ -75,7 +75,7 @@ With the fix in place:
 The Cryptol spec [`add_one_spec.cry`](add_one_spec.cry) is a *total*
 function (`add_one_spec x = x + 1` for every input). Equivalence to a
 total spec is a strictly stronger property: it requires that the
-C++ function return on every input. `add_one_throws.cpp` does *not*
+C++ function return on every input. `add_one_disproved.cpp` does *not*
 return on `x == 42` — it throws — so equivalence to the total
 Cryptol spec must fail, and it does, with exactly that counterexample.
 
@@ -121,7 +121,7 @@ in-Crucible fix is sufficient.
 
 # Throws case — DISPROVED ( with counterexample x = 42)
 ./verify.ps1 `
-    -CppFile     demos\02-havoc-coverage\throws_exception\add_one_throws.cpp `
+    -CppFile     demos\02-havoc-coverage\throws_exception\add_one_disproved.cpp `
     -CryptolSpec demos\02-havoc-coverage\throws_exception\add_one_spec.cry `
     -CryptolFn   add_one_spec `
     -Function    add_one

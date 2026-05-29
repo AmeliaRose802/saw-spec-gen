@@ -29,7 +29,7 @@ durations that mustn't go negative, etc.
 
 We want to port this to Rust. Two attempts:
 
-### `sat_add_good.rs` — the correct port
+### `sat_add_verified.rs` — the correct port
 
 A direct translation of the C++:
 
@@ -44,7 +44,7 @@ fn sat_add(a: u32, b: u32) -> u32 {
 }
 ```
 
-### `sat_add_bad.rs` — the *clever* port
+### `sat_add_disproved.rs` — the *clever* port
 
 Same function, but "optimised" to remove the branch:
 
@@ -114,7 +114,7 @@ From the repo root:
 # The correct port — should print EQUIVALENT
 .\verify-equiv.ps1 `
     -CppFile     demos\04-cpp-rust-equivalence\sat_add_optimized\sat_add.cpp `
-    -RustFile    demos\04-cpp-rust-equivalence\sat_add_optimized\sat_add_good.rs `
+    -RustFile    demos\04-cpp-rust-equivalence\sat_add_optimized\sat_add_verified.rs `
     -CryptolSpec demos\04-cpp-rust-equivalence\sat_add_optimized\sat_add_spec.cry `
     -CryptolFn   sat_add_spec `
     -Function    sat_add
@@ -122,7 +122,7 @@ From the repo root:
 # The "clever" port — should print NOT EQUIVALENT with a concrete counterexample
 .\verify-equiv.ps1 `
     -CppFile     demos\04-cpp-rust-equivalence\sat_add_optimized\sat_add.cpp `
-    -RustFile    demos\04-cpp-rust-equivalence\sat_add_optimized\sat_add_bad.rs `
+    -RustFile    demos\04-cpp-rust-equivalence\sat_add_optimized\sat_add_disproved.rs `
     -CryptolSpec demos\04-cpp-rust-equivalence\sat_add_optimized\sat_add_spec.cry `
     -CryptolFn   sat_add_spec `
     -Function    sat_add

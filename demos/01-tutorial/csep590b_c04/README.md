@@ -18,13 +18,15 @@ Here we adapt both halves to bit-precise z3-backed equivalence
 checking:
 
   * For Part A problems we ship **both** the literal buggy port
-    (DISPROVED by SAW, the counterexample plays the role of the
-    homework's expected output) and a **fixed** implementation
-    (VERIFIED).
+    (named `*_disproved.{cpp,rs}`, DISPROVED by SAW — the
+    counterexample plays the role of the homework's expected
+    output) and a **fixed** implementation (named
+    `*_verified.{cpp,rs}`, VERIFIED).
   * For Part B problems we ship a **reference** implementation
-    bounded so SAW can fully unroll, against a closed-form Cryptol
-    spec (no loop-invariant hole required — the bounded loop is
-    handled by SAW's existing pipeline).
+    (named `*_verified.{cpp,rs}`) bounded so SAW can fully unroll,
+    against a closed-form Cryptol spec (no loop-invariant hole
+    required — the bounded loop is handled by SAW's existing
+    pipeline).
 
 ## Problems
 
@@ -57,14 +59,14 @@ the loops:
 ```powershell
 # C++ side
 .\verify.ps1 `
-    -CppFile     demos\01-tutorial\csep590b_c04\p1_clamp_sub\clamp_sub_fixed.cpp `
+    -CppFile     demos\01-tutorial\csep590b_c04\p1_clamp_sub\clamp_sub_verified.cpp `
     -CryptolSpec demos\01-tutorial\csep590b_c04\p1_clamp_sub\clamp_sub_spec.cry `
     -CryptolFn   clamp_sub_spec `
     -Function    clamp_sub
 
 # Rust side
 .\verify-rust.ps1 `
-    -RustFile    demos\01-tutorial\csep590b_c04\p1_clamp_sub\clamp_sub_fixed.rs `
+    -RustFile    demos\01-tutorial\csep590b_c04\p1_clamp_sub\clamp_sub_verified.rs `
     -CryptolSpec demos\01-tutorial\csep590b_c04\p1_clamp_sub\clamp_sub_spec.cry `
     -CryptolFn   clamp_sub_spec `
     -Function    clamp_sub
@@ -72,9 +74,9 @@ the loops:
 
 ## Running via the test harness
 
-All ten demos (5 problems × {buggy, fixed} for Part A; 5 problems
-× 1 reference for Part B; both C++ and Rust ports) are registered
-in [`tests/saw_demos/cases.psd1`](../../tests/saw_demos/cases.psd1)
+All ten demos (5 problems × {disproved, verified} for Part A;
+5 problems × 1 reference for Part B; both C++ and Rust ports)
+are registered in [`tests/saw_demos/cases.psd1`](../../tests/saw_demos/cases.psd1)
 under the tag `csep590b_c04`:
 
 ```powershell
@@ -83,15 +85,15 @@ pwsh tests\saw_demos\Run-SawDemos.ps1 -Tag csep590b_c04
 
 ## Notes
 
-  * Problem 2's buggy Rust port differs from the buggy C++ port:
-    the literal `if c / a != b` round-trip pattern, when ported to
-    Rust via `wrapping_div`, hits crucible-llvm's poison-value path
-    on the `sdiv i32::MIN, -1` corner and aborts the simulator
-    instead of yielding a clean DISPROVED. The Rust buggy port
-    therefore omits the overflow check entirely — a simpler bug
-    that still trips the spec — while the C++ port retains the
-    literal Python translation. See the per-file headers for
-    details.
+  * Problem 2's disproved Rust port differs from the disproved C++
+    port: the literal `if c / a != b` round-trip pattern, when
+    ported to Rust via `wrapping_div`, hits crucible-llvm's
+    poison-value path on the `sdiv i32::MIN, -1` corner and aborts
+    the simulator instead of yielding a clean DISPROVED. The Rust
+    disproved port therefore omits the overflow check entirely —
+    a simpler bug that still trips the spec — while the C++ port
+    retains the literal Python translation. See the per-file
+    headers for details.
 
   * Newton's-isqrt divisor (`n / x`) relies on `x ≥ 1` as a
     loop-carried invariant. That invariant is inductive and SAW

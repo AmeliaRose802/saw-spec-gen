@@ -1,5 +1,5 @@
 // DEMO: Problem 5 (isqrt_newton) — reference (Rust mirror of
-// isqrt.cpp).
+// isqrt_verified.cpp).
 //
 // Bounded-loop port of the homework's Newton's-method isqrt. Input
 // is clamped to [1, 255] (sentinel 0 outside) so SAW can fully

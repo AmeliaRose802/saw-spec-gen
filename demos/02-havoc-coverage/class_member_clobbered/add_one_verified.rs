@@ -1,7 +1,7 @@
 /*
 DEMO: Verified — method takes `&self`, so it cannot mutate the struct's field.
 
-Mirrors demos/02-havoc-coverage/class_member_clobbered/add_one_verified.cpp.
+Mirrors add_one_verified.cpp.
 The C++ version makes the virtual method `const`, which is how it
 promises not to write through `this`. In Rust this is enforced at the
 type level: `&self` cannot mutate `self`. The borrow checker is doing

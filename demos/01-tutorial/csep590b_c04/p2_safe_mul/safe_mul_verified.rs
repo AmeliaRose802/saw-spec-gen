@@ -1,5 +1,5 @@
 // DEMO: Problem 2 (safe_mul) — FIXED reference (Rust mirror of
-// safe_mul_fixed.cpp).
+// safe_mul_verified.cpp).
 //
 // Multiply in i64, check the i32 range, return 0 on overflow.
 //

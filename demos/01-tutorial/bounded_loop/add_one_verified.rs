@@ -1,4 +1,4 @@
-// DEMO: Bounded-loop verification (Rust mirror of add_one.cpp).
+// DEMO: Bounded-loop verification (Rust mirror of add_one_verified.cpp).
 //
 // This `add_one` does not use Rust's built-in `+` on the full word.
 // Instead it builds the result bit-by-bit using a 32-iteration
@@ -16,7 +16,7 @@
 //
 // Build/verify:
 //   .\verify-rust.ps1 `
-//       -RustFile    demos\01-tutorial\bounded_loop\add_one.rs `
+//       -RustFile    demos\01-tutorial\bounded_loop\add_one_verified.rs `
 //       -CryptolSpec demos\01-tutorial\bounded_loop\add_one_spec.cry `
 //       -CryptolFn   add_one_spec `
 //       -Function    add_one

@@ -1,7 +1,7 @@
 /*
 DEMO: Disproved — concrete struct method that mutates a `static mut` global.
 
-Mirrors demos/02-havoc-coverage/concrete_type_safe/add_one_disproved.cpp.
+Mirrors add_one_disproved.cpp.
 The original C++ uses a `SusLog` whose log() method clobbers
 `super_important`. Here we do the same thing in Rust: a concrete
 struct's method writes -1 to a static mut global, which triggers the

@@ -1,8 +1,8 @@
 // Cryptol spec: count how many of the input bytes are ASCII digits.
 //
 // Both C++ implementations are verified against this single spec:
-//   * count_digits_cstr.cpp   (const char* over a fixed-length buffer)
-//   * count_digits_string.cpp (const std::string& -- STL container)
+//   * count_digits_cstr_verified.cpp   (const char* over a fixed-length buffer)
+//   * count_digits_string_verified.cpp (const std::string& -- STL container)
 //
 // The input here is modelled as exactly 8 bytes so the proof is
 // finite. The C++ pointer/std::string equivalents must guarantee

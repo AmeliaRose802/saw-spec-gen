@@ -1,4 +1,4 @@
-// DEMO: Data-dependent bounded loop (Rust mirror of sum_first_n.cpp).
+// DEMO: Data-dependent bounded loop (Rust mirror of sum_first_n_verified.cpp).
 //
 // `sum_first_n(n)` returns 1 + 2 + ... + n.  The loop trip count is the
 // *symbolic* input `n`, but we cap it at MAX_N so SAW can unroll every
@@ -19,7 +19,7 @@
 //
 // Build/verify:
 //   .\verify-rust.ps1 `
-//       -RustFile    demos\01-tutorial\bounded_loop\sum_first_n.rs `
+//       -RustFile    demos\01-tutorial\bounded_loop\sum_first_n_verified.rs `
 //       -CryptolSpec demos\01-tutorial\bounded_loop\sum_first_n_spec.cry `
 //       -CryptolFn   sum_first_n_spec `
 //       -Function    sum_first_n

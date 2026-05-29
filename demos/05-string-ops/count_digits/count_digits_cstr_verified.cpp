@@ -2,7 +2,7 @@
 DEMO: count_digits over a fixed-length `const char*` buffer.
 
 This is the simpler, "C-style string" baseline. The companion file
-count_digits_string.cpp wraps the same operation in `std::string&`
+count_digits_string_verified.cpp wraps the same operation in `std::string&`
 and (currently) cannot be verified through gen-verify -- see
 README.md for why.
 

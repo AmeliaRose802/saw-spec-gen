@@ -1,7 +1,7 @@
 /*
 DEMO: count_digits over a fixed-length `const char*` buffer -- BROKEN.
 
-Companion to count_digits_cstr.cpp. The implementation has a subtle
+Companion to count_digits_cstr_verified.cpp. The implementation has a subtle
 logic bug: it checks `b >= '0'` but forgets the upper bound, so every
 byte with value >= 0x30 (any digit, letter, or punctuation in the
 upper half of ASCII) is counted -- not just the actual digits

@@ -1,5 +1,5 @@
 // DEMO: Problem 4 (make_change) — reference (Rust mirror of
-// make_change.cpp).
+// make_change_verified.cpp).
 //
 // Bounded-loop port of the homework's greedy-change algorithm.
 // Input is clamped to [0, 99] cents so SAW can fully unroll the

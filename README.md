@@ -47,14 +47,14 @@ pwsh scripts/init.ps1            # or:  bash scripts/init.sh
 
 # Verify a C++ function against a Cryptol spec.
 ./verify.ps1 `
-    -CppFile     demos/01-tutorial/bounded_loop/add_one.cpp `
+    -CppFile     demos/01-tutorial/bounded_loop/add_one_verified.cpp `
     -CryptolSpec demos/01-tutorial/bounded_loop/add_one_spec.cry `
     -CryptolFn   add_one_spec `
     -Function    add_one
 
 # Same for Rust.
 ./verify-rust.ps1 `
-    -RustFile    demos/01-tutorial/bounded_loop/add_one.rs `
+    -RustFile    demos/01-tutorial/bounded_loop/add_one_verified.rs `
     -CryptolSpec demos/01-tutorial/bounded_loop/add_one_spec.cry `
     -CryptolFn   add_one_spec `
     -Function    add_one
@@ -233,7 +233,7 @@ Working end-to-end demos live in [demos/](demos/), grouped by role:
 | `05-string-ops/has_null_byte/` | SWAR null-byte detection (real libc `strlen` bit-trick over a packed 64-bit word) |
 | `05-string-ops/count_digits/` | C-string + `std::string` variants, both verifying and counterexample-producing |
 | `06-async-rust/` | Verify a Rust `async fn` by targeting its coroutine `resume` symbol |
-| `99-research/rust_adversarial_holes/` | "Sneaky" Rust patterns (interior mutability, raw aliasing, drop side effects, `unreachable_unchecked`, …) — every disproved case shows the harness catching what unit tests would miss |
+| `99-research/rust_adversarial/` | "Sneaky" Rust patterns (interior mutability, raw aliasing, drop side effects, `unreachable_unchecked`, …) — every disproved case shows the harness catching what unit tests would miss |
 | `99-research/box_allocator/` | Known-`UNKNOWN` case (`Box::new` path the front-end can't model yet) |
 
 Each scenario's `out_*/verify.saw` is fully readable — useful for

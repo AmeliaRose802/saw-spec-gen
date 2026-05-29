@@ -1,7 +1,7 @@
 /*
 DEMO: Verified — concrete struct method, no global state touched.
 
-Mirrors demos/02-havoc-coverage/concrete_type_safe/add_one_verified.cpp.
+Mirrors add_one_verified.cpp.
 In the C++ version this shows that calling on a concrete type lets SAW
 verify the actual implementation (rather than the havoc model of an
 opaque virtual call). In Rust there's no havoc model in this verifier

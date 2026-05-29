@@ -47,7 +47,7 @@ $env:SKIP_SAW_TESTS = '1'
 | `string_ops`         | `demos/05-string-ops/has_null_byte/**` — SWAR null-byte detection (C++).                        |
 | `strings`            | `demos/05-string-ops/count_digits/**` — C-string + `std::string` `count_digits` (C++).          |
 | `async_rust`         | `demos/06-async-rust/add_one_coroutine` — `async fn` coroutine lowering, proves resume == spec. |
-| `rust_adversarial`   | `demos/99-research/rust_adversarial_holes/**` — research cases for known verifier blind spots.  |
+| `rust_adversarial`   | `demos/99-research/rust_adversarial/**` — research cases for known verifier blind spots.  |
 | `box_allocator`      | `demos/99-research/box_allocator` — excluded by default; produces `UNKNOWN` under the current pipeline. |
 
 ## Adding a new case

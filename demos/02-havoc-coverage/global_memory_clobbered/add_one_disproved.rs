@@ -2,7 +2,7 @@
 DEMO: Disproved — `static mut` global is clobbered by a helper that
 add_one calls before reading it.
 
-Mirrors demos/02-havoc-coverage/global_memory_clobbered/add_one_disproved.cpp.
+Mirrors add_one_disproved.cpp.
 The C++ version uses an opaque factory + virtual dispatch so SAW's
 havoc model lets the call write to any mutable global. Rust doesn't
 have that havoc model in this verifier path, but the same outcome is

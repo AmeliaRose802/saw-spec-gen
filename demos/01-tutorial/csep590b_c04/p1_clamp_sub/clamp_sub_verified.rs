@@ -1,5 +1,5 @@
 // DEMO: Problem 1 (clamp_sub) — FIXED reference (Rust mirror of
-// clamp_sub_fixed.cpp).
+// clamp_sub_verified.cpp).
 //
 // Two's-complement saturating subtraction via the classical
 // (sign(a) != sign(b)) /\ (sign(r) != sign(a)) overflow predicate.

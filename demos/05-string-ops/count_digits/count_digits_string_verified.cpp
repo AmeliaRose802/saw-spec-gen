@@ -2,7 +2,7 @@
 DEMO: count_digits over a `const std::string&` parameter --
 HEAP-MODE PROOF.
 
-This is the same operation as count_digits_cstr.cpp but takes a
+This is the same operation as count_digits_cstr_verified.cpp but takes a
 real C++ std::string by reference. The proof handles MSVC's
 heap-allocated representation (NOT the small-string optimisation
 inline buffer), so it covers strings of arbitrary length up to a

@@ -45,11 +45,12 @@
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'demos/02-havoc-coverage/output_param_uninitialized'; File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'demos/02-havoc-coverage/pointer_aliasing';           File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'demos/02-havoc-coverage/pointer_aliasing';           File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
-        # Adversarial-holes filenames embed the *historical* false verdict
-        # (e.g. `false_disproved_ctor_stub.cpp` once falsely reported
-        # DISPROVED before the bug was fixed; today it correctly VERIFIES).
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'demos/02-havoc-coverage/ctor_stub_false_verdicts';          File = 'add_one_false_disproved_ctor_stub.cpp';  Expected = 'VERIFIED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'demos/02-havoc-coverage/ctor_stub_false_verdicts';          File = 'add_one_false_verified_mutable.cpp';     Expected = 'DISPROVED' }
+        # `ctor_stub_false_verdicts` exhibits two patterns that historically
+        # produced *false* verdicts (one falsely DISPROVED, one falsely
+        # VERIFIED) before SAW fixes landed. Filenames now follow the
+        # convention; the README captures the historical bug context.
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'demos/02-havoc-coverage/ctor_stub_false_verdicts';          File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'demos/02-havoc-coverage/ctor_stub_false_verdicts';          File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'demos/02-havoc-coverage/multi_method_ordering';      File = 'call_validate_verified.cpp';             Expected = 'VERIFIED' }
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'demos/02-havoc-coverage/multi_method_ordering';      File = 'call_audit_verified.cpp';                Expected = 'VERIFIED' }
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'demos/02-havoc-coverage/multi_method_ordering';      File = 'call_prepare_disproved.cpp';             Expected = 'DISPROVED' }
@@ -57,7 +58,7 @@
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'demos/02-havoc-coverage/multi_method_ordering';      File = 'call_extra_disproved.cpp';               Expected = 'DISPROVED' }
         # MSVC C++ exception lowering: total Cryptol spec, partial impl.
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'demos/02-havoc-coverage/throws_exception';           File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'demos/02-havoc-coverage/throws_exception';           File = 'add_one_throws.cpp';                     Expected = 'DISPROVED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'demos/02-havoc-coverage/throws_exception';           File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
 
         # ── Rust havoc demos (verify-rust.ps1) ──────────────────────────────
         @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'demos/02-havoc-coverage/nothing_sketchy';         File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
@@ -79,10 +80,10 @@
         @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'demos/03-rust-trait-dispatch/external_crate';    File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
 
         # ── Bounded-loop demos (positive) ───────────────────────────────────
-        @{ Tag = 'bounded_loop'; Runner = 'cpp';  Dir = 'demos/01-tutorial/bounded_loop'; File = 'add_one.cpp';      Expected = 'VERIFIED' }
-        @{ Tag = 'bounded_loop'; Runner = 'rust'; Dir = 'demos/01-tutorial/bounded_loop'; File = 'add_one.rs';       Expected = 'VERIFIED' }
-        @{ Tag = 'bounded_loop'; Runner = 'cpp';  Dir = 'demos/01-tutorial/bounded_loop'; File = 'sum_first_n.cpp';  Expected = 'VERIFIED'; Cry = 'sum_first_n_spec.cry'; CryptolFn = 'sum_first_n_spec'; Function = 'sum_first_n' }
-        @{ Tag = 'bounded_loop'; Runner = 'rust'; Dir = 'demos/01-tutorial/bounded_loop'; File = 'sum_first_n.rs';   Expected = 'VERIFIED'; Cry = 'sum_first_n_spec.cry'; CryptolFn = 'sum_first_n_spec'; Function = 'sum_first_n' }
+        @{ Tag = 'bounded_loop'; Runner = 'cpp';  Dir = 'demos/01-tutorial/bounded_loop'; File = 'add_one_verified.cpp';      Expected = 'VERIFIED' }
+        @{ Tag = 'bounded_loop'; Runner = 'rust'; Dir = 'demos/01-tutorial/bounded_loop'; File = 'add_one_verified.rs';       Expected = 'VERIFIED' }
+        @{ Tag = 'bounded_loop'; Runner = 'cpp';  Dir = 'demos/01-tutorial/bounded_loop'; File = 'sum_first_n_verified.cpp';  Expected = 'VERIFIED'; Cry = 'sum_first_n_spec.cry'; CryptolFn = 'sum_first_n_spec'; Function = 'sum_first_n' }
+        @{ Tag = 'bounded_loop'; Runner = 'rust'; Dir = 'demos/01-tutorial/bounded_loop'; File = 'sum_first_n_verified.rs';   Expected = 'VERIFIED'; Cry = 'sum_first_n_spec.cry'; CryptolFn = 'sum_first_n_spec'; Function = 'sum_first_n' }
 
         # ── String operations (SWAR null-byte detection: real libc strlen
         #    bit-trick over a 64-bit word treated as 8 packed bytes). ───────
@@ -92,7 +93,7 @@
         # ── Real C-string demo: count_digits over `_In_reads_(8) const char*`.
         #    Exercises the SAL count annotation -> 8-byte buffer allocation
         #    path plus the auto-emitted llvm.var.annotation override. ───────
-        @{ Tag = 'strings'; Runner = 'cpp'; Dir = 'demos/05-string-ops/count_digits'; File = 'count_digits_cstr.cpp';           Cry = 'count_digits_spec.cry'; CryptolFn = 'count_digits_spec'; Function = 'count_digits'; Expected = 'VERIFIED'  }
+        @{ Tag = 'strings'; Runner = 'cpp'; Dir = 'demos/05-string-ops/count_digits'; File = 'count_digits_cstr_verified.cpp';  Cry = 'count_digits_spec.cry'; CryptolFn = 'count_digits_spec'; Function = 'count_digits'; Expected = 'VERIFIED'  }
         @{ Tag = 'strings'; Runner = 'cpp'; Dir = 'demos/05-string-ops/count_digits'; File = 'count_digits_cstr_disproved.cpp'; Cry = 'count_digits_spec.cry'; CryptolFn = 'count_digits_spec'; Function = 'count_digits'; Expected = 'DISPROVED' }
         # std::string heap-mode demo: hand-rolled SAW driver allocates a
         # basic_string with `_Ptr` wired to a separately-allocated content
@@ -100,14 +101,14 @@
         # verifies (z3) that count_digits matches the spec for any string
         # up to MAX_LEN=32 bytes. Uses a custom runner because gen-verify
         # can't synthesise this layout yet.
-        @{ Tag = 'strings'; Runner = 'custom'; Script = 'demos/05-string-ops/count_digits/run_string_demo.ps1'; ScriptArgs = @{ CppFile = 'demos/05-string-ops/count_digits/count_digits_string.cpp';           ExpectedResult = 'VERIFIED'  }; Expected = 'VERIFIED'  }
+        @{ Tag = 'strings'; Runner = 'custom'; Script = 'demos/05-string-ops/count_digits/run_string_demo.ps1'; ScriptArgs = @{ CppFile = 'demos/05-string-ops/count_digits/count_digits_string_verified.cpp';  ExpectedResult = 'VERIFIED'  }; Expected = 'VERIFIED'  }
         @{ Tag = 'strings'; Runner = 'custom'; Script = 'demos/05-string-ops/count_digits/run_string_demo.ps1'; ScriptArgs = @{ CppFile = 'demos/05-string-ops/count_digits/count_digits_string_disproved.cpp'; ExpectedResult = 'DISPROVED' }; Expected = 'DISPROVED' }
 
         # ── C++/Rust equivalence demos (verify-equiv.ps1) ───────────────────
-        @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'demos/04-cpp-rust-equivalence/compute_fee_reordered';         Cpp = 'compute_fee.cpp'; Rust = 'compute_fee_good.rs'; Cry = 'compute_fee_spec.cry'; CryptolFn = 'compute_fee_spec'; Function = 'compute_fee'; Expected = 'EQUIVALENT'     }
-        @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'demos/04-cpp-rust-equivalence/compute_fee_reordered';         Cpp = 'compute_fee.cpp'; Rust = 'compute_fee_bad.rs';  Cry = 'compute_fee_spec.cry'; CryptolFn = 'compute_fee_spec'; Function = 'compute_fee'; Expected = 'NOT EQUIVALENT' }
-        @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'demos/04-cpp-rust-equivalence/sat_add_optimized';   Cpp = 'sat_add.cpp';     Rust = 'sat_add_good.rs';     Cry = 'sat_add_spec.cry';     CryptolFn = 'sat_add_spec';     Function = 'sat_add';     Expected = 'EQUIVALENT'     }
-        @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'demos/04-cpp-rust-equivalence/sat_add_optimized';   Cpp = 'sat_add.cpp';     Rust = 'sat_add_bad.rs';      Cry = 'sat_add_spec.cry';     CryptolFn = 'sat_add_spec';     Function = 'sat_add';     Expected = 'NOT EQUIVALENT' }
+        @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'demos/04-cpp-rust-equivalence/compute_fee_reordered';         Cpp = 'compute_fee.cpp'; Rust = 'compute_fee_verified.rs';  Cry = 'compute_fee_spec.cry'; CryptolFn = 'compute_fee_spec'; Function = 'compute_fee'; Expected = 'EQUIVALENT'     }
+        @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'demos/04-cpp-rust-equivalence/compute_fee_reordered';         Cpp = 'compute_fee.cpp'; Rust = 'compute_fee_disproved.rs'; Cry = 'compute_fee_spec.cry'; CryptolFn = 'compute_fee_spec'; Function = 'compute_fee'; Expected = 'NOT EQUIVALENT' }
+        @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'demos/04-cpp-rust-equivalence/sat_add_optimized';   Cpp = 'sat_add.cpp';     Rust = 'sat_add_verified.rs';  Cry = 'sat_add_spec.cry';     CryptolFn = 'sat_add_spec';     Function = 'sat_add';     Expected = 'EQUIVALENT'     }
+        @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'demos/04-cpp-rust-equivalence/sat_add_optimized';   Cpp = 'sat_add.cpp';     Rust = 'sat_add_disproved.rs'; Cry = 'sat_add_spec.cry';     CryptolFn = 'sat_add_spec';     Function = 'sat_add';     Expected = 'NOT EQUIVALENT' }
         @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'demos/04-cpp-rust-equivalence/not_operator_trap'; Cpp = 'negate.cpp';     Rust = 'negate.rs';           Cry = 'negate_spec.cry';      CryptolFn = 'negate_spec';      Function = 'negate';      Expected = 'NOT EQUIVALENT' }
 
         # ── Unknown concrete-impl dyn-trait case (custom runner) ────────────
@@ -117,16 +118,16 @@
         # ── Async-Rust coroutine demo (custom runner) ───────────────────────
         @{ Tag = 'async_rust'; Runner = 'custom'; Script = 'demos/06-async-rust/add_one_coroutine/run_async_demo.ps1'; ScriptArgs = @{}; Expected = 'VERIFIED' }
 
-        # ── Rust adversarial holes (research cases: each demonstrates a
-        #    specific verifier blind spot or successful adversarial coverage).
+        # ── Rust adversarial research cases: each demonstrates a specific
+        #    verifier blind spot or successful adversarial coverage.
         #    Expected verdicts captured from baseline runs.
-        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'demos/99-research/rust_adversarial_holes/cell_interior_mutation';  File = 'add_one.rs'; Expected = 'DISPROVED' }
-        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'demos/99-research/rust_adversarial_holes/cross_fn_global';          File = 'add_one.rs'; Expected = 'VERIFIED'  }
-        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'demos/99-research/rust_adversarial_holes/drop_noinline';            File = 'add_one.rs'; Expected = 'VERIFIED'  }
-        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'demos/99-research/rust_adversarial_holes/drop_side_effect';         File = 'add_one.rs'; Expected = 'VERIFIED'  }
-        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'demos/99-research/rust_adversarial_holes/raw_pointer_aliasing';     File = 'add_one.rs'; Expected = 'DISPROVED' }
-        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'demos/99-research/rust_adversarial_holes/symbol_collision';         File = 'add_one.rs'; Expected = 'DISPROVED' }
-        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'demos/99-research/rust_adversarial_holes/unreachable_unchecked';    File = 'add_one.rs'; Expected = 'DISPROVED' }
+        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'demos/99-research/rust_adversarial/cell_interior_mutation';  File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
+        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'demos/99-research/rust_adversarial/cross_fn_global';         File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
+        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'demos/99-research/rust_adversarial/drop_noinline';           File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
+        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'demos/99-research/rust_adversarial/drop_side_effect';        File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
+        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'demos/99-research/rust_adversarial/raw_pointer_aliasing';    File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
+        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'demos/99-research/rust_adversarial/symbol_collision';        File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
+        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'demos/99-research/rust_adversarial/unreachable_unchecked';   File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
         # box_allocator currently produces UNKNOWN under the default pipeline
         # (Box::new path the front-end can't model). Tracked separately; not
         # run by default to keep the suite green. To enable, add tag 'box_allocator'.

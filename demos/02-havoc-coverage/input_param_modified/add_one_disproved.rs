@@ -1,7 +1,7 @@
 /*
 DEMO: Disproved — validator takes `&mut u32` and rewrites the value.
 
-Mirrors demos/02-havoc-coverage/input_param_modified/add_one_disproved.cpp,
+Mirrors add_one_disproved.cpp,
 where the validator's pointer parameter is non-const. In Rust the
 equivalent is `&mut u32`. After the call, `input` has been clobbered to
 999, so the function returns 1000 — not x + 1. SAW finds a

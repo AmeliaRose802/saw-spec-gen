@@ -7,14 +7,23 @@ CI run should immediately notice.
 
 | File | Spec direction | Tool result | Real answer | Status |
 |------|----------------|-------------|-------------|--------|
-| [add_one_false_disproved_ctor_stub.cpp](add_one_false_disproved_ctor_stub.cpp) | should be **VERIFIED** | reports **VERIFIED** | code is correct | fixed |
-| [add_one_false_verified_mutable.cpp](add_one_false_verified_mutable.cpp) | should be **DISPROVED** | reports **DISPROVED** (real CEX) | code is wrong | fixed |
+| [add_one_verified.cpp](add_one_verified.cpp) | should be **VERIFIED** | reports **VERIFIED** | code is correct | fixed (Hole #1: previously falsely DISPROVED — see below) |
+| [add_one_disproved.cpp](add_one_disproved.cpp) | should be **DISPROVED** | reports **DISPROVED** (real CEX) | code is wrong | fixed (Hole #2: previously falsely VERIFIED — see below) |
+
+> Earlier revisions of these files embedded the historical false
+> verdict in the filename
+> (`add_one_false_disproved_ctor_stub.cpp` and
+> `add_one_false_verified_mutable.cpp`). They were renamed to the
+> repo-wide `_verified` / `_disproved` convention; the false-verdict
+> history is preserved in the section headers below.
 
 Both share [add_one_spec.cry](add_one_spec.cry) and run through `verify.ps1`.
 
 ## Hole #1 — fixed: ctor stubs now initialize data members
 
-Demonstrated by [add_one_false_disproved_ctor_stub.cpp](add_one_false_disproved_ctor_stub.cpp).
+Demonstrated by [add_one_verified.cpp](add_one_verified.cpp)
+(historically named `add_one_false_disproved_ctor_stub.cpp` — once
+falsely reported DISPROVED before the fix landed).
 
 **Before:** the auto-generated `<class>_ctor_override` allocated only 8
 bytes (`llvm_alloc_aligned 8 (llvm_int 64)`) and wrote only the vptr.
@@ -42,7 +51,9 @@ Files touched:
 
 ## Hole #2 — fixed: `mutable` keyword soundly downgrades `const this`
 
-Demonstrated by [add_one_false_verified_mutable.cpp](add_one_false_verified_mutable.cpp).
+Demonstrated by [add_one_disproved.cpp](add_one_disproved.cpp)
+(historically named `add_one_false_verified_mutable.cpp` — once
+falsely reported VERIFIED before the fix landed).
 
 **Before:** `const` virtual methods always allocated `this` as
 `llvm_alloc_readonly`, modeling "this is preserved" — unsound when the
@@ -75,12 +86,12 @@ patterns; tests that should have failed could have spuriously passed.
 
 ```powershell
 # Should be VERIFIED — and is.
-./verify.ps1 -CppFile demos\02-havoc-coverage\ctor_stub_false_verdicts\add_one_false_disproved_ctor_stub.cpp `
+./verify.ps1 -CppFile demos\02-havoc-coverage\ctor_stub_false_verdicts\add_one_verified.cpp `
              -CryptolSpec demos\02-havoc-coverage\ctor_stub_false_verdicts\add_one_spec.cry `
              -CryptolFn add_one_spec -Function add_one
 
 # Should be DISPROVED (with a counterexample at `this_bias__post`) — and is.
-./verify.ps1 -CppFile demos\02-havoc-coverage\ctor_stub_false_verdicts\add_one_false_verified_mutable.cpp `
+./verify.ps1 -CppFile demos\02-havoc-coverage\ctor_stub_false_verdicts\add_one_disproved.cpp `
              -CryptolSpec demos\02-havoc-coverage\ctor_stub_false_verdicts\add_one_spec.cry `
              -CryptolFn add_one_spec -Function add_one
 ```

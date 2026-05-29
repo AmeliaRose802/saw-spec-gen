@@ -2,7 +2,7 @@
 DEMO: Verified — `&u32` (in) and `&mut u32` (out) cannot alias by the
 borrow checker.
 
-Mirrors demos/02-havoc-coverage/pointer_aliasing/add_one_verified.cpp,
+Mirrors add_one_verified.cpp,
 which uses `_In_`, `_Out_`, and `__restrict` to tell the C++ tool the
 two pointers don't alias. In Rust this is the default: you cannot
 simultaneously hold `&u32` and `&mut u32` pointing at the same value
