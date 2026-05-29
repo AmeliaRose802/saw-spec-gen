@@ -59,6 +59,8 @@
         # MSVC C++ exception lowering: total Cryptol spec, partial impl.
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/throws_exception';           File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/throws_exception';           File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/throws_exception';           File = 'add_one_throws_caught.cpp';              Expected = 'VERIFIED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/throws_exception';           File = 'add_one_multi_catch.cpp';                Expected = 'DISPROVED' }
 
         # ── Rust havoc tests (verify-rust.ps1) ──────────────────────────────
         # Note: Rust has no havoc model in this verifier path — every

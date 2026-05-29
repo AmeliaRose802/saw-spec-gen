@@ -18,7 +18,7 @@
 #
 # Environment overrides:
 #   INSTALL_ROOT          install root           (default: ~/.saw-spec-gen)
-#   EXCEPTION_LOWER_TAG   release tag to fetch   (default: v0.1.0)
+#   EXCEPTION_LOWER_TAG   release tag to fetch   (default: v0.2.0)
 #   EXCEPTION_LOWER_REF   git ref for fallback   (default: main)
 #   LLVM_BIN              llvm bin dir for cmake (default: empty)
 #   QUIET                 1 to suppress info     (default: 0)
@@ -28,7 +28,7 @@
 set -euo pipefail
 
 INSTALL_ROOT="${INSTALL_ROOT:-${HOME}/.saw-spec-gen}"
-EXCEPTION_LOWER_TAG="${EXCEPTION_LOWER_TAG:-v0.1.0}"
+EXCEPTION_LOWER_TAG="${EXCEPTION_LOWER_TAG:-v0.2.0}"
 EXCEPTION_LOWER_REF="${EXCEPTION_LOWER_REF:-main}"
 LLVM_BIN="${LLVM_BIN:-}"
 QUIET="${QUIET:-0}"
@@ -76,15 +76,19 @@ platform_label() {
 have() { command -v "$1" >/dev/null 2>&1; }
 
 try_download_prebuilt() {
-    local platform asset url tmp
+    local platform asset url tmp ext
     platform="$(platform_label)"
     if [[ -z "$platform" ]]; then
         log '  no prebuilt label for this platform; falling back to source build'
         return 1
     fi
-    asset="exception-lower-${platform}.zip"
+    # Linux/macOS get .tar.gz (preserves the executable bit through
+    # extraction); Windows gets .zip. tar(1) handles both formats but we
+    # match what upstream publishes so we don't have to repackage.
+    ext='tar.gz'
+    asset="exception-lower-${platform}.${ext}"
     url="https://github.com/AmeliaRose802/llvm-exception-lower/releases/download/${EXCEPTION_LOWER_TAG}/${asset}"
-    tmp="$(mktemp -t el.XXXXXX.zip)"
+    tmp="$(mktemp -t el.XXXXXX.${ext})"
     log "  downloading $url"
     if have curl; then
         if ! curl -fL --retry 3 -o "$tmp" "$url" 2>/dev/null; then
@@ -109,12 +113,12 @@ try_download_prebuilt() {
         return 1
     fi
     mkdir -p "$EL_BIN_DIR"
-    if ! have unzip; then
-        log '  unzip not on PATH; cannot extract prebuilt'
+    # tar is universal on Linux/macOS; -p preserves the +x bit.
+    if ! tar -xpzf "$tmp" -C "$EL_BIN_DIR"; then
+        log '  tar extract failed'
         rm -f "$tmp"
         return 1
     fi
-    unzip -o -q "$tmp" -d "$EL_BIN_DIR"
     rm -f "$tmp"
     if [[ ! -x "$EL_BIN" ]]; then
         # Some packagers put the binary under a top-level directory.

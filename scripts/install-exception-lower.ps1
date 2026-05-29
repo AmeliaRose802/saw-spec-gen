@@ -27,8 +27,9 @@
 
 .PARAMETER ReleaseTag
     Which release of llvm-exception-lower to download prebuilt binaries
-    from (default: v0.1.0). The asset name is derived from the host
-    platform: exception-lower-{platform}-{arch}.zip.
+    from (default: v0.2.0). The asset name is derived from the host
+    platform: exception-lower-{platform}-{arch}.{ext} where {ext} is
+    .zip on Windows and .tar.gz elsewhere.
 
 .PARAMETER Ref
     Git ref to fall back to when no prebuilt is available
@@ -54,7 +55,7 @@
 [CmdletBinding()]
 param(
     [string]$InstallRoot,
-    [string]$ReleaseTag = 'v0.1.0',
+    [string]$ReleaseTag = 'v0.2.0',
     [string]$Ref = 'main',
     [string]$LlvmBin,
     [switch]$Quiet,
@@ -114,9 +115,14 @@ function _TryDownloadPrebuilt {
         _Log '  no prebuilt label for this platform; falling back to source build' 'DarkYellow'
         return $false
     }
-    $assetName = "exception-lower-$platform.zip"
+    # Use .zip on Windows (Expand-Archive handles it natively) and
+    # .tar.gz everywhere else (matches the convention upstream uses for
+    # stripped ELF / Mach-O builds and lets us preserve the executable
+    # bit through extraction with tar).
+    $ext = if ($isWindowsHost) { 'zip' } else { 'tar.gz' }
+    $assetName = "exception-lower-$platform.$ext"
     $url = "https://github.com/AmeliaRose802/llvm-exception-lower/releases/download/$ReleaseTag/$assetName"
-    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) "el-$([guid]::NewGuid().ToString('N')).zip"
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) "el-$([guid]::NewGuid().ToString('N')).$ext"
     _Log "  downloading $url" 'Cyan'
     try {
         Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing -ErrorAction Stop
@@ -130,12 +136,21 @@ function _TryDownloadPrebuilt {
         return $false
     }
     # Extract directly into bin/. The release archive contains the
-    # single executable at its root.
+    # single executable plus a couple of doc files at its root.
     New-Item -ItemType Directory -Path $elBinDir -Force | Out-Null
     try {
-        Expand-Archive -LiteralPath $tmp -DestinationPath $elBinDir -Force
+        if ($ext -eq 'zip') {
+            Expand-Archive -LiteralPath $tmp -DestinationPath $elBinDir -Force
+        } else {
+            # tar.exe ships with Windows 10+ and is universally
+            # available on Linux/macOS. -p preserves permissions so the
+            # executable bit survives.
+            Push-Location $elBinDir
+            try { & tar -xpzf $tmp } finally { Pop-Location }
+            if ($LASTEXITCODE -ne 0) { throw "tar exited $LASTEXITCODE" }
+        }
     } catch {
-        _Log "  unzip failed: $($_.Exception.Message)" 'DarkYellow'
+        _Log "  extract failed: $($_.Exception.Message)" 'DarkYellow'
         Remove-Item $tmp -Force -ErrorAction SilentlyContinue
         return $false
     }

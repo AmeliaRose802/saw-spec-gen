@@ -157,7 +157,8 @@ On first need, `verify.ps1` will try to auto-install the pass for you:
 1. Download a prebuilt binary for your host platform from
    [llvm-exception-lower releases](https://github.com/AmeliaRose802/llvm-exception-lower/releases)
    into `~/.saw-spec-gen/exception-lower/bin/`. Currently published:
-   `windows-x64`. Other platforms fall through to step 2.
+   `windows-x64` (`.zip`), `linux-x64` (`.tar.gz`). Other platforms
+   fall through to step 2.
 2. Clone + cmake-build from source if `cmake` and `git` are on `PATH`.
 
 If neither path works, verification falls back gracefully and tells you

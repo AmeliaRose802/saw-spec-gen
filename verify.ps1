@@ -103,30 +103,6 @@ $exceptionLower = $tools.ExceptionLower
 $llvmTarget= $tools.LlvmTarget   # e.g. x86_64-pc-windows-msvc / -unknown-linux-gnu
 $isMsvc    = $llvmTarget -match 'windows-msvc'
 
-# Auto-install the exception-lower pass on first need. The MSVC target
-# is the one where SAW simply cannot load C++ try/catch bitcode without
-# the lowering pass (FUNC_CODE_CATCHSWITCH is unparseable); on Itanium
-# targets the throw is silently pruned which is at least a usable
-# fallback. We therefore only force the install for MSVC. Even there,
-# the pipeline still works for non-EH demos when the install fails — we
-# just lose verifiability of the `try` / `catch` cases.
-if (-not $exceptionLower -and $isMsvc) {
-    Write-Host ""
-    Write-Host "[*] exception-lower pass not found; attempting auto-install..." -ForegroundColor Cyan
-    $installScript = Join-Path $ScriptRoot 'scripts/install-exception-lower.ps1'
-    try {
-        $built = & $installScript -LlvmBin $tools.LlvmBin
-        if ($LASTEXITCODE -eq 0 -and $built -and (Test-Path -LiteralPath $built)) {
-            $exceptionLower = $built
-            $env:SAW_SPEC_GEN_EXCEPTION_LOWER = $built
-            Write-Host "[*] exception-lower installed: $built" -ForegroundColor Green
-        }
-    } catch {
-        Write-Host "[!] exception-lower auto-install failed: $_" -ForegroundColor Yellow
-        Write-Host "    Continuing with text-only MSVC EH stripping." -ForegroundColor Yellow
-    }
-}
-
 # ── All artifacts go under $OutputDir ──────────────────────────────────────────
 $bcFile   = Join-Path $OutputDir "$baseName.bc"
 $llFile   = Join-Path $OutputDir "$baseName.ll"
@@ -151,50 +127,18 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # ── Step 1.25: Lower C++ exception handling (optional) ────────────────────────
-# When the standalone `exception-lower` pass is available, run it on
-# the freshly compiled bitcode so SAW can symbolically execute through
-# try/catch arms. The pass rewrites both Itanium (invoke/landingpad/
-# __cxa_throw) and MSVC SEH (catchswitch/catchpad/_CxxThrowException)
-# constructs into explicit error-flag CFG. Without this pass:
-#   * Itanium catches are simply pruned (any throw becomes
-#     `partial-correctness only` — the catch body is unreachable).
-#   * MSVC catches fail to load at all
-#     (FUNC_CODE_CATCHSWITCH is not understood by the bc parser).
-# After lowering we still run the text-based `--strip-msvc-eh` patch
-# below to deal with the throw-info xdata globals (their initialisers
-# use ptrtoint-of-__ImageBase, which Crucible rejects at module load
-# even though the lowered code never reads the field values).
-# The pass is a no-op on IR that contains no EH constructs, so it is
-# safe to invoke unconditionally whenever the binary is available.
-if ($exceptionLower) {
-    Write-Host ""
-    Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
-    Write-Host " Step 1.25: Lower C++ exception handling" -ForegroundColor Cyan
-    Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
-    $loweredBc = Join-Path $OutputDir "${baseName}_lowered.bc"
-    & $exceptionLower $bcFile -o $loweredBc 2>&1 | Write-Host
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "  warning: exception-lower failed; continuing with unlowered IR" -ForegroundColor Yellow
-    } else {
-        # Replace the canonical .bc with the lowered form, and refresh
-        # the .ll text so downstream gen-verify (which reads --llvm-ir)
-        # and the text-based patch see the lowered shape.
-        Copy-Item $loweredBc $bcFile -Force
-        Write-Host "  → $bcFile (lowered)" -ForegroundColor Green
-        if ($llFile -and $llvmDis) {
-            & $llvmDis $bcFile -o $llFile 2>&1
-            if ($LASTEXITCODE -ne 0) {
-                Write-Host "  warning: llvm-dis failed on lowered .bc; .ll may be stale" -ForegroundColor Yellow
-            } else {
-                Write-Host "  → $llFile (refreshed from lowered .bc)" -ForegroundColor Green
-            }
-        }
-    }
-} elseif ($isMsvc) {
-    Write-Host "  note: exception-lower binary not available; C++ try/catch demos will not load." -ForegroundColor DarkYellow
-    Write-Host "        Run scripts/install-exception-lower.ps1 to install, or set" -ForegroundColor DarkYellow
-    Write-Host "        SAW_SPEC_GEN_EXCEPTION_LOWER to point at an existing build." -ForegroundColor DarkYellow
-}
+# Delegates to scripts/ensure-exception-lower.ps1 which handles
+# auto-install (MSVC only) and the actual lowering pass.
+$exceptionLower = & (Join-Path $ScriptRoot 'scripts/ensure-exception-lower.ps1') `
+    -ExceptionLower $exceptionLower `
+    -IsMsvc $isMsvc `
+    -ScriptRoot $ScriptRoot `
+    -BcFile $bcFile `
+    -LlFile $llFile `
+    -LlvmDis $llvmDis `
+    -OutputDir $OutputDir `
+    -BaseName $baseName `
+    -Tools $tools
 
 # ── Step 1.5: Patch IR for SAW/Crucible quirks ────────────────────────────────
 # Two textual passes run on the .ll, then we re-assemble the .bc:
