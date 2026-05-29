@@ -53,6 +53,6 @@ pub use mir_spec::emit_mir_saw_specs;
 #[allow(unused_imports)]
 pub use factory::emit_interface_factory_spec;
 #[allow(unused_imports)]
-pub use stubs::{assemble_vtable_stubs, emit_interface_stubs, AssembledStubs};
+pub use stubs::{assemble_vtable_stubs, emit_interface_stubs, link_stubs_with_main, AssembledStubs};
 #[allow(unused_imports)]
 pub use verify_script::emit_verification_script;

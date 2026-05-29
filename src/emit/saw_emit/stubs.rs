@@ -135,6 +135,60 @@ pub fn assemble_vtable_stubs(output_dir: &Path) -> AssembledStubs {
     }
 }
 
+/// Pre-link `main_bitcode` (the user's compiled code) with the
+/// previously-assembled `vtable_stubs.bc` into a single `code.combined.bc`
+/// using `llvm-link`. Lets the emitted `verify.saw` load one module via
+/// `llvm_load_module` and skip `llvm_combine_modules` entirely — that
+/// primitive was added to upstream SAW *after* the v1.5 release tag, so
+/// generating scripts that depend on it forces users to build SAW from
+/// source. Pre-linking with the off-the-shelf `llvm-link` tool sidesteps
+/// the issue and produces output any SAW ≥ 0.x can load.
+///
+/// If `stubs` is anything other than `Bitcode` we just pass it through
+/// unchanged — there's nothing to link with.
+///
+/// On link failure (e.g. `llvm-link` missing from PATH) the original
+/// `Bitcode` value is returned, so the caller falls back to the
+/// `llvm_combine_modules` emission path.
+pub fn link_stubs_with_main(
+    main_bitcode: &Path,
+    output_dir: &Path,
+    stubs: AssembledStubs,
+) -> AssembledStubs {
+    let stubs_bc_name = match &stubs {
+        AssembledStubs::Bitcode { bc_filename, .. } => bc_filename.clone(),
+        _ => return stubs,
+    };
+    let stubs_bc_path = output_dir.join(&stubs_bc_name);
+    if !stubs_bc_path.exists() {
+        return stubs;
+    }
+    if !main_bitcode.exists() {
+        return stubs;
+    }
+    let combined_filename = "code.combined.bc";
+    let combined_path = output_dir.join(combined_filename);
+    let candidates: &[&str] = &["llvm-link", "llvm-link.exe"];
+    for cmd in candidates {
+        match std::process::Command::new(cmd)
+            .arg(main_bitcode)
+            .arg(&stubs_bc_path)
+            .arg("-o")
+            .arg(&combined_path)
+            .output()
+        {
+            Ok(out) if out.status.success() && combined_path.exists() => {
+                return AssembledStubs::LinkedBitcode {
+                    combined_filename: combined_filename.to_string(),
+                    linker: (*cmd).to_string(),
+                };
+            }
+            Ok(_) | Err(_) => continue,
+        }
+    }
+    stubs
+}
+
 /// Result of [`assemble_vtable_stubs`].
 #[derive(Debug, Clone)]
 pub enum AssembledStubs {
@@ -142,6 +196,11 @@ pub enum AssembledStubs {
     NoStubs,
     /// Successfully assembled to bitcode.
     Bitcode { bc_filename: String, assembler: String },
+    /// `vtable_stubs.bc` was further pre-linked with the main bitcode
+    /// into a single combined module. The emitted verify script can do
+    /// one `llvm_load_module` and skip `llvm_combine_modules` (which
+    /// the v1.5 SAW release tarball doesn't ship).
+    LinkedBitcode { combined_filename: String, linker: String },
     /// No assembler was available; the user must run `llvm-as` or
     /// `clang -c -emit-llvm` manually before running SAW.
     TextOnly { ll_filename: String },
@@ -158,6 +217,7 @@ impl AssembledStubs {
         match self {
             AssembledStubs::NoStubs => None,
             AssembledStubs::Bitcode { bc_filename, .. } => Some(bc_filename.as_str()),
+            AssembledStubs::LinkedBitcode { combined_filename, .. } => Some(combined_filename.as_str()),
             AssembledStubs::TextOnly { .. } => Some("vtable_stubs.bc"),
         }
     }

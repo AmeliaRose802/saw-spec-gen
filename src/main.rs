@@ -202,6 +202,25 @@ enum Commands {
         /// once per override; emits `llvm_int BITS` for that name.
         #[arg(long = "alias-enum", value_name = "NAME=BITS", num_args = 0..)]
         alias_enum: Vec<String>,
+
+        /// Emit `llvm_combine_modules` in the generated `verify.saw`
+        /// instead of pre-linking `main.bc` + `vtable_stubs.bc` with
+        /// `llvm-link` at gen time.
+        ///
+        /// Default (off): pre-link with `llvm-link` and have SAW load a
+        /// single `code.combined.bc`. Works with the stock GaloisInc
+        /// SAW v1.5 release tarball.
+        ///
+        /// On (this flag): keep the old behavior. Produces a script
+        /// that needs SAW master / a fork that includes the
+        /// `llvm_combine_modules` primitive (merged upstream after the
+        /// v1.5 tag).
+        ///
+        /// Has no effect when there are no interface (virtual) methods
+        /// to stub — the single-module load path is always used in that
+        /// case.
+        #[arg(long = "use-llvm-combine-modules", default_value_t = false)]
+        use_llvm_combine_modules: bool,
     },
 
     /// Generate Rust trait vtable stubs + havoc specs for opaque
@@ -529,6 +548,7 @@ fn main() -> Result<()> {
             output,
             alias_size,
             alias_enum,
+            use_llvm_combine_modules,
         } => {
             gen_verify::run(
                 &ast,
@@ -540,6 +560,7 @@ fn main() -> Result<()> {
                 &output,
                 &alias_size,
                 &alias_enum,
+                use_llvm_combine_modules,
             )?;
         }
         Commands::GenRustTraitStubs { schema, output } => {

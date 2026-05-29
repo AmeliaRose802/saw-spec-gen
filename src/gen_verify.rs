@@ -25,6 +25,7 @@ pub fn run(
     output: &Path,
     alias_size_overrides: &[String],
     alias_enum_overrides: &[String],
+    use_llvm_combine_modules: bool,
 ) -> Result<()> {
     if ast.is_empty() {
         anyhow::bail!("At least one --ast file is required");
@@ -310,9 +311,16 @@ pub fn run(
     // at load time. If no assembler (llvm-as / clang) is on PATH we fall
     // back to referencing the `.ll` and the emitted script will warn the
     // user to assemble it manually.
+    //
+    // After assembly, by default we go one step further and pre-link
+    // main.bc + vtable_stubs.bc into a single code.combined.bc using
+    // llvm-link. The emitted verify.saw then loads one module and skips
+    // SAW's `llvm_combine_modules` primitive, which only exists in
+    // post-v1.5 SAW (master / forks). Pass --use-llvm-combine-modules
+    // to keep the old two-module emission for users on a custom SAW.
     let stubs_status = if has_interfaces {
-        let st = saw_emit::assemble_vtable_stubs(output);
-        match &st {
+        let assembled = saw_emit::assemble_vtable_stubs(output);
+        match &assembled {
             saw_emit::AssembledStubs::Bitcode { bc_filename, assembler } => {
                 eprintln!(
                     "Assembled vtable stubs to {} via `{assembler}`",
@@ -341,9 +349,37 @@ pub fn run(
                     "         before invoking saw on verify.saw.",
                 );
             }
+            saw_emit::AssembledStubs::LinkedBitcode { .. } => { /* unreachable here */ }
             saw_emit::AssembledStubs::NoStubs => {}
         }
-        st
+        // Default: pre-link with llvm-link so the script doesn't need
+        // SAW's `llvm_combine_modules` (post-v1.5 only).
+        let final_status = if use_llvm_combine_modules {
+            assembled
+        } else {
+            let linked = saw_emit::link_stubs_with_main(bitcode, output, assembled);
+            match &linked {
+                saw_emit::AssembledStubs::LinkedBitcode { combined_filename, linker } => {
+                    eprintln!(
+                        "Pre-linked main + vtable stubs into {} via `{linker}` \
+                         (verify.saw will not need llvm_combine_modules).",
+                        combined_filename,
+                    );
+                }
+                saw_emit::AssembledStubs::Bitcode { .. } => {
+                    eprintln!(
+                        "warning: llvm-link not found on PATH; falling back to \
+                         llvm_combine_modules in the emitted script. Stock SAW \
+                         v1.5 will not be able to run that — install llvm-link \
+                         (ships with LLVM) or pass --use-llvm-combine-modules \
+                         to silence this warning.",
+                    );
+                }
+                _ => {}
+            }
+            linked
+        };
+        final_status
     } else {
         saw_emit::AssembledStubs::NoStubs
     };

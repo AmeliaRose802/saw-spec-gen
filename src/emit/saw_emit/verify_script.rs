@@ -209,6 +209,22 @@ fn emit_load_bitcode_step(
 ) {
     out.push_str(&format!("// Step {step}: Load bitcode"));
     if has_interfaces {
+        // Preferred path: gen-verify already pre-linked main.bc + vtable_stubs.bc
+        // into a single combined module via `llvm-link`. This avoids
+        // `llvm_combine_modules`, which was added to SAW *after* the v1.5
+        // release tag — generating the combine version forces users to
+        // build SAW from source.
+        if let AssembledStubs::LinkedBitcode { combined_filename, linker } = stubs_status {
+            out.push_str(" (vtable stubs pre-linked)\n");
+            out.push_str(&format!(
+                "// {combined_filename} was produced at gen time via `{linker}`\n"
+            ));
+            out.push_str("// (main bitcode + vtable_stubs.bc). Loading one module here lets the\n");
+            out.push_str("// stock SAW v1.5 release tarball run this script unmodified.\n");
+            out.push_str(&format!("m <- llvm_load_module \"{combined_filename}\";\n\n"));
+            let _ = step;
+            return;
+        }
         let stubs_filename = stubs_status.script_filename().unwrap_or("vtable_stubs.bc");
         out.push_str(" + vtable stubs\n");
         if let AssembledStubs::TextOnly { ll_filename } = stubs_status {
@@ -227,6 +243,7 @@ fn emit_load_bitcode_step(
             out.push_str(&format!(
                 "// vtable_stubs.bc was assembled from vtable_stubs.ll via `{assembler}`.\n",
             ));
+            out.push_str("// (Pre-linking with `llvm-link` was disabled via --use-llvm-combine-modules.)\n");
         }
         out.push_str(&format!("m_main  <- llvm_load_module \"{bitcode_rel}\";\n"));
         out.push_str(&format!(
