@@ -362,7 +362,12 @@ build_saw_from_source() {
             have_dev_lib z     || missing+=(libz)
             have_dev_lib ffi   || missing+=(libffi)
         fi
-        printf '%s\n' "${missing[@]}"
+        # Important: printf with no args on an empty array would still emit
+        # one empty line, which mapfile reads as an element of size 1 ->
+        # caller thinks something is still missing. Emit nothing instead.
+        if (( ${#missing[@]} > 0 )); then
+            printf '%s\n' "${missing[@]}"
+        fi
     }
     # Map (logical dep, distro) → concrete package name.
     pkg_for() {
