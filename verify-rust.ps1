@@ -34,8 +34,8 @@
 
 .EXAMPLE
     .\verify-rust.ps1 `
-        -RustFile    demo\rust_equalivence_demo\nothing_sketchy\add_one_sat.rs `
-        -CryptolSpec demo\rust_equalivence_demo\nothing_sketchy\add_one_spec.cry `
+        -RustFile    demos\02-havoc-coverage\nothing_sketchy\add_one_verified.rs `
+        -CryptolSpec demos\02-havoc-coverage\nothing_sketchy\add_one_spec.cry `
         -CryptolFn   add_one_spec `
         -Function    add_one
 #>
