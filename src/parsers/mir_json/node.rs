@@ -207,10 +207,7 @@ mod tests {
         assert_eq!(a.size, Some(24));
         assert_eq!(a.variants[0].fields.len(), 2);
         assert_eq!(a.variants[0].fields[0].name.as_deref(), Some("version"));
-        assert_eq!(
-            a.variants[0].fields[0].ty.as_deref(),
-            Some("ty::Uint::U32")
-        );
+        assert_eq!(a.variants[0].fields[0].ty.as_deref(), Some("ty::Uint::U32"));
     }
 
     #[test]

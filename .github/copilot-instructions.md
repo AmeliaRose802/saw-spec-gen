@@ -87,8 +87,10 @@ pwsh tests/saw_demos/Run-SawDemos.ps1 -Tag cpp_havoc
 pwsh tests/saw_demos/Run-SawDemos.ps1 -List         # dry run
 ```
 
-The pre-commit hook (above) runs the line-count check **and** the SAW
-suite. The runner auto-skips when SAW is not installed on the machine
+The pre-commit hook (above) runs the line-count check, `cargo fmt --
+--check` (matches CI; set `SKIP_FMT=1` to skip), `cargo clippy
+-- -D warnings` (matches CI; set `SKIP_CLIPPY=1` to skip), **and** the
+SAW suite. The runner auto-skips when SAW is not installed on the machine
 (no-op exit 0). Set `SKIP_SAW_TESTS=1` in the environment to skip
 explicitly. When adding a new demo, append an entry to `cases.psd1` —
 do not write a bespoke runner script. See

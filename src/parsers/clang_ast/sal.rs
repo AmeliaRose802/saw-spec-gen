@@ -19,7 +19,13 @@ pub fn parse_sal_annotation(attr: &AstNode) -> Option<Annotation> {
     let value: &str = if let Some(v) = attr.value.as_ref().and_then(|v| v.as_str()) {
         v
     } else {
-        let exp = attr.range.as_ref()?.begin.as_ref()?.expansion_loc.as_ref()?;
+        let exp = attr
+            .range
+            .as_ref()?
+            .begin
+            .as_ref()?
+            .expansion_loc
+            .as_ref()?;
         let file = exp.file.as_deref()?;
         let offset = exp.offset? as usize;
         let tok_len = exp.tok_len? as usize;

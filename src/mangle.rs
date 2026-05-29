@@ -218,10 +218,7 @@ mod tests {
     fn v0_inherent_method() {
         // Pin::<ReadyU32>::new_unchecked
         let m = "_RNvMs4_NtCs25LAAAjbyGa_4core3pinINtB5_3PinQNtCsdp1B4KIx7LM_11add_one_sat8ReadyU32E13new_unchecked";
-        assert_eq!(
-            humanize(m).as_deref(),
-            Some("Pin__ReadyU32__new_unchecked")
-        );
+        assert_eq!(humanize(m).as_deref(), Some("Pin__ReadyU32__new_unchecked"));
     }
 
     #[test]

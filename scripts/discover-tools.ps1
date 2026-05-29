@@ -129,7 +129,15 @@ function Find-SawSpecGenTools {
     }
     $llvmBin = $null
     foreach ($dir in $llvmBinCandidates) {
-        if ($dir -and (Test-Path -LiteralPath (Join-Path $dir ("clang" + $exeExt)))) {
+        # Require BOTH clang and llvm-as to be present in the candidate
+        # directory. GitHub's windows-latest runners ship clang at
+        # C:\Program Files\LLVM\bin but no llvm-as, so checking only
+        # for clang accepts a clang-only LLVM and the rest of the
+        # pipeline fails later on. Require both up front so we fall
+        # through to the bundled $HOME/.saw-spec-gen/llvm/bin install.
+        if ($dir `
+                -and (Test-Path -LiteralPath (Join-Path $dir ("clang"   + $exeExt))) `
+                -and (Test-Path -LiteralPath (Join-Path $dir ("llvm-as" + $exeExt)))) {
             $llvmBin = (Resolve-Path -LiteralPath $dir).Path
             break
         }

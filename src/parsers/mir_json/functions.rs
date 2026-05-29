@@ -72,17 +72,10 @@ pub fn parse_mir_function(
 }
 
 /// Convert a single [`ArgDef`] into a [`ParamInfo`].
-pub fn parse_mir_param(
-    arg: &ArgDef,
-    adt_map: &HashMap<String, TypeInfo>,
-) -> Option<ParamInfo> {
+pub fn parse_mir_param(arg: &ArgDef, adt_map: &HashMap<String, TypeInfo>) -> Option<ParamInfo> {
     let name = arg.name.clone()?;
     let ty_name = arg.ty.as_deref()?;
-    let is_mut = arg
-        .mutability
-        .as_ref()
-        .map(|m| m.is_mut())
-        .unwrap_or(false);
+    let is_mut = arg.mutability.as_ref().map(|m| m.is_mut()).unwrap_or(false);
     let (ty, mutability, nullable) = parse_rust_type_string(ty_name, is_mut, adt_map);
     Some(ParamInfo {
         name,

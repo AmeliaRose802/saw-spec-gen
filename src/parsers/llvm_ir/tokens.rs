@@ -89,10 +89,7 @@ mod tests {
 
     #[test]
     fn split_handles_flat_csv() {
-        assert_eq!(
-            split_ir_params("i32, i64, i8*"),
-            vec!["i32", "i64", "i8*"],
-        );
+        assert_eq!(split_ir_params("i32, i64, i8*"), vec!["i32", "i64", "i8*"],);
     }
 
     #[test]

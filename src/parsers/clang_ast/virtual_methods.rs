@@ -144,13 +144,9 @@ impl<'a> Visitor for VMethodVisitor<'a> {
             let has_override = node.has_override_attr();
             if is_virtual || has_override {
                 let is_pure = node.pure == Some(true);
-                if let Some(func) = parse_function_decl(
-                    node,
-                    true,
-                    self.ctx,
-                    self.id_to_name,
-                    self.stack.current(),
-                ) {
+                if let Some(func) =
+                    parse_function_decl(node, true, self.ctx, self.id_to_name, self.stack.current())
+                {
                     if self.filter.map(|f| func.name.contains(f)).unwrap_or(true) {
                         let class_name = node
                             .parent_decl_context_id

@@ -16,8 +16,8 @@ pub const MAX_IR_FILE_SIZE: u64 = 200 * 1024 * 1024;
 /// Read a `.ll` file from disk. Enforces [`MAX_IR_FILE_SIZE`] before
 /// attempting the read so we don't OOM on huge bitcode dumps.
 pub fn parse_llvm_ir(path: &Path) -> Result<String> {
-    let metadata = std::fs::metadata(path)
-        .with_context(|| format!("Failed to stat {}", path.display()))?;
+    let metadata =
+        std::fs::metadata(path).with_context(|| format!("Failed to stat {}", path.display()))?;
     let file_size = metadata.len();
     if file_size > MAX_IR_FILE_SIZE {
         let size_mb = file_size / (1024 * 1024);
@@ -31,17 +31,14 @@ pub fn parse_llvm_ir(path: &Path) -> Result<String> {
             MAX_IR_FILE_SIZE / (1024 * 1024),
         );
     }
-    std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read {}", path.display()))
+    std::fs::read_to_string(path).with_context(|| format!("Failed to read {}", path.display()))
 }
 
 /// Convenience helper: load optional LLVM IR text and return both the
 /// struct-size table and parsed function signatures. Returns empty
 /// values when `path` is `None`. Used by `gen-verify` to centralise the
 /// optional-IR plumbing.
-pub fn load_optional(
-    path: Option<&Path>,
-) -> Result<(HashMap<String, usize>, Vec<FunctionInfo>)> {
+pub fn load_optional(path: Option<&Path>) -> Result<(HashMap<String, usize>, Vec<FunctionInfo>)> {
     let Some(p) = path else {
         return Ok((HashMap::new(), Vec::new()));
     };
@@ -50,7 +47,10 @@ pub fn load_optional(
     let sizes = struct_sizes(&ir_text);
     eprintln!("  parsed {} struct type definitions", sizes.len());
     let funcs = extract_functions(&ir_text, None).unwrap_or_default();
-    eprintln!("  parsed {} function signatures (for deref sizes)", funcs.len());
+    eprintln!(
+        "  parsed {} function signatures (for deref sizes)",
+        funcs.len()
+    );
     Ok((sizes, funcs))
 }
 

@@ -192,10 +192,7 @@ fn match_primitive(ty_name: &str) -> Option<TypeInfo> {
 
 /// Extract the pointee type from a reference/pointer type string.
 /// Example: `"ty::Ref<'_, u8, Shared>"` → `u8`.
-pub fn extract_ref_inner_type(
-    ty_name: &str,
-    adt_map: &HashMap<String, TypeInfo>,
-) -> TypeInfo {
+pub fn extract_ref_inner_type(ty_name: &str, adt_map: &HashMap<String, TypeInfo>) -> TypeInfo {
     if let Some(start) = ty_name.find('<') {
         let inner = &ty_name[start + 1..];
         if let Some(end) = inner.rfind('>') {

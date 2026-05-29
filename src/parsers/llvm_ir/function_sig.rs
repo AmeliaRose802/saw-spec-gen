@@ -139,7 +139,10 @@ pub fn extract_return_type(line: &str, at_pos: usize) -> String {
         if LINKAGE_KEYWORDS.contains(p) || p.starts_with('#') {
             continue;
         }
-        if PAREN_ATTR_PREFIXES.iter().any(|prefix| p.starts_with(prefix)) {
+        if PAREN_ATTR_PREFIXES
+            .iter()
+            .any(|prefix| p.starts_with(prefix))
+        {
             skip_depth = update_paren_depth(p, 0).max(0);
             continue;
         }

@@ -91,7 +91,10 @@ mod tests {
     #[test]
     fn byte_array_becomes_byte_array_variant() {
         let m = HashMap::new();
-        assert_eq!(parse_ir_type_resolved("[16 x i8]", &m), TypeInfo::ByteArray(16));
+        assert_eq!(
+            parse_ir_type_resolved("[16 x i8]", &m),
+            TypeInfo::ByteArray(16)
+        );
     }
 
     #[test]
@@ -123,7 +126,11 @@ mod tests {
             },
         );
         match parse_ir_type_resolved("%struct.Pair", &m) {
-            TypeInfo::Struct { name, size_bytes, fields } => {
+            TypeInfo::Struct {
+                name,
+                size_bytes,
+                fields,
+            } => {
                 assert_eq!(name, "struct.Pair");
                 assert_eq!(size_bytes, Some(8));
                 assert_eq!(fields.len(), 2);

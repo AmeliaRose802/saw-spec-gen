@@ -35,6 +35,7 @@ mod path_utils;
 mod stubs;
 mod types;
 mod verify_script;
+mod verify_script_steps;
 mod writer;
 
 // Re-export the public surface that the rest of the crate depends on.
@@ -44,6 +45,8 @@ mod writer;
 // future extractors.
 
 #[allow(unused_imports)]
+pub use factory::emit_interface_factory_spec;
+#[allow(unused_imports)]
 pub use llvm_spec::{
     emit_operator_new_spec, emit_saw_specs, emit_saw_specs_with_globals,
     emit_single_experimental_spec, EmitMode,
@@ -51,8 +54,8 @@ pub use llvm_spec::{
 #[allow(unused_imports)]
 pub use mir_spec::emit_mir_saw_specs;
 #[allow(unused_imports)]
-pub use factory::emit_interface_factory_spec;
-#[allow(unused_imports)]
-pub use stubs::{assemble_vtable_stubs, emit_interface_stubs, link_stubs_with_main, AssembledStubs};
+pub use stubs::{
+    assemble_vtable_stubs, emit_interface_stubs, link_stubs_with_main, AssembledStubs,
+};
 #[allow(unused_imports)]
 pub use verify_script::emit_verification_script;

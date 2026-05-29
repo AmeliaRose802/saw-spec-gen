@@ -26,10 +26,7 @@ pub fn emit_interface_factory_spec(
     fs::create_dir_all(output_dir)?;
     let override_id = spec_safe_id(spec);
     let interface_id = sanitize_name(interface_class).to_lowercase();
-    let target_symbol = spec
-        .mangled_name
-        .as_deref()
-        .unwrap_or(&spec.function_name);
+    let target_symbol = spec.mangled_name.as_deref().unwrap_or(&spec.function_name);
     let filepath = output_dir.join(format!("{}_auto_spec.saw", override_id));
 
     let mut out = String::new();
@@ -39,7 +36,9 @@ pub fn emit_interface_factory_spec(
     ));
     out.push_str("// Must be included after interface_overrides.saw.\n\n");
 
-    out.push_str(&format!("let {override_id}_factory : LLVMSetup () = do {{\n"));
+    out.push_str(&format!(
+        "let {override_id}_factory : LLVMSetup () = do {{\n"
+    ));
 
     let mut execute_arguments: Vec<String> = Vec::new();
     for param in &spec.params {
