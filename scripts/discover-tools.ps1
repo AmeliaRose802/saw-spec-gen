@@ -252,10 +252,18 @@ $userHome/.saw-spec-gen/env.ps1 for the format the installer writes).
 function Add-SolverDirToPath {
     [CmdletBinding()]
     param([Parameter(Mandatory)][hashtable]$Tools)
+    $sep = if ($Tools.Platform -eq 'Windows') { ';' } else { ':' }
     if ($Tools.SolverDir -and (Test-Path -LiteralPath $Tools.SolverDir)) {
-        $sep = if ($Tools.Platform -eq 'Windows') { ';' } else { ':' }
         if ($env:PATH -notlike "*$($Tools.SolverDir)*") {
             $env:PATH = "$($Tools.SolverDir)$sep$($env:PATH)"
+        }
+    }
+    # Also put the LLVM bin dir on PATH so subprocesses (notably the
+    # saw-spec-gen binary, which discovers llvm-link / llvm-as via
+    # `Command::new` rather than absolute paths) can find them.
+    if ($Tools.LlvmBin -and (Test-Path -LiteralPath $Tools.LlvmBin)) {
+        if ($env:PATH -notlike "*$($Tools.LlvmBin)*") {
+            $env:PATH = "$($Tools.LlvmBin)$sep$($env:PATH)"
         }
     }
 }
