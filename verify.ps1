@@ -97,7 +97,9 @@ Add-SolverDirToPath -Tools $tools
 
 $clang     = $tools.Clang
 $llvmAs    = $tools.LlvmAs
+$llvmDis   = $tools.LlvmDis
 $saw       = $tools.Saw
+$exceptionLower = $tools.ExceptionLower
 $llvmTarget= $tools.LlvmTarget   # e.g. x86_64-pc-windows-msvc / -unknown-linux-gnu
 $isMsvc    = $llvmTarget -match 'windows-msvc'
 
@@ -122,6 +124,51 @@ if ($LASTEXITCODE -ne 0) {
     $llFile = $null
 } else {
     Write-Host "  → $llFile" -ForegroundColor Green
+}
+
+# ── Step 1.25: Lower C++ exception handling (optional) ────────────────────────
+# When the standalone `exception-lower` pass is available, run it on
+# the freshly compiled bitcode so SAW can symbolically execute through
+# try/catch arms. The pass rewrites both Itanium (invoke/landingpad/
+# __cxa_throw) and MSVC SEH (catchswitch/catchpad/_CxxThrowException)
+# constructs into explicit error-flag CFG. Without this pass:
+#   * Itanium catches are simply pruned (any throw becomes
+#     `partial-correctness only` — the catch body is unreachable).
+#   * MSVC catches fail to load at all
+#     (FUNC_CODE_CATCHSWITCH is not understood by the bc parser).
+# After lowering we still run the text-based `--strip-msvc-eh` patch
+# below to deal with the throw-info xdata globals (their initialisers
+# use ptrtoint-of-__ImageBase, which Crucible rejects at module load
+# even though the lowered code never reads the field values).
+# The pass is a no-op on IR that contains no EH constructs, so it is
+# safe to invoke unconditionally whenever the binary is available.
+if ($exceptionLower) {
+    Write-Host ""
+    Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host " Step 1.25: Lower C++ exception handling" -ForegroundColor Cyan
+    Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
+    $loweredBc = Join-Path $OutputDir "${baseName}_lowered.bc"
+    & $exceptionLower $bcFile -o $loweredBc 2>&1 | Write-Host
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  warning: exception-lower failed; continuing with unlowered IR" -ForegroundColor Yellow
+    } else {
+        # Replace the canonical .bc with the lowered form, and refresh
+        # the .ll text so downstream gen-verify (which reads --llvm-ir)
+        # and the text-based patch see the lowered shape.
+        Copy-Item $loweredBc $bcFile -Force
+        Write-Host "  → $bcFile (lowered)" -ForegroundColor Green
+        if ($llFile -and $llvmDis) {
+            & $llvmDis $bcFile -o $llFile 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "  warning: llvm-dis failed on lowered .bc; .ll may be stale" -ForegroundColor Yellow
+            } else {
+                Write-Host "  → $llFile (refreshed from lowered .bc)" -ForegroundColor Green
+            }
+        }
+    }
+} elseif ($isMsvc) {
+    Write-Host "  note: exception-lower binary not found; MSVC try/catch will not be reachable." -ForegroundColor DarkYellow
+    Write-Host "        See https://github.com/AmeliaRose802/llvm-exception-lower" -ForegroundColor DarkYellow
 }
 
 # ── Step 1.5: Patch IR for SAW/Crucible quirks ────────────────────────────────

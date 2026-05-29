@@ -50,7 +50,13 @@
 // CFG instead of inside unwinder funclets.
 
 #include <cstdint>
-#include <cstdio>
+
+// A volatile sink so the "harmless" catch arm has an observable side
+// effect we don't need an SAW override for. (Calling printf here would
+// trigger "No implementation or override found for pointer" because
+// saw-spec-gen doesn't auto-stub libc; the volatile store keeps the
+// catch arm reachable in the IR without introducing an external call.)
+static volatile uint32_t g_harmless_observed;
 
 struct HarmlessTag {};
 struct HarmfulTag {};
@@ -64,8 +70,9 @@ uint32_t add_one(uint32_t x) {
             throw HarmfulTag{};
         }
     } catch (const HarmlessTag&) {
-        // Harmless: log and fall through to the spec-correct return.
-        std::printf("harmless tag caught at x=7\n");
+        // Harmless: record an observable and fall through to the
+        // spec-correct return.
+        g_harmless_observed = x;
     } catch (const HarmfulTag&) {
         // Harmful: short-circuit with a wrong value. This is the
         // hole the equivalence proof should expose.

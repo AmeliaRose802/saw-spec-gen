@@ -1,7 +1,7 @@
 # Throws an exception
 
-Two `add_one` variants that demonstrate what happens when C++ source
-uses `throw`. Both target the same Cryptol spec
+Four `add_one` variants that demonstrate what happens when C++ source
+uses `throw` / `try` / `catch`. All target the same Cryptol spec
 [`add_one_spec.cry`](add_one_spec.cry):
 
 ```cryptol
@@ -13,6 +13,13 @@ add_one_spec x = x + 1
 |------|--------------|------------|
 | [`add_one_verified.cpp`](add_one_verified.cpp) | plain `return x + 1` (no exceptions) | **VERIFIED** by z3 |
 | [`add_one_disproved.cpp`](add_one_disproved.cpp) | `if (x == 42) throw 1; return x + 1;` | **DISPROVED** with counterexample `x = 42` |
+| [`add_one_throws_caught.cpp`](add_one_throws_caught.cpp) | helper throws on `x == 42`, caller `catch(int)` swallows it and still returns `x + 1` | **VERIFIED** by z3 (requires exception-lower pass) |
+| [`add_one_multi_catch.cpp`](add_one_multi_catch.cpp) | two custom exception types; harmless catch falls through to `x + 1`, harmful catch returns `0` | **DISPROVED** with counterexample `x = 99` (requires exception-lower pass) |
+
+The last two cases only verify when the standalone
+[`exception-lower`](https://github.com/AmeliaRose802/llvm-exception-lower)
+LLVM pass is available; see
+["Catching the throw"](#catching-the-throw-via-exception-lower) below.
 
 ## What clang emits for `throw`
 
@@ -109,6 +116,42 @@ pre-pass for this MSVC case — that tool targets the Itanium EH ABI
 choice for Linux/macOS or `*-pc-windows-gnu` builds. On MSVC, the
 in-Crucible fix is sufficient.
 
+## Catching the throw via exception-lower
+
+A propagating `throw` (above) lowers cleanly because clang emits
+`call _CxxThrowException` + `unreachable` — no funclet records and
+SAW just prunes the throw path. The moment a matching `catch`
+appears, clang emits MSVC SEH funclet plumbing
+(`catchswitch` / `catchpad` / `catchret`) which `llvm-pretty-bc-parser`
+rejects (`FUNC_CODE_CATCHSWITCH`).
+
+[`add_one_throws_caught.cpp`](add_one_throws_caught.cpp) and
+[`add_one_multi_catch.cpp`](add_one_multi_catch.cpp) both depend on
+funclet IR. `verify.ps1` runs the standalone
+[`exception-lower`](https://github.com/AmeliaRose802/llvm-exception-lower)
+pass on the freshly compiled bitcode before handing it to SAW; the
+pass rewrites both Itanium (`invoke` / `landingpad` / `__cxa_throw`)
+and MSVC SEH (`catchswitch` / `catchpad` / `_CxxThrowException`)
+constructs into explicit error-flag CFG that the existing parser
+accepts.
+
+Once lowered:
+
+- `throws_caught` — the catch arm clears the error flag and falls
+  through to `return x + 1`, so SAW proves equivalence to the total
+  Cryptol spec for every input. **VERIFIED**.
+- `multi_catch` — the harmless catch arm clears the flag and falls
+  through to `return x + 1`; the harmful arm returns `0` instead.
+  SAW symbolically executes both arms and surfaces the harmful arm
+  as a counterexample. **DISPROVED** at `x = 99`.
+
+If the binary is not installed, `verify.ps1` prints a one-line note
+and continues with text-only MSVC EH stripping; the funclet-bearing
+demos will then fail to load with `FUNC_CODE_CATCHSWITCH`. Set
+`SAW_SPEC_GEN_EXCEPTION_LOWER` (or put `exception-lower` / `exception-lower.exe`
+on `PATH`, or drop it under `~/.saw-spec-gen/exception-lower/bin/`)
+to enable the pipeline.
+
 ## Running the tests
 
 ```powershell
@@ -125,10 +168,24 @@ in-Crucible fix is sufficient.
     -CryptolSpec tests\e2e\cases\02-havoc-coverage\throws_exception\add_one_spec.cry `
     -CryptolFn   add_one_spec `
     -Function    add_one
+
+# Throws-caught case — VERIFIED (requires exception-lower)
+./verify.ps1 `
+    -CppFile     tests\e2e\cases\02-havoc-coverage\throws_exception\add_one_throws_caught.cpp `
+    -CryptolSpec tests\e2e\cases\02-havoc-coverage\throws_exception\add_one_spec.cry `
+    -CryptolFn   add_one_spec `
+    -Function    add_one
+
+# Multi-catch case — DISPROVED at x = 99 (requires exception-lower)
+./verify.ps1 `
+    -CppFile     tests\e2e\cases\02-havoc-coverage\throws_exception\add_one_multi_catch.cpp `
+    -CryptolSpec tests\e2e\cases\02-havoc-coverage\throws_exception\add_one_spec.cry `
+    -CryptolFn   add_one_spec `
+    -Function    add_one
 ```
 
-Both cases are wired into the consolidated end-to-end test suite
+All four cases are wired into the consolidated end-to-end test suite
 ([`tests/e2e/cases.psd1`](../../../tests/e2e/cases.psd1),
 runner: [`tests/e2e/Run-E2ETests.ps1`](../../../tests/e2e/Run-E2ETests.ps1))
-as regression tests. If SAW ever regresses on either case, the
+as regression tests. If SAW ever regresses on any case, the
 pre-commit hook and any CI invocation of the suite will notice.

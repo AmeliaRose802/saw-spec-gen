@@ -37,6 +37,10 @@
       SolverDir     directory containing z3 / yices / cvc4
       Rustc         full path to rustc(.exe) — from rustup if available
       SpecGen       full path to saw-spec-gen(.exe) under target/release
+      ExceptionLower full path to the LLVM exception-lowering pass
+                     binary (https://github.com/AmeliaRose802/llvm-exception-lower)
+                     — optional; verify.ps1 falls back to text-only
+                     MSVC EH stripping when not present.
 #>
 
 function Get-SawSpecGenPlatform {
@@ -207,6 +211,26 @@ function Find-SawSpecGenTools {
     if ($env:SAW_SPEC_GEN_RUSTC) { $rustc = $env:SAW_SPEC_GEN_RUSTC }
     if (-not $rustc) { $rustc = Find-OnPath ("rustc" + $exeExt) }
 
+    # ── 5b. exception-lower (https://github.com/AmeliaRose802/llvm-exception-lower) ─
+    # Optional standalone LLVM pass that rewrites C++ try/catch (both
+    # Itanium landingpad and MSVC SEH funclet forms) into explicit
+    # error-flag CFG. When present, verify.ps1 runs it on the freshly
+    # compiled bitcode so SAW can symbolically execute through catch
+    # arms instead of dying at FUNC_CODE_CATCHSWITCH / failing to model
+    # the unwinder. When absent we still strip the dead MSVC EH metadata
+    # globals textually, which covers the propagating-throw case but
+    # leaves any `try` / `catch` source unverifiable.
+    $exceptionLowerCandidates = @()
+    if ($env:SAW_SPEC_GEN_EXCEPTION_LOWER) { $exceptionLowerCandidates += $env:SAW_SPEC_GEN_EXCEPTION_LOWER }
+    $exceptionLowerCandidates += Find-OnPath ("exception-lower" + $exeExt)
+    $exceptionLowerCandidates += @(
+        "$env:USERPROFILE\.saw-spec-gen\exception-lower\bin\exception-lower$exeExt"
+        "$env:USERPROFILE\.saw-spec-gen\exception-lower\build\exception-lower$exeExt"
+        "$HOME/.saw-spec-gen/exception-lower/bin/exception-lower$exeExt"
+        "$HOME/.saw-spec-gen/exception-lower/build/exception-lower$exeExt"
+    )
+    $exceptionLower = Find-FirstExisting $exceptionLowerCandidates
+
     # ── 6. saw-spec-gen itself (built from $RepoRoot). ───────────────────
     $specGen = Join-Path $RepoRoot ("target/release/saw-spec-gen" + $exeExt)
     if (-not (Test-Path -LiteralPath $specGen)) {
@@ -215,19 +239,20 @@ function Find-SawSpecGenTools {
     }
 
     return @{
-        Platform   = $platform
-        ExeExt     = $exeExt
-        LlvmTarget = $llvmTarget
-        LlvmBin    = $llvmBin
-        Clang      = $clang
-        LlvmAs     = $llvmAs
-        LlvmDis    = $llvmDis
-        LlvmLink   = $llvmLink
-        CxxFilt    = $cxxFilt
-        Saw        = $saw
-        SolverDir  = $solverDir
-        Rustc      = $rustc
-        SpecGen    = $specGen
+        Platform        = $platform
+        ExeExt          = $exeExt
+        LlvmTarget      = $llvmTarget
+        LlvmBin         = $llvmBin
+        Clang           = $clang
+        LlvmAs          = $llvmAs
+        LlvmDis         = $llvmDis
+        LlvmLink        = $llvmLink
+        CxxFilt         = $cxxFilt
+        Saw             = $saw
+        SolverDir       = $solverDir
+        Rustc           = $rustc
+        SpecGen         = $specGen
+        ExceptionLower  = $exceptionLower
     }
 }
 

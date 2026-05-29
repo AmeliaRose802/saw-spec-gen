@@ -69,6 +69,8 @@ SAW_BUILD_JOBS="${SAW_BUILD_JOBS:-}"
 # auto-installs missing system C dev libraries (libgmp-dev, …) when
 # SAW_SOURCE=fork or SAW_SOURCE=upstream. Useful in CI / unattended runs.
 SKIP_SUDO_INSTALL="${SKIP_SUDO_INSTALL:-0}"
+EXCEPTION_LOWER_REF="${EXCEPTION_LOWER_REF:-main}"
+SKIP_EXCEPTION_LOWER="${SKIP_EXCEPTION_LOWER:-0}"
 FORCE="${FORCE:-0}"
 
 # Resolve repo root regardless of where the script is invoked from.
@@ -326,6 +328,58 @@ echo "  solvers: $SOLVER_DIR"
 . "${SCRIPT_DIR}/init-saw-source.sh"
 
 
+# ── Step 4.5: exception-lower pass (optional) ─────────────────────────
+step 'Step 4.5: exception-lower pass (optional)'
+EXCEPTION_LOWER=""
+if [[ "$SKIP_EXCEPTION_LOWER" == "1" ]]; then
+    echo '  skipped (SKIP_EXCEPTION_LOWER=1)'
+else
+    EL_ROOT="${INSTALL_ROOT}/exception-lower"
+    EL_BIN="${EL_ROOT}/build/exception-lower"
+    if [[ -x "$EL_BIN" && "$FORCE" != "1" ]]; then
+        echo "  already built: $EL_BIN"
+        EXCEPTION_LOWER="$EL_BIN"
+    elif ! have cmake || ! have git; then
+        echo '  cmake or git not on PATH; skipping exception-lower install.'
+        echo '  Install both and re-run scripts/init.sh, or build the pass manually:'
+        echo '    https://github.com/AmeliaRose802/llvm-exception-lower'
+    else
+        EL_SRC="${EL_ROOT}/src"
+        if [[ ! -d "${EL_SRC}/.git" ]]; then
+            rm -rf "$EL_SRC"
+            echo "  cloning https://github.com/AmeliaRose802/llvm-exception-lower@$EXCEPTION_LOWER_REF"
+            git clone --depth 1 --branch "$EXCEPTION_LOWER_REF" \
+                'https://github.com/AmeliaRose802/llvm-exception-lower' "$EL_SRC"
+        else
+            echo "  source already cloned: $EL_SRC"
+        fi
+        EL_BUILD="${EL_ROOT}/build"
+        [[ "$FORCE" == "1" && -d "$EL_BUILD" ]] && rm -rf "$EL_BUILD"
+        mkdir -p "$EL_BUILD"
+        # If the system LLVM ships a cmake config dir, point cmake at it
+        # explicitly so the build doesn't pick up an older LLVM behind it.
+        LLVM_CMAKE_DIR=""
+        if [[ -d "${LLVM_BIN}/../lib/cmake/llvm" ]]; then
+            LLVM_CMAKE_DIR="$(cd "${LLVM_BIN}/../lib/cmake/llvm" && pwd)"
+        fi
+        (
+            cd "$EL_BUILD"
+            cmake_args=("$EL_SRC" -DCMAKE_BUILD_TYPE=Release)
+            [[ -n "$LLVM_CMAKE_DIR" ]] && cmake_args+=(-DLLVM_DIR="$LLVM_CMAKE_DIR")
+            cmake "${cmake_args[@]}"
+            cmake --build . --config Release
+        )
+        if [[ -x "$EL_BIN" ]]; then
+            EXCEPTION_LOWER="$EL_BIN"
+            echo "  built: $EL_BIN"
+        else
+            echo '  build did not produce exception-lower binary; skipping'
+            echo '  (verify.ps1 will fall back to text-only MSVC EH stripping)'
+        fi
+    fi
+fi
+
+
 # ── Step 5: PowerShell ─────────────────────────────────────────────────
 # The verify scripts (verify.ps1, verify-rust.ps1, verify-equiv.ps1) and
 # the discover-tools layer are written in PowerShell so they can share
@@ -404,6 +458,7 @@ export SAW_SPEC_GEN_SAW="$SAW_EXE"
 export SAW_SPEC_GEN_SOLVER_BIN="$SOLVER_DIR"
 export SAW_SPEC_GEN_PWSH="$PWSH_FOUND"
 export SAW_SPEC_GEN_RUSTC="$(command -v rustc)"
+${EXCEPTION_LOWER:+export SAW_SPEC_GEN_EXCEPTION_LOWER="$EXCEPTION_LOWER"}
 case ":\${PATH}:" in
     *":\${SAW_SPEC_GEN_SOLVER_BIN}:"*) ;;
     *) export PATH="\${SAW_SPEC_GEN_SOLVER_BIN}:\${PATH}" ;;
@@ -445,6 +500,7 @@ cat > "$ENV_PS1" <<EOF
 \$env:SAW_SPEC_GEN_SOLVER_BIN  = '$SOLVER_DIR'
 \$env:SAW_SPEC_GEN_PWSH        = '$PWSH_FOUND'
 \$env:SAW_SPEC_GEN_RUSTC       = '$(command -v rustc)'
+${EXCEPTION_LOWER:+\$env:SAW_SPEC_GEN_EXCEPTION_LOWER = \'$EXCEPTION_LOWER\'}
 EOF
 echo "  wrote: $ENV_PS1"
 
@@ -459,6 +515,12 @@ for tool in "$LLVM_BIN/clang" "$LLVM_BIN/llvm-as" "$SAW_EXE" "$SOLVER_DIR/z3" "$
         ok=0
     fi
 done
+# ExceptionLower is optional; report status but don't fail.
+if [[ -n "$EXCEPTION_LOWER" && -x "$EXCEPTION_LOWER" ]]; then
+    printf '  %-45s OK\n' "$EXCEPTION_LOWER"
+else
+    printf '  %-45s (try/catch demos will be unverifiable)\n' 'exception-lower skipped'
+fi
 [[ "$ok" == "1" ]] || exit 1
 
 cat <<EOF

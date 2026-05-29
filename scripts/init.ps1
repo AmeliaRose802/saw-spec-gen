@@ -29,6 +29,17 @@
     Which LLVM tarball to install when clang isn't found on Windows
     (default: 20.1.6).
 
+.PARAMETER ExceptionLowerRef
+    Git ref of https://github.com/AmeliaRose802/llvm-exception-lower to
+    clone + build (default: main). The pass is optional — verify.ps1
+    falls back to text-only MSVC EH stripping when it isn't present —
+    but it is required for any demo that uses `try` / `catch`.
+
+.PARAMETER SkipExceptionLower
+    Don't try to clone or build the exception-lowering pass. Useful on
+    machines where cmake or a C++ host compiler isn't available; the
+    rest of the install still completes.
+
 .PARAMETER Force
     Re-download / rebuild even if everything is already in place.
 #>
@@ -37,6 +48,8 @@
 param(
     [string]$SawVersion = '1.5',
     [string]$LlvmVersion = '20.1.6',
+    [string]$ExceptionLowerRef = 'main',
+    [switch]$SkipExceptionLower,
     [switch]$Force
 )
 
@@ -197,7 +210,64 @@ if (-not (Test-Path -LiteralPath $sawExe)) {
 }
 Write-Host "  saw:     $sawExe" -ForegroundColor Green
 Write-Host "  solvers: $solverDir" -ForegroundColor Green
-
+# ── Step 4.5: exception-lower pass (optional) ──────────────────────────
+Write-Step 'Step 4.5: exception-lower pass (optional)'
+$exceptionLower = $null
+if ($SkipExceptionLower) {
+    Write-Host '  skipped (--SkipExceptionLower set)' -ForegroundColor Yellow
+} else {
+    $elRoot = Join-Path $installRoot 'exception-lower'
+    $elBin  = Join-Path $elRoot ('build/exception-lower' + $exeExt)
+    if ((Test-Path -LiteralPath $elBin) -and (-not $Force)) {
+        Write-Host "  already built: $elBin" -ForegroundColor DarkGreen
+        $exceptionLower = $elBin
+    } else {
+        $cmake = Find-OnPath ('cmake' + $exeExt)
+        $git   = Find-OnPath ('git' + $exeExt)
+        if (-not $cmake -or -not $git) {
+            Write-Host '  cmake or git not on PATH; skipping exception-lower install.' -ForegroundColor Yellow
+            Write-Host '  Install both and re-run scripts/init.ps1, or build the pass manually:' -ForegroundColor Yellow
+            Write-Host '    https://github.com/AmeliaRose802/llvm-exception-lower' -ForegroundColor Yellow
+        } else {
+            $srcDir = Join-Path $elRoot 'src'
+            if (-not (Test-Path -LiteralPath (Join-Path $srcDir '.git'))) {
+                if (Test-Path -LiteralPath $srcDir) { Remove-Item -Recurse -Force -LiteralPath $srcDir }
+                Write-Host "  cloning https://github.com/AmeliaRose802/llvm-exception-lower@$ExceptionLowerRef"
+                & $git clone --depth 1 --branch $ExceptionLowerRef 'https://github.com/AmeliaRose802/llvm-exception-lower' $srcDir 2>&1 | Out-Host
+                if ($LASTEXITCODE -ne 0) { Write-Host '  clone failed; skipping' -ForegroundColor Yellow; $srcDir = $null }
+            } else {
+                Write-Host "  source already cloned: $srcDir" -ForegroundColor DarkGreen
+            }
+            if ($srcDir) {
+                $buildDir = Join-Path $elRoot 'build'
+                if ($Force -and (Test-Path -LiteralPath $buildDir)) { Remove-Item -Recurse -Force -LiteralPath $buildDir }
+                New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
+                $llvmCmakeDir = $null
+                if ($llvmBin) {
+                    $candidate = Resolve-Path (Join-Path $llvmBin '../lib/cmake/llvm') -ErrorAction SilentlyContinue
+                    if ($candidate) { $llvmCmakeDir = $candidate.Path }
+                }
+                Push-Location $buildDir
+                try {
+                    $cmakeArgs = @($srcDir, '-DCMAKE_BUILD_TYPE=Release')
+                    if ($llvmCmakeDir) { $cmakeArgs += "-DLLVM_DIR=$llvmCmakeDir" }
+                    Write-Host "  cmake $($cmakeArgs -join ' ')"
+                    & $cmake @cmakeArgs 2>&1 | Out-Host
+                    if ($LASTEXITCODE -eq 0) {
+                        & $cmake --build . --config Release 2>&1 | Out-Host
+                    }
+                } finally { Pop-Location }
+                if (Test-Path -LiteralPath $elBin) {
+                    $exceptionLower = $elBin
+                    Write-Host "  built: $elBin" -ForegroundColor Green
+                } else {
+                    Write-Host '  build did not produce exception-lower binary; skipping' -ForegroundColor Yellow
+                    Write-Host '  (verify.ps1 will fall back to text-only MSVC EH stripping)' -ForegroundColor Yellow
+                }
+            }
+        }
+    }
+}
 # ── Step 5: write env.ps1 ─────────────────────────────────────────────────
 Write-Step 'Step 5: write env file'
 $envFile = Join-Path $installRoot 'env.ps1'
@@ -210,6 +280,9 @@ $envContent = @"
 `$env:SAW_SPEC_GEN_SAW         = '$sawExe'
 `$env:SAW_SPEC_GEN_SOLVER_BIN  = '$solverDir'
 "@
+if ($exceptionLower) {
+    $envContent += "`n`$env:SAW_SPEC_GEN_EXCEPTION_LOWER = '$exceptionLower'`n"
+}
 Set-Content -LiteralPath $envFile -Value $envContent -Encoding utf8
 Write-Host "  wrote: $envFile" -ForegroundColor Green
 
@@ -224,6 +297,12 @@ foreach ($k in @('Clang', 'LlvmAs', 'Saw', 'SolverDir', 'SpecGen')) {
         Write-Host ("  {0,-10} MISSING" -f $k) -ForegroundColor Red
         $ok = $false
     }
+}
+# ExceptionLower is optional; report status but don't fail the install.
+if ($check['ExceptionLower']) {
+    Write-Host ("  {0,-14} OK   {1}" -f 'ExceptionLower', $check['ExceptionLower']) -ForegroundColor Green
+} else {
+    Write-Host ("  {0,-14} skipped (try/catch demos will be unverifiable)" -f 'ExceptionLower') -ForegroundColor DarkYellow
 }
 if (-not $ok) { exit 1 }
 
