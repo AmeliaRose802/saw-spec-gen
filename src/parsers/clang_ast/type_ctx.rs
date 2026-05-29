@@ -30,7 +30,7 @@ pub struct TypeContext {
     /// Tuple is `(field_name, TypeInfo, default_literal)` where the
     /// literal is a Cryptol/integer literal string when the AST has an
     /// in-class initializer, or empty otherwise.
-    pub class_own_fields: HashMap<String, Vec<(String, TypeInfo, String)>>,
+    pub class_own_fields: HashMap<String, OwnFieldList>,
 
     /// Set of polymorphic class names — classes whose hierarchy
     /// declares at least one `virtual` method. These layouts start
@@ -98,11 +98,13 @@ pub fn extract_field_default_literal(field: &AstNode) -> String {
                 .as_ref()
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
-            "CXXBoolLiteralExpr" => n
-                .value
-                .as_ref()
-                .and_then(|v| v.as_bool())
-                .map(|b| if b { "1".into() } else { "0".into() }),
+            "CXXBoolLiteralExpr" => n.value.as_ref().and_then(|v| v.as_bool()).map(|b| {
+                if b {
+                    "1".into()
+                } else {
+                    "0".into()
+                }
+            }),
             _ => n.inner.iter().find_map(dfs),
         }
     }
@@ -152,10 +154,7 @@ impl<'a> StructVisitor<'a> {
         for child in &node.inner {
             match child.kind.as_str() {
                 "FieldDecl" => {
-                    let fname = child
-                        .name
-                        .clone()
-                        .unwrap_or_else(|| "unnamed".to_string());
+                    let fname = child.name.clone().unwrap_or_else(|| "unnamed".to_string());
                     let fty = child
                         .qual_type()
                         .map(|qt| parse_cpp_type(qt, self.ctx))
@@ -167,10 +166,10 @@ impl<'a> StructVisitor<'a> {
                     fields.push((fname.clone(), fty.clone()));
                     own_fields.push((fname, fty, default_lit));
                 }
-                "CXXMethodDecl" | "CXXConstructorDecl" | "CXXDestructorDecl" => {
-                    if child.r#virtual == Some(true) {
-                        has_virtual_here = true;
-                    }
+                "CXXMethodDecl" | "CXXConstructorDecl" | "CXXDestructorDecl"
+                    if child.r#virtual == Some(true) =>
+                {
+                    has_virtual_here = true;
                 }
                 _ => {}
             }
@@ -179,12 +178,12 @@ impl<'a> StructVisitor<'a> {
             self.ctx.structs.insert(name.to_string(), fields);
         }
         if !own_fields.is_empty() {
-            self.ctx.class_own_fields.insert(name.to_string(), own_fields);
+            self.ctx
+                .class_own_fields
+                .insert(name.to_string(), own_fields);
         }
         if has_mutable_here {
-            self.ctx
-                .classes_with_mutable_field
-                .insert(name.to_string());
+            self.ctx.classes_with_mutable_field.insert(name.to_string());
         }
         if has_virtual_here {
             self.ctx.polymorphic_classes.insert(name.to_string());
@@ -270,14 +269,18 @@ fn propagate_mutable_through_bases(ctx: &mut TypeContext) {
     }
 }
 
+/// `(field_name, type, default_literal)` triple describing a single
+/// own data member of a C++ class.
+pub type OwnField = (String, TypeInfo, String);
+
+/// Ordered list of own data members for a class.
+pub type OwnFieldList = Vec<OwnField>;
+
 /// Compute the LLVM struct type name and ordered field list for a
 /// polymorphic class. When the class adds no own fields, clang reuses
 /// the topmost ancestor that owns fields as the layout type — we
 /// reproduce that resolution here.
-pub fn compute_class_layout(
-    class: &str,
-    ctx: &TypeContext,
-) -> Option<(String, Vec<(String, TypeInfo, String)>)> {
+pub fn compute_class_layout(class: &str, ctx: &TypeContext) -> Option<(String, OwnFieldList)> {
     // Walk root → derived to assemble the layout chain.
     let mut chain: Vec<String> = Vec::new();
     let mut cur = class.to_string();

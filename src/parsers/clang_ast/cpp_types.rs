@@ -35,8 +35,7 @@ pub fn parse_cpp_type(qual_type: &str, ctx: &TypeContext) -> TypeInfo {
             let count_str = &t[bracket_pos + 1..t.len() - 1];
             if let Ok(count) = count_str.parse::<usize>() {
                 let elem_type = parse_cpp_type(elem_type_str, ctx);
-                if matches!(elem_type, TypeInfo::UnsignedInt(8) | TypeInfo::SignedInt(8))
-                {
+                if matches!(elem_type, TypeInfo::UnsignedInt(8) | TypeInfo::SignedInt(8)) {
                     return TypeInfo::ByteArray(count);
                 }
                 if let Some((elem_size, _)) = cpp_type_size_align(&elem_type) {
@@ -59,8 +58,9 @@ pub fn parse_cpp_type(qual_type: &str, ctx: &TypeContext) -> TypeInfo {
         "unsigned int" | "uint32_t" | "unsigned long" | "DWORD" | "ULONG" => {
             TypeInfo::UnsignedInt(32)
         }
-        "unsigned long long" | "uint64_t" | "size_t" | "__size_t" | "UINT64"
-        | "ULONG64" => TypeInfo::UnsignedInt(64),
+        "unsigned long long" | "uint64_t" | "size_t" | "__size_t" | "UINT64" | "ULONG64" => {
+            TypeInfo::UnsignedInt(64)
+        }
         "unsigned short" | "uint16_t" | "WORD" | "USHORT" => TypeInfo::UnsignedInt(16),
         "unsigned char" | "uint8_t" | "BYTE" | "UCHAR" => TypeInfo::UnsignedInt(8),
         "void" => TypeInfo::Void,

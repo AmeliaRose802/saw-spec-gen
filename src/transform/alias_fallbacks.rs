@@ -214,13 +214,19 @@ pub fn apply_cli_overrides(
 pub fn dump_fallback_diagnostics(fb: &AliasFallbacks) {
     let mut bytes: Vec<(&String, &usize)> = fb.bytes.iter().collect();
     bytes.sort_by(|a, b| a.0.cmp(b.0));
-    eprintln!("--- alias fallback diagnostics ({} byte sizes) ---", bytes.len());
+    eprintln!(
+        "--- alias fallback diagnostics ({} byte sizes) ---",
+        bytes.len()
+    );
     for (name, n) in bytes {
         eprintln!("  bytes  {name} = {n}");
     }
     let mut enums: Vec<(&String, &u32)> = fb.enum_bits.iter().collect();
     enums.sort_by(|a, b| a.0.cmp(b.0));
-    eprintln!("--- alias fallback diagnostics ({} enum widths) ---", enums.len());
+    eprintln!(
+        "--- alias fallback diagnostics ({} enum widths) ---",
+        enums.len()
+    );
     for (name, bits) in enums {
         eprintln!("  enum   {name} = i{bits}");
     }
@@ -350,8 +356,7 @@ mod tests {
         // parameter carries `dereferenceable(N)`, which is the only
         // reliable source of the allocation size in this case.
         let mut f = empty_func();
-        let tuple_name =
-            "std::tuple<KeyStoreOperationResult, LatchableKey>".to_string();
+        let tuple_name = "std::tuple<KeyStoreOperationResult, LatchableKey>".to_string();
         let mut p = param(
             "result",
             TypeInfo::Pointer(Box::new(TypeInfo::Struct {

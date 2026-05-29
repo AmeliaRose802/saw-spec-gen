@@ -36,9 +36,8 @@ pub fn detect_missing_interfaces(ast: &AstNode) -> Vec<MissingInterfaceRef> {
     walk(ast, &mut mv);
 
     missing.sort_by(|a, b| a.interface_name.cmp(&b.interface_name));
-    missing.dedup_by(|a, b| {
-        a.interface_name == b.interface_name && a.owning_class == b.owning_class
-    });
+    missing
+        .dedup_by(|a, b| a.interface_name == b.interface_name && a.owning_class == b.owning_class);
     missing
 }
 

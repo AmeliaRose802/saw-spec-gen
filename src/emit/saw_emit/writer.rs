@@ -46,7 +46,9 @@ impl SpecWriter {
     }
 
     pub fn with_capacity(cap: usize) -> Self {
-        Self { buf: String::with_capacity(cap) }
+        Self {
+            buf: String::with_capacity(cap),
+        }
     }
 
     /// Consume the writer and return the underlying `String`.

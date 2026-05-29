@@ -37,8 +37,8 @@ fn effective_max_mir_size() -> u64 {
 /// [`MirJson`]. Streams via a buffered reader so the source bytes are
 /// never held in a `String` alongside the parsed structure.
 pub fn parse_mir(path: &Path) -> Result<MirJson> {
-    let metadata = std::fs::metadata(path)
-        .with_context(|| format!("Failed to stat {}", path.display()))?;
+    let metadata =
+        std::fs::metadata(path).with_context(|| format!("Failed to stat {}", path.display()))?;
     let file_size = metadata.len();
     let max_size = effective_max_mir_size();
     if file_size > max_size {
@@ -58,8 +58,7 @@ pub fn parse_mir(path: &Path) -> Result<MirJson> {
         );
     }
 
-    let file = File::open(path)
-        .with_context(|| format!("Failed to open {}", path.display()))?;
+    let file = File::open(path).with_context(|| format!("Failed to open {}", path.display()))?;
     let reader = BufReader::with_capacity(READ_BUFFER_BYTES, file);
     serde_json::from_reader(reader)
         .with_context(|| format!("Failed to parse JSON from {}", path.display()))

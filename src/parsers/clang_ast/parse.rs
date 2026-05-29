@@ -50,8 +50,8 @@ fn effective_max_ast_size() -> u64 {
 /// `metadata()` before any data is read. Accepts both single-object
 /// dumps and concatenated multi-object dumps (from `-ast-dump-filter`).
 pub fn parse_ast(path: &Path) -> Result<AstNode> {
-    let metadata = std::fs::metadata(path)
-        .with_context(|| format!("Failed to stat {}", path.display()))?;
+    let metadata =
+        std::fs::metadata(path).with_context(|| format!("Failed to stat {}", path.display()))?;
     let file_size = metadata.len();
     let max_size = effective_max_ast_size();
     if file_size > max_size {
@@ -71,8 +71,7 @@ pub fn parse_ast(path: &Path) -> Result<AstNode> {
         );
     }
 
-    let file = File::open(path)
-        .with_context(|| format!("Failed to open {}", path.display()))?;
+    let file = File::open(path).with_context(|| format!("Failed to open {}", path.display()))?;
     let reader = BufReader::with_capacity(READ_BUFFER_BYTES, file);
     parse_ast_from_reader(reader)
         .with_context(|| format!("Failed to parse JSON from {}", path.display()))
@@ -82,8 +81,7 @@ pub fn parse_ast(path: &Path) -> Result<AstNode> {
 /// [`Read`] source, streaming the bytes through serde_json without an
 /// intermediate `String`.
 pub fn parse_ast_from_reader<R: Read>(reader: R) -> Result<AstNode> {
-    let stream =
-        serde_json::Deserializer::from_reader(reader).into_iter::<AstNode>();
+    let stream = serde_json::Deserializer::from_reader(reader).into_iter::<AstNode>();
     let mut nodes: Vec<AstNode> = Vec::new();
     for item in stream {
         nodes.push(item.context("Failed to deserialize AST node")?);
@@ -99,8 +97,7 @@ pub fn parse_ast_from_reader<R: Read>(reader: R) -> Result<AstNode> {
 /// in-tree `parse_ast` no longer routes through it.
 #[allow(dead_code)]
 pub fn parse_ast_str(content: &str) -> Result<AstNode> {
-    let stream =
-        serde_json::Deserializer::from_str(content).into_iter::<AstNode>();
+    let stream = serde_json::Deserializer::from_str(content).into_iter::<AstNode>();
     let mut nodes: Vec<AstNode> = Vec::new();
     for item in stream {
         nodes.push(item.context("Failed to deserialize AST node")?);

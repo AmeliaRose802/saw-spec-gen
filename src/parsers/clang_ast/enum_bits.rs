@@ -59,7 +59,8 @@ mod tests {
                     {"kind": "EnumConstantDecl", "name": "A"}
                 ]}
             ]
-        })).unwrap();
+        }))
+        .unwrap();
         let m = collect_all_enum_bits(&ast);
         assert_eq!(m.get("Plain"), Some(&32));
     }
@@ -74,7 +75,8 @@ mod tests {
                 {"kind": "EnumDecl", "name": "E",
                  "fixedUnderlyingType": {"qualType": "uint64_t"}}
             ]
-        })).unwrap();
+        }))
+        .unwrap();
         let m = collect_all_enum_bits(&ast);
         assert_eq!(m.get("E"), Some(&64));
     }

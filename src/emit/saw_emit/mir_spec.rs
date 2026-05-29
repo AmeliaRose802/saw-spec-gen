@@ -40,10 +40,7 @@ pub fn generate_mir_spec(spec: &SpecConstraint) -> String {
             AllocType::FreshVar => format!("mir_term {}", p.name),
         })
         .collect();
-    out.push_str(&format!(
-        "\n    mir_execute_func [{}];\n",
-        args.join(", "),
-    ));
+    out.push_str(&format!("\n    mir_execute_func [{}];\n", args.join(", "),));
 
     let needs_adversarial = spec.is_virtual || !spec.has_body;
     if needs_adversarial {

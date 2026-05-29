@@ -137,6 +137,12 @@ pub struct LlvmStubEmitter {
     out: String,
 }
 
+impl Default for LlvmStubEmitter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LlvmStubEmitter {
     pub fn new() -> Self {
         let mut s = LlvmStubEmitter { out: String::new() };
@@ -232,6 +238,12 @@ pub struct SawSpecEmitter {
     override_idents: Vec<String>,
 }
 
+impl Default for SawSpecEmitter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SawSpecEmitter {
     pub fn new() -> Self {
         SawSpecEmitter {
@@ -294,10 +306,7 @@ impl TraitVisitor for SawSpecEmitter {
         for (i, a) in m.args.iter().enumerate() {
             match a {
                 RustType::Ref | RustType::Ptr => {
-                    let _ = writeln!(
-                        self.out,
-                        "    a{i} <- llvm_alloc (llvm_int 8);  // ptr",
-                    );
+                    let _ = writeln!(self.out, "    a{i} <- llvm_alloc (llvm_int 8);  // ptr",);
                 }
                 RustType::Unit => { /* unrepresentable as arg */ }
                 _ => {

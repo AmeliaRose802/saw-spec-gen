@@ -52,11 +52,7 @@ pub fn read_source_token(path: &str, offset: usize, len: usize) -> Option<String
 ///
 /// Returns `None` only when even the base token can't be read. If the
 /// base reads successfully but no `(` follows, returns just the base.
-pub fn read_source_macro_with_args(
-    path: &str,
-    offset: usize,
-    base_len: usize,
-) -> Option<String> {
+pub fn read_source_macro_with_args(path: &str, offset: usize, base_len: usize) -> Option<String> {
     let base = read_source_token(path, offset, base_len)?;
     // Grab a generous window after the base token and scan it for a
     // balanced `(...)` group. 128 bytes is well past anything SAL
@@ -74,8 +70,8 @@ pub fn read_source_macro_with_args(
     let scan_end = (after_base + 128).min(bytes.len());
     let mut depth = 0usize;
     let mut close_at = None;
-    for i in after_base..scan_end {
-        match bytes[i] {
+    for (i, &b) in bytes.iter().enumerate().take(scan_end).skip(after_base) {
+        match b {
             b'(' => depth += 1,
             b')' => {
                 depth -= 1;

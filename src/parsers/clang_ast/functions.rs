@@ -14,9 +14,7 @@ use super::sal::parse_sal_annotation;
 use super::system_headers::is_system_include_path;
 use super::type_ctx::{build as build_type_ctx, build_node_id_map, TypeContext};
 use super::visitor::{walk, ClassStack, Visitor, WalkAction};
-use crate::constraints::{
-    Annotation, FunctionInfo, Mutability, Nullability, ParamInfo, TypeInfo,
-};
+use crate::constraints::{Annotation, FunctionInfo, Mutability, Nullability, ParamInfo, TypeInfo};
 use anyhow::Result;
 use std::collections::HashMap;
 
@@ -145,7 +143,13 @@ pub fn parse_function_decl(
     }
 
     if is_method {
-        params.push(synth_this_param(node, ctx, id_to_name, enclosing_class, is_const_method));
+        params.push(synth_this_param(
+            node,
+            ctx,
+            id_to_name,
+            enclosing_class,
+            is_const_method,
+        ));
     }
     for child in &node.inner {
         if child.kind == "ParmVarDecl" {
@@ -204,9 +208,7 @@ fn synth_this_param(
     // can still legally modify mutable members. Stay sound: if the
     // class (or any base) has a `mutable` field, treat `this` as
     // Mutable.
-    let mutability = if is_const_method
-        && !ctx.classes_with_mutable_field.contains(parent_name)
-    {
+    let mutability = if is_const_method && !ctx.classes_with_mutable_field.contains(parent_name) {
         Mutability::Readonly
     } else {
         Mutability::Mutable

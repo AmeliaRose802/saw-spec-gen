@@ -85,10 +85,7 @@ pub fn generate_havoc_spec(
         build_param_blocks(func, layout, cryptol_post_expr.as_deref());
 
     out.push_str(&setup);
-    out.push_str(&format!(
-        "\n    llvm_execute_func [{}];\n",
-        args.join(", "),
-    ));
+    out.push_str(&format!("\n    llvm_execute_func [{}];\n", args.join(", "),));
 
     emit_return(&mut out, &func.return_type, sret_saw_type.as_deref());
 
@@ -111,7 +108,9 @@ fn emit_header(out: &mut String, imethod: &InterfaceMethod) {
     ));
     out.push_str("//\n");
     out.push_str("// Models ANY implementation consistent with type-system and SAL constraints.\n");
-    out.push_str("// The solver can choose ANY value for mutable/writable memory after the call.\n");
+    out.push_str(
+        "// The solver can choose ANY value for mutable/writable memory after the call.\n",
+    );
     out.push_str("// Const/_In_ memory is preserved — the solver cannot modify it.\n");
     out.push_str("//\n");
     out.push_str("// Annotation key:\n");
@@ -188,9 +187,7 @@ fn build_param_blocks(
         let behavior = resolve_param_behavior(param);
         if param.name == "this"
             && behavior == HavocBehavior::Havoced
-            && layout
-                .map(|c| !c.layout_fields.is_empty())
-                .unwrap_or(false)
+            && layout.map(|c| !c.layout_fields.is_empty()).unwrap_or(false)
         {
             emit_this_full_class_havoc(layout.unwrap(), &mut setup, &mut postconds);
             args.push("this_ptr".to_string());
@@ -208,13 +205,14 @@ fn build_param_blocks(
         args.push(format!("{}_ptr", param.name));
     }
 
-    let sret_saw_type: Option<String> = sret_inner_ir_type(&func.return_type).map(|_| {
-        match &func.return_type {
+    let sret_saw_type: Option<String> =
+        sret_inner_ir_type(&func.return_type).map(|_| match &func.return_type {
             TypeInfo::Opaque { size_bytes: 0, .. } => "llvm_array 16 (llvm_int 8)".to_string(),
-            TypeInfo::Struct { size_bytes: None, .. } => "llvm_array 16 (llvm_int 8)".to_string(),
+            TypeInfo::Struct {
+                size_bytes: None, ..
+            } => "llvm_array 16 (llvm_int 8)".to_string(),
             other => type_to_saw(other),
-        }
-    });
+        });
     if let Some(saw_type) = &sret_saw_type {
         setup.push_str("\n    // sret: aggregate return passed via hidden output pointer\n");
         setup.push_str("    // (MSVC ABI: parameter index 1, immediately after `this`).\n");
@@ -240,9 +238,7 @@ fn emit_return(out: &mut String, return_type: &TypeInfo, sret_saw_type: Option<&
         let ret_saw = type_to_saw(return_type);
         if !is_void_saw_type(&ret_saw) {
             out.push_str("\n    // Return: unconstrained (solver chooses any value)\n");
-            out.push_str(&format!(
-                "    ret <- llvm_fresh_var \"ret\" ({ret_saw});\n"
-            ));
+            out.push_str(&format!("    ret <- llvm_fresh_var \"ret\" ({ret_saw});\n"));
             out.push_str("    llvm_return (llvm_term ret);\n");
         }
     }
@@ -380,10 +376,22 @@ mod tests {
 
     #[test]
     fn annotation_label_recognizes_sal() {
-        assert_eq!(annotation_label(&[Annotation::InReads(0)], true), "_In_ → preserved");
-        assert_eq!(annotation_label(&[Annotation::InReads(16)], true), "_In_reads_(16) → preserved");
-        assert_eq!(annotation_label(&[Annotation::OutWrites(8)], false), "_Out_writes_(8) → HAVOCED");
-        assert_eq!(annotation_label(&[Annotation::Inout], false), "_Inout_ → HAVOCED");
+        assert_eq!(
+            annotation_label(&[Annotation::InReads(0)], true),
+            "_In_ → preserved"
+        );
+        assert_eq!(
+            annotation_label(&[Annotation::InReads(16)], true),
+            "_In_reads_(16) → preserved"
+        );
+        assert_eq!(
+            annotation_label(&[Annotation::OutWrites(8)], false),
+            "_Out_writes_(8) → HAVOCED"
+        );
+        assert_eq!(
+            annotation_label(&[Annotation::Inout], false),
+            "_Inout_ → HAVOCED"
+        );
         assert_eq!(annotation_label(&[], true), "const → preserved");
         assert_eq!(annotation_label(&[], false), "mutable → HAVOCED");
     }

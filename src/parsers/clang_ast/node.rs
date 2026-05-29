@@ -87,7 +87,11 @@ pub struct AstNode {
 
     /// `FunctionDecl.exceptionSpec` — alternative location for noexcept
     /// info when the spec isn't baked into `qualType`.
-    #[serde(default, rename = "exceptionSpec", deserialize_with = "deserialize_exception_spec")]
+    #[serde(
+        default,
+        rename = "exceptionSpec",
+        deserialize_with = "deserialize_exception_spec"
+    )]
     pub exception_spec: Option<ExceptionSpec>,
 
     /// Source location of the primary token. Used to filter system
@@ -431,7 +435,10 @@ mod tests {
         .unwrap();
         assert_eq!(n.bases.len(), 2);
         assert_eq!(
-            n.bases[0].r#type.as_ref().and_then(|t| t.qual_type.as_deref()),
+            n.bases[0]
+                .r#type
+                .as_ref()
+                .and_then(|t| t.qual_type.as_deref()),
             Some("class Base")
         );
     }

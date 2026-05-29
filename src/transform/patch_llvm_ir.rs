@@ -158,13 +158,8 @@ fn eh_global_name(line: &str) -> Option<&str> {
         let full = &line[..1 + end];
         (full, &line[full.len()..])
     };
-    let inner = name_with_at
-        .trim_start_matches('@')
-        .trim_matches('"');
-    if inner.starts_with("_CT??_R0")
-        || inner.starts_with("_TI")
-        || inner.starts_with("_CTA")
-    {
+    let inner = name_with_at.trim_start_matches('@').trim_matches('"');
+    if inner.starts_with("_CT??_R0") || inner.starts_with("_TI") || inner.starts_with("_CTA") {
         Some(name_with_at)
     } else {
         None

@@ -123,7 +123,10 @@ mod tests {
         let p = parse_ir_param_resolved("i8* nocapture readonly", 0, &m).unwrap();
         assert_eq!(p.mutability, Mutability::Readonly);
         assert!(matches!(p.ty, TypeInfo::Pointer(_)));
-        assert!(p.annotations.iter().any(|a| matches!(a, Annotation::NoCapture)));
+        assert!(p
+            .annotations
+            .iter()
+            .any(|a| matches!(a, Annotation::NoCapture)));
     }
 
     #[test]
