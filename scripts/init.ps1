@@ -82,8 +82,15 @@ function Expand-DownloadedArchive {
     Write-Host "  extracting → $DestDir"
     if ($Tarball -or $leaf -match '\.tar\.(gz|xz|bz2)$') {
         # tar.exe ships with Win10+; on Linux/macOS we use the system tar.
+        # On Windows GitHub runners, `tar` on PATH resolves to git-bash's
+        # MSYS tar (/usr/bin/tar) which interprets Windows paths like
+        # `C:\Users\...` as a remote host ("Cannot connect to C: resolve
+        # failed"). Pin to System32 bsdtar explicitly to avoid that.
+        $tarExe = if ($platform -eq 'Windows') {
+            Join-Path $env:SystemRoot 'System32\tar.exe'
+        } else { 'tar' }
         Push-Location $DestDir
-        try { & tar -xf $tmp } finally { Pop-Location }
+        try { & $tarExe -xf $tmp } finally { Pop-Location }
     } else {
         Expand-Archive -LiteralPath $tmp -DestinationPath $DestDir -Force
     }
