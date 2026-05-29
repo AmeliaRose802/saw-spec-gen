@@ -8,22 +8,22 @@ Cargo.lock
 *.bc
 *.ll
 **/*_ast.json
-demo/specs/
+end-to-end-test/specs/
 
 # Generated tool outputs (saw-spec-gen produces these per-demo)
 **/out_*/
-demo/rust_specs/
-demo/rust_demo_specs/
+end-to-end-test/rust_specs/
+end-to-end-test/rust_demo_specs/
 
 # Loose test artifacts
 _test_ast.json
-demo/_test.saw
-demo/test_load.saw
-demo/test_load2.saw
-demo/token_service_out
-demo/token_service_out.mir
-demo/token_service_out.linked-mir.json
-demo/token_service.mir.json
+end-to-end-test/_test.saw
+end-to-end-test/test_load.saw
+end-to-end-test/test_load2.saw
+end-to-end-test/token_service_out
+end-to-end-test/token_service_out.mir
+end-to-end-test/token_service_out.linked-mir.json
+end-to-end-test/token_service.mir.json
 
 # SAW demo runner failure logs
 tests/saw_demos/last-fail-*.log

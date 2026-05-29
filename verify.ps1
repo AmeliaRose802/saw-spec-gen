@@ -42,8 +42,8 @@
     Output directory for all generated artifacts. Defaults to "out/" next to the .cpp file.
 
 .EXAMPLE
-    .\verify.ps1 -CppFile demo\add_one.cpp -CryptolSpec demo\add_one_spec.cry -CryptolFn add_one_spec -Function add_one
-    .\verify.ps1 -CppFile demo\add_one.cpp -CryptolSpec demo\add_one_spec.cry -CryptolFn add_one_spec -Function add_one -OutputDir my_output
+    .\verify.ps1 -CppFile end-to-end-test\add_one.cpp -CryptolSpec end-to-end-test\add_one_spec.cry -CryptolFn add_one_spec -Function add_one
+    .\verify.ps1 -CppFile end-to-end-test\add_one.cpp -CryptolSpec end-to-end-test\add_one_spec.cry -CryptolFn add_one_spec -Function add_one -OutputDir my_output
 #>
 
 param(

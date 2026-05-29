@@ -241,7 +241,7 @@ enum Commands {
     ///     saw-spec-gen filter-ast \
     ///         --input  big_ast.json \
     ///         --output small_ast.json \
-    ///         --keep   demo/strings
+    ///         --keep   end-to-end-test/strings
     FilterAst {
         /// Path to the raw clang AST dump (any size).
         #[arg(long)]

@@ -1,6 +1,6 @@
 # SAW demo test suite
 
-End-to-end regression suite for every `demo/` scenario. Each case runs
+End-to-end regression suite for every `end-to-end-test/` scenario. Each case runs
 the full verification pipeline (compile → spec generation → SAW) and
 asserts the verdict matches an expected `VERIFIED` / `DISPROVED` /
 `EQUIVALENT` / `NOT EQUIVALENT` / `UNKNOWN`.
@@ -39,23 +39,23 @@ $env:SKIP_SAW_TESTS = '1'
 
 | Tag                 | What it covers                                                                            |
 |---------------------|-------------------------------------------------------------------------------------------|
-| `cpp_havoc`         | `demo/vtable_havoc_spec_demos/**` — vtable + global havoc spec demos (C++).               |
-| `rust_havoc`        | `demo/rust_equalivence_demo/**` (excluding `cpp_*/` and `trait_unknown_impl`) — Rust.     |
-| `bounded_loop`      | `demo/bounded_loop/**` — bit-level ripple-carry and bounded data-dependent loops.         |
-| `rust_equiv`        | `demo/rust_equalivence_demo/cpp_*/` — C++/Rust equivalence via shared Cryptol spec.       |
-| `trait_unknown_impl`| `demo/rust_equalivence_demo/trait_unknown_impl` — opaque `&dyn Trait` impl, vtable stubs. |
-| `async_rust`        | `demo/async_rust` — `async fn` coroutine lowering, proves resume == spec.                 |
-| `rust_adversarial`  | `demo/rust_adversarial_holes/**` — research cases for known verifier blind spots.         |
+| `cpp_havoc`         | `end-to-end-test/vtable_havoc_spec_demos/**` — vtable + global havoc spec demos (C++).               |
+| `rust_havoc`        | `end-to-end-test/rust_equalivence_demo/**` (excluding `cpp_*/` and `trait_unknown_impl`) — Rust.     |
+| `bounded_loop`      | `end-to-end-test/bounded_loop/**` — bit-level ripple-carry and bounded data-dependent loops.         |
+| `rust_equiv`        | `end-to-end-test/rust_equalivence_demo/cpp_*/` — C++/Rust equivalence via shared Cryptol spec.       |
+| `trait_unknown_impl`| `end-to-end-test/rust_equalivence_demo/trait_unknown_impl` — opaque `&dyn Trait` impl, vtable stubs. |
+| `async_rust`        | `end-to-end-test/async_rust` — `async fn` coroutine lowering, proves resume == spec.                 |
+| `rust_adversarial`  | `end-to-end-test/rust_adversarial_holes/**` — research cases for known verifier blind spots.         |
 | `box_allocator`     | Excluded by default; produces `UNKNOWN` under the current pipeline.                       |
 
 ## Adding a new case
 
-1. Drop the source + Cryptol spec into a new `demo/<topic>/` directory.
+1. Drop the source + Cryptol spec into a new `end-to-end-test/<topic>/` directory.
 2. Append an entry to `cases.psd1`:
 
    ```powershell
    @{ Tag = 'rust_havoc'; Runner = 'rust'
-      Dir = 'demo/my_new_case'; File = 'my_fn.rs'
+      Dir = 'end-to-end-test/my_new_case'; File = 'my_fn.rs'
       Expected = 'VERIFIED' }
    ```
 
@@ -77,6 +77,6 @@ runs:
 ## Runner semantics
 
 Each case writes nothing back into `tests/`. Output artifacts live next
-to the demo source (`demo/<topic>/out_<name>/`) and are cleared at the
+to the demo source (`end-to-end-test/<topic>/out_<name>/`) and are cleared at the
 start of each case. A failing case writes its full captured stdout to
 `tests/saw_demos/last-fail-<idx>.log` for triage.

@@ -47,23 +47,23 @@ pwsh scripts/init.ps1            # or:  bash scripts/init.sh
 
 # Verify a C++ function against a Cryptol spec.
 ./verify.ps1 `
-    -CppFile     demo/bounded_loop/add_one.cpp `
-    -CryptolSpec demo/bounded_loop/add_one_spec.cry `
+    -CppFile     end-to-end-test/bounded_loop/add_one.cpp `
+    -CryptolSpec end-to-end-test/bounded_loop/add_one_spec.cry `
     -CryptolFn   add_one_spec `
     -Function    add_one
 
 # Same for Rust.
 ./verify-rust.ps1 `
-    -RustFile    demo/bounded_loop/add_one.rs `
-    -CryptolSpec demo/bounded_loop/add_one_spec.cry `
+    -RustFile    end-to-end-test/bounded_loop/add_one.rs `
+    -CryptolSpec end-to-end-test/bounded_loop/add_one_spec.cry `
     -CryptolFn   add_one_spec `
     -Function    add_one
 
 # Prove both implementations match the same spec (and so each other).
 ./verify-equiv.ps1 `
-    -CppFile     demo/rust_equalivence_demo/nothing_sketchy/add_one_verified.cpp `
-    -RustFile    demo/rust_equalivence_demo/nothing_sketchy/add_one_verified.rs `
-    -CryptolSpec demo/rust_equalivence_demo/nothing_sketchy/add_one_spec.cry `
+    -CppFile     end-to-end-test/rust_equalivence_demo/nothing_sketchy/add_one_verified.cpp `
+    -RustFile    end-to-end-test/rust_equalivence_demo/nothing_sketchy/add_one_verified.rs `
+    -CryptolSpec end-to-end-test/rust_equalivence_demo/nothing_sketchy/add_one_spec.cry `
     -CryptolFn   add_one_spec `
     -Function    add_one
 ```
@@ -221,7 +221,7 @@ per-method `*_havoc_spec.saw` for every virtual method, ready to
 
 ## Examples
 
-Working end-to-end demos live in [demo/](demo/):
+Working end-to-end demos live in [end-to-end-test/](end-to-end-test/):
 
 | Directory | What it shows |
 |---|---|

@@ -40,9 +40,9 @@
 
 .EXAMPLE
     .\verify-equiv.ps1 `
-        -CppFile     demo\rust_equalivence_demo\nothing_sketchy\add_one_verified.cpp `
-        -RustFile    demo\rust_equalivence_demo\nothing_sketchy\add_one_verified.rs `
-        -CryptolSpec demo\rust_equalivence_demo\nothing_sketchy\add_one_spec.cry `
+        -CppFile     end-to-end-test\rust_equalivence_demo\nothing_sketchy\add_one_verified.cpp `
+        -RustFile    end-to-end-test\rust_equalivence_demo\nothing_sketchy\add_one_verified.rs `
+        -CryptolSpec end-to-end-test\rust_equalivence_demo\nothing_sketchy\add_one_spec.cry `
         -CryptolFn   add_one_spec `
         -Function    add_one
 #>
