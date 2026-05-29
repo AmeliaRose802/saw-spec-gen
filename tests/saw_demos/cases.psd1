@@ -61,17 +61,23 @@
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'demos/02-havoc-coverage/throws_exception';           File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
 
         # ── Rust havoc demos (verify-rust.ps1) ──────────────────────────────
+        # Note: Rust has no havoc model in this verifier path — every
+        # function body SAW can see gets inlined. The 02-havoc-coverage
+        # Rust ports are therefore pedagogical mirrors of the C++ demos;
+        # only the cases exercising a *distinct* mutation pattern earn
+        # a slot in the regression suite. The remaining .rs files in
+        # those dirs are kept on disk as side-by-side teaching material
+        # but are not registered here. See README.md for the rationale.
+        #
+        # Smoke: pipeline end-to-end on the simplest possible case.
         @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'demos/02-havoc-coverage/nothing_sketchy';         File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
         @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'demos/02-havoc-coverage/nothing_sketchy';         File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
-        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'demos/02-havoc-coverage/concrete_type_safe';      File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
+        # `static mut` global write tracked across a concrete method call.
         @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'demos/02-havoc-coverage/concrete_type_safe';      File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
-        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'demos/02-havoc-coverage/class_member_clobbered';  File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
+        # `&mut self` struct-field write tracked across a method call.
         @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'demos/02-havoc-coverage/class_member_clobbered';  File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
-        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'demos/02-havoc-coverage/global_memory_clobbered'; File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
-        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'demos/02-havoc-coverage/global_memory_clobbered'; File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
-        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'demos/02-havoc-coverage/input_param_modified';    File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
+        # `&mut u32` argument mutation tracked across a free-function call.
         @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'demos/02-havoc-coverage/input_param_modified';    File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
-        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'demos/02-havoc-coverage/pointer_aliasing';        File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
         @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'demos/03-rust-trait-dispatch/static_dispatch';   File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
         @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'demos/03-rust-trait-dispatch/static_dispatch';   File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
         @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'demos/03-rust-trait-dispatch/dynamic_dispatch';  File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
@@ -80,10 +86,37 @@
         @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'demos/03-rust-trait-dispatch/external_crate';    File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
 
         # ── Bounded-loop demos (positive) ───────────────────────────────────
-        @{ Tag = 'bounded_loop'; Runner = 'cpp';  Dir = 'demos/01-tutorial/bounded_loop'; File = 'add_one_verified.cpp';      Expected = 'VERIFIED' }
-        @{ Tag = 'bounded_loop'; Runner = 'rust'; Dir = 'demos/01-tutorial/bounded_loop'; File = 'add_one_verified.rs';       Expected = 'VERIFIED' }
+        # `add_one_verified.{cpp,rs}` in this dir duplicate the
+        # `nothing_sketchy` smoke pair (both are `return x + 1`); they
+        # remain on disk as a teaching introduction to the pipeline but
+        # are not registered here. Only `sum_first_n` actually exercises
+        # bounded-loop unrolling.
         @{ Tag = 'bounded_loop'; Runner = 'cpp';  Dir = 'demos/01-tutorial/bounded_loop'; File = 'sum_first_n_verified.cpp';  Expected = 'VERIFIED'; Cry = 'sum_first_n_spec.cry'; CryptolFn = 'sum_first_n_spec'; Function = 'sum_first_n' }
         @{ Tag = 'bounded_loop'; Runner = 'rust'; Dir = 'demos/01-tutorial/bounded_loop'; File = 'sum_first_n_verified.rs';   Expected = 'VERIFIED'; Cry = 'sum_first_n_spec.cry'; CryptolFn = 'sum_first_n_spec'; Function = 'sum_first_n' }
+
+        # ── CSEP590B 26sp Coding Assignment 4 demos ─────────────────────────
+        # Five problems × {verified, disproved} (Part A) or {verified}
+        # (Part B), each ported to both C++ and Rust. See
+        # demos/01-tutorial/csep590b_c04/README.md for the assignment
+        # context and per-problem bounds.
+        # Part A — counterexample finding (verified + disproved variants).
+        @{ Tag = 'csep590b_c04'; Runner = 'cpp';  Dir = 'demos/01-tutorial/csep590b_c04/p1_clamp_sub';    File = 'clamp_sub_verified.cpp';     Expected = 'VERIFIED';  Cry = 'clamp_sub_spec.cry';    CryptolFn = 'clamp_sub_spec';    Function = 'clamp_sub'    }
+        @{ Tag = 'csep590b_c04'; Runner = 'cpp';  Dir = 'demos/01-tutorial/csep590b_c04/p1_clamp_sub';    File = 'clamp_sub_disproved.cpp';    Expected = 'DISPROVED'; Cry = 'clamp_sub_spec.cry';    CryptolFn = 'clamp_sub_spec';    Function = 'clamp_sub'    }
+        @{ Tag = 'csep590b_c04'; Runner = 'rust'; Dir = 'demos/01-tutorial/csep590b_c04/p1_clamp_sub';    File = 'clamp_sub_verified.rs';      Expected = 'VERIFIED';  Cry = 'clamp_sub_spec.cry';    CryptolFn = 'clamp_sub_spec';    Function = 'clamp_sub'    }
+        @{ Tag = 'csep590b_c04'; Runner = 'rust'; Dir = 'demos/01-tutorial/csep590b_c04/p1_clamp_sub';    File = 'clamp_sub_disproved.rs';     Expected = 'DISPROVED'; Cry = 'clamp_sub_spec.cry';    CryptolFn = 'clamp_sub_spec';    Function = 'clamp_sub'    }
+        @{ Tag = 'csep590b_c04'; Runner = 'cpp';  Dir = 'demos/01-tutorial/csep590b_c04/p2_safe_mul';     File = 'safe_mul_verified.cpp';      Expected = 'VERIFIED';  Cry = 'safe_mul_spec.cry';     CryptolFn = 'safe_mul_spec';     Function = 'safe_mul'     }
+        @{ Tag = 'csep590b_c04'; Runner = 'cpp';  Dir = 'demos/01-tutorial/csep590b_c04/p2_safe_mul';     File = 'safe_mul_disproved.cpp';     Expected = 'DISPROVED'; Cry = 'safe_mul_spec.cry';     CryptolFn = 'safe_mul_spec';     Function = 'safe_mul'     }
+        @{ Tag = 'csep590b_c04'; Runner = 'rust'; Dir = 'demos/01-tutorial/csep590b_c04/p2_safe_mul';     File = 'safe_mul_verified.rs';       Expected = 'VERIFIED';  Cry = 'safe_mul_spec.cry';     CryptolFn = 'safe_mul_spec';     Function = 'safe_mul'     }
+        @{ Tag = 'csep590b_c04'; Runner = 'rust'; Dir = 'demos/01-tutorial/csep590b_c04/p2_safe_mul';     File = 'safe_mul_disproved.rs';      Expected = 'DISPROVED'; Cry = 'safe_mul_spec.cry';     CryptolFn = 'safe_mul_spec';     Function = 'safe_mul'     }
+        @{ Tag = 'csep590b_c04'; Runner = 'cpp';  Dir = 'demos/01-tutorial/csep590b_c04/p3_count_groups'; File = 'count_groups_verified.cpp';  Expected = 'VERIFIED';  Cry = 'count_groups_spec.cry'; CryptolFn = 'count_groups_spec'; Function = 'count_groups' }
+        @{ Tag = 'csep590b_c04'; Runner = 'cpp';  Dir = 'demos/01-tutorial/csep590b_c04/p3_count_groups'; File = 'count_groups_disproved.cpp'; Expected = 'DISPROVED'; Cry = 'count_groups_spec.cry'; CryptolFn = 'count_groups_spec'; Function = 'count_groups' }
+        @{ Tag = 'csep590b_c04'; Runner = 'rust'; Dir = 'demos/01-tutorial/csep590b_c04/p3_count_groups'; File = 'count_groups_verified.rs';   Expected = 'VERIFIED';  Cry = 'count_groups_spec.cry'; CryptolFn = 'count_groups_spec'; Function = 'count_groups' }
+        @{ Tag = 'csep590b_c04'; Runner = 'rust'; Dir = 'demos/01-tutorial/csep590b_c04/p3_count_groups'; File = 'count_groups_disproved.rs';  Expected = 'DISPROVED'; Cry = 'count_groups_spec.cry'; CryptolFn = 'count_groups_spec'; Function = 'count_groups' }
+        # Part B — invariant finding (bounded reference impl only).
+        @{ Tag = 'csep590b_c04'; Runner = 'cpp';  Dir = 'demos/01-tutorial/csep590b_c04/p4_make_change';  File = 'make_change_verified.cpp';   Expected = 'VERIFIED';  Cry = 'make_change_spec.cry';  CryptolFn = 'make_change_spec';  Function = 'make_change'  }
+        @{ Tag = 'csep590b_c04'; Runner = 'rust'; Dir = 'demos/01-tutorial/csep590b_c04/p4_make_change';  File = 'make_change_verified.rs';    Expected = 'VERIFIED';  Cry = 'make_change_spec.cry';  CryptolFn = 'make_change_spec';  Function = 'make_change'  }
+        @{ Tag = 'csep590b_c04'; Runner = 'cpp';  Dir = 'demos/01-tutorial/csep590b_c04/p5_isqrt';        File = 'isqrt_verified.cpp';         Expected = 'VERIFIED';  Cry = 'isqrt_spec.cry';        CryptolFn = 'isqrt_spec';        Function = 'isqrt'        }
+        @{ Tag = 'csep590b_c04'; Runner = 'rust'; Dir = 'demos/01-tutorial/csep590b_c04/p5_isqrt';        File = 'isqrt_verified.rs';          Expected = 'VERIFIED';  Cry = 'isqrt_spec.cry';        CryptolFn = 'isqrt_spec';        Function = 'isqrt'        }
 
         # ── String operations (SWAR null-byte detection: real libc strlen
         #    bit-trick over a 64-bit word treated as 8 packed bytes). ───────

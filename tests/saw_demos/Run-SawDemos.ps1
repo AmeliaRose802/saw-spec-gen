@@ -82,6 +82,7 @@ $defaultTags = @(
     'cpp_havoc'
     'rust_havoc'
     'bounded_loop'
+    'csep590b_c04'
     'rust_equiv'
     'trait_unknown_impl'
     'async_rust'
