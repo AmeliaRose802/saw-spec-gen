@@ -93,13 +93,11 @@ jobs:
             experimental: true
             install_cmd: 'bash scripts/init.sh'
             cache_key: 'linux-saw1.5-llvm20.1.6-pwsh7.6.2'
-            cache_hashfiles: "${{ hashFiles('scripts/init.sh', 'scripts/init-saw-source.sh') }}"
           - os: windows-latest
             name: 'SAW demo suite (Windows, experimental)'
             experimental: true
             install_cmd: 'pwsh -NoLogo -NoProfile -File scripts/init.ps1'
             cache_key: 'windows-saw1.5-llvm20.1.6'
-            cache_hashfiles: "${{ hashFiles('scripts/init.ps1') }}"
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.experimental }}
@@ -131,7 +129,10 @@ jobs:
       uses: actions/cache/restore@v4
       with:
         path: ~/.saw-spec-gen
-        key: ${{ matrix.cache_key }}-${{ matrix.cache_hashfiles }}
+        # hashFiles() can't be used inside matrix.include, so the
+        # per-OS installer hash is inlined here. Bumping either init
+        # script invalidates only that OS's cache.
+        key: ${{ matrix.cache_key }}-${{ matrix.os == 'windows-latest' && hashFiles('scripts/init.ps1') || hashFiles('scripts/init.sh', 'scripts/init-saw-source.sh') }}
 
     - name: Install SAW, LLVM (+ pwsh on Linux); build saw-spec-gen
       shell: bash
