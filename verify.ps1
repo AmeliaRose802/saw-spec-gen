@@ -42,8 +42,8 @@
     Output directory for all generated artifacts. Defaults to "out/" next to the .cpp file.
 
 .EXAMPLE
-    .\verify.ps1 -CppFile demo\add_one.cpp -CryptolSpec demo\add_one_spec.cry -CryptolFn add_one_spec -Function add_one
-    .\verify.ps1 -CppFile demo\add_one.cpp -CryptolSpec demo\add_one_spec.cry -CryptolFn add_one_spec -Function add_one -OutputDir my_output
+    .\verify.ps1 -CppFile demos\01-tutorial\bounded_loop\add_one_verified.cpp -CryptolSpec demos\01-tutorial\bounded_loop\add_one_spec.cry -CryptolFn add_one_spec -Function add_one
+    .\verify.ps1 -CppFile demos\01-tutorial\bounded_loop\add_one_verified.cpp -CryptolSpec demos\01-tutorial\bounded_loop\add_one_spec.cry -CryptolFn add_one_spec -Function add_one -OutputDir my_output
 #>
 
 param(
@@ -297,7 +297,7 @@ function Write-ResultJson($verdict, $cex, $expected, $actual) {
 
 if ($sawOutput -match "Counterexample") {
     Write-Host ""
-    Write-Host "  RESULT: UNSAT" -ForegroundColor Red
+    Write-Host "  RESULT: DISPROVED" -ForegroundColor Red
     Write-Host ""
     Write-Host "  C++ function  : $Function" -ForegroundColor White
     Write-Host "  Cryptol spec  : $CryptolFn" -ForegroundColor White
@@ -459,7 +459,7 @@ int main() {
     exit 1
 } elseif ($sawOutput -match "VERIFIED") {
     Write-Host ""
-    Write-Host "  RESULT: SAT" -ForegroundColor Green
+    Write-Host "  RESULT: VERIFIED" -ForegroundColor Green
     Write-Host ""
     Write-Host "  C++ function  : $Function" -ForegroundColor White
     Write-Host "  Cryptol spec  : $CryptolFn" -ForegroundColor White
@@ -471,7 +471,7 @@ int main() {
     Write-Host ""
     Write-Host "  RESULT: UNKNOWN" -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "  SAW did not produce a clear sat/unsat result." -ForegroundColor Yellow
+    Write-Host "  SAW did not produce a clear verified/disproved result." -ForegroundColor Yellow
     Write-Host "  Full output:" -ForegroundColor Yellow
     Write-Host ""
     Write-Host $sawOutput
