@@ -111,11 +111,19 @@ Write-Host ""
 Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
 Write-Host " Step 1: Compile $baseName.cpp → bitcode" -ForegroundColor Cyan
 Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
-& $clang -c -emit-llvm -O0 -fno-rtti -target $llvmTarget $CppFile -o $bcFile 2>&1
+# Use -O1 for the bitcode SAW consumes. On Itanium ABI (Linux/macOS) the
+# extra optimization is what lets clang fold a polymorphic
+# `c->method()` (with `c` selected across a branch) into a direct load
+# from the selected vtable address — see commit log for the symbolic
+# function-pointer issue. MSVC behaves the same way at -O0, so this is a
+# safe uniform setting.
+& $clang -c -emit-llvm -O1 -fno-rtti -target $llvmTarget $CppFile -o $bcFile 2>&1
 if ($LASTEXITCODE -ne 0) { Write-Error "clang failed"; exit 1 }
 Write-Host "  → $bcFile ($((Get-Item $bcFile).Length) bytes)" -ForegroundColor Green
 
 # Also emit IR text so gen-verify can resolve fully qualified struct names.
+# Keep -O0 here so saw-spec-gen sees the original struct/field layout
+# rather than the post-optimization view.
 & $clang -S -emit-llvm -O0 -fno-rtti -target $llvmTarget $CppFile -o $llFile 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  warning: failed to emit .ll (continuing without struct-size resolution)" -ForegroundColor Yellow
@@ -151,6 +159,25 @@ if ($llFile) {
     # Re-assemble the .bc so SAW sees the patched module.
     & $llvmAs $patchedLl -o $bcFile 2>&1
     if ($LASTEXITCODE -ne 0) { Write-Error "llvm-as (post-patch) failed"; exit 1 }
+    # Re-optimise the patched bitcode.  On the Itanium ABI the
+    # -O0 IR keeps each `c = new Derived()` branch entirely separate,
+    # and the indirect call `c->m()` lowers to a load through a phi
+    # of two distinct heap allocations — which Crucible cannot resolve
+    # to a concrete function handle.  Running `opt -O1` here folds
+    # the call into a `load` from the (phi-merged) vtable address, so
+    # both branches resolve to the same stub override.  Pure-bytecode
+    # so safe regardless of source language / target ABI.
+    $optTool = Join-Path (Split-Path $llvmAs -Parent) 'opt'
+    if (Test-Path $optTool) {
+        # Strip clang's per-function `optnone` (added under -O0) so the
+        # -O1 pipeline below can actually transform the bodies.  We keep
+        # `noinline`: removing it lets `opt` inline every `linkonce_odr`
+        # C++ method, after which DCE prunes the original definition —
+        # and saw-spec-gen's auto-generated overrides then fail to bind
+        # because the symbol no longer exists.
+        & $optTool -O1 --force-remove-attribute=optnone $bcFile -o $bcFile 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { Write-Error "opt -O1 failed"; exit 1 }
+    }
 }
 
 # ── Step 2: Dump clang AST → JSON ─────────────────────────────────────────────

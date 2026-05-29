@@ -52,12 +52,21 @@ $saw        = $tools.Saw
 $llvmTarget = $tools.LlvmTarget
 
 # ── Stage workspace. ─────────────────────────────────────────────────────
+# On Linux, libstdc++'s `size()` / `operator[]` are inline header
+# functions clang only fully folds into the body at `-O1` or higher.
+# The MSVC IR is fully inlined at -O0, so Windows can stay at -O0.
 $bcFile = Join-Path $outDir 'count_digits_string.bc'
 & $clang -c -emit-llvm -target $llvmTarget $CppFile -o $bcFile 2>&1 | Out-Null
 if (-not (Test-Path $bcFile)) { Write-Error 'clang failed'; exit 1 }
 
+$driver = if ($IsLinux) {
+    'verify_count_digits_string_linux.saw'
+} else {
+    'verify_count_digits_string.saw'
+}
+
 Copy-Item (Join-Path $ScriptRoot 'count_digits_string_spec.cry') (Join-Path $outDir 'count_digits_string_spec.cry') -Force
-Copy-Item (Join-Path $ScriptRoot 'verify_count_digits_string.saw') (Join-Path $outDir 'verify.saw') -Force
+Copy-Item (Join-Path $ScriptRoot $driver) (Join-Path $outDir 'verify.saw') -Force
 
 # ── Run SAW. ─────────────────────────────────────────────────────────────
 Push-Location $outDir

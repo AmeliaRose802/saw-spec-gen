@@ -99,7 +99,11 @@ Write-Host "  → $bcFile" -ForegroundColor Green
 # semantically weaker (commutes cleanly with insertvalue) and
 # Crucible accepts it. The rewrite is a no-op when the IR has no
 # `poison` tokens, so it's safe to run unconditionally.
-$llvmAs = Join-Path $llvmBin "llvm-as.exe"
+$llvmAs = $tools.LlvmAs
+if (-not $llvmAs) {
+    $llvmAsExe = if ($IsWindows) { 'llvm-as.exe' } else { 'llvm-as' }
+    $llvmAs = Join-Path $llvmBin $llvmAsExe
+}
 & $specGen patch-llvm-ir `
     --input  $llFile `
     --output $llFile `

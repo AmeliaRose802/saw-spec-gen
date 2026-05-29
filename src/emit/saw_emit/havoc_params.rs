@@ -6,19 +6,33 @@ use crate::clang_ast::ClassConstructor;
 use crate::constraints::*;
 
 /// Emit setup + postconditions for a mutable `this` pointer when full
-/// class layout is known. Pre-state allocates the named LLVM struct,
-/// the vptr placeholder, and a fresh var per data member; post-state
-/// preserves the vptr but writes a fresh symbolic over every member.
+/// class layout is known. Pre-state allocates an anonymous packed
+/// struct (vptr + data members + trailing padding), reads the vptr +
+/// fields as fresh vars, then post-state rewrites every data member
+/// with a fresh symbolic value while preserving the vptr.
+///
+/// An anonymous struct type is used (rather than `llvm_alias "class.X"`)
+/// because passes like `opt -O1` strip named struct types from the
+/// linked bitcode — `llvm_alias` would then fail to resolve at SAW
+/// load time.
 pub fn emit_this_full_class_havoc(
     layout: &ClassConstructor,
     setup: &mut String,
     postconds: &mut String,
 ) {
+    let pad_bytes = trailing_padding_bytes(&layout.layout_fields);
+    let has_pad = pad_bytes > 0;
     setup.push_str("\n    // Parameter: this (mutable → full-class HAVOC)\n");
-    setup.push_str(&format!(
-        "    this_ptr <- llvm_alloc (llvm_alias \"{}\");\n",
-        layout.layout_type_name,
-    ));
+    setup.push_str("    this_ptr <- llvm_alloc (llvm_packed_struct_type\n");
+    setup.push_str("        [ llvm_pointer (llvm_int 64)  // vptr\n");
+    for (_, fty, _) in &layout.layout_fields {
+        let width = field_width(fty);
+        setup.push_str(&format!("        , llvm_int {width}\n"));
+    }
+    if has_pad {
+        setup.push_str(&format!("        , llvm_array {pad_bytes} (llvm_int 8)\n"));
+    }
+    setup.push_str("        ]);\n");
     setup.push_str("    this_vptr_pre <- llvm_alloc_readonly_aligned 8 (llvm_int 64);\n");
     for (fname, fty, _) in &layout.layout_fields {
         let width = field_width(fty);
@@ -26,10 +40,18 @@ pub fn emit_this_full_class_havoc(
             "    this_{fname}_pre <- llvm_fresh_var \"this_{fname}_pre\" (llvm_int {width});\n",
         ));
     }
-    setup.push_str("    llvm_points_to this_ptr (llvm_struct_value\n");
+    if has_pad {
+        setup.push_str(&format!(
+            "    this_pad_pre <- llvm_fresh_var \"this_pad_pre\" (llvm_array {pad_bytes} (llvm_int 8));\n",
+        ));
+    }
+    setup.push_str("    llvm_points_to this_ptr (llvm_packed_struct_value\n");
     setup.push_str("        [ this_vptr_pre  // vptr (any pointer)\n");
     for (fname, _, _) in &layout.layout_fields {
         setup.push_str(&format!("        , llvm_term this_{fname}_pre\n"));
+    }
+    if has_pad {
+        setup.push_str("        , llvm_term this_pad_pre\n");
     }
     setup.push_str("        ]);\n");
 
@@ -40,10 +62,18 @@ pub fn emit_this_full_class_havoc(
             "    this_{fname}_post <- llvm_fresh_var \"this_{fname}_post\" (llvm_int {width});\n",
         ));
     }
-    postconds.push_str("    llvm_points_to this_ptr (llvm_struct_value\n");
+    if has_pad {
+        postconds.push_str(&format!(
+            "    this_pad_post <- llvm_fresh_var \"this_pad_post\" (llvm_array {pad_bytes} (llvm_int 8));\n",
+        ));
+    }
+    postconds.push_str("    llvm_points_to this_ptr (llvm_packed_struct_value\n");
     postconds.push_str("        [ this_vptr_pre  // vptr preserved\n");
     for (fname, _, _) in &layout.layout_fields {
         postconds.push_str(&format!("        , llvm_term this_{fname}_post\n"));
+    }
+    if has_pad {
+        postconds.push_str("        , llvm_term this_pad_post\n");
     }
     postconds.push_str("        ]);\n");
 }
@@ -54,6 +84,22 @@ fn field_width(fty: &TypeInfo) -> u32 {
         TypeInfo::Bool => 1,
         _ => 64,
     }
+}
+
+/// Compute trailing padding (in bytes) needed to round the packed
+/// struct (8-byte vptr + data members) up to an 8-byte boundary,
+/// matching clang's class layout for an x86_64 polymorphic class.
+fn trailing_padding_bytes(fields: &[(String, TypeInfo, String)]) -> u32 {
+    let mut bits = 64u32; // vptr
+    for (_, fty, _) in fields {
+        // Bool is i1 in IR but takes one byte of storage in the class
+        // layout; round any sub-byte width up to a full byte.
+        let w = field_width(fty);
+        bits += w.max(8).next_multiple_of(8);
+    }
+    let bytes = bits.div_ceil(8);
+    let aligned = bytes.next_multiple_of(8);
+    aligned - bytes
 }
 
 /// Emit setup + postconditions for a pointer parameter using the

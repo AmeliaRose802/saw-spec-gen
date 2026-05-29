@@ -239,11 +239,24 @@ fn emit_ctor_overrides(
 
         let has_data_members = !ctor.layout_fields.is_empty();
         if has_data_members {
+            // Use an anonymous packed struct type rather than
+            // `llvm_alias "class.X"`. The latter relies on the named
+            // type surviving in the post-`opt` bitcode, which it
+            // doesn't once -O1 inlines / strips type metadata.
+            let pad_bytes = ctor_trailing_padding(&ctor.layout_fields);
             out.push_str("\n    // this: full class layout (vptr + data members)\n");
-            out.push_str(&format!(
-                "    this_ptr <- llvm_alloc (llvm_alias \"{}\");\n",
-                ctor.layout_type_name,
-            ));
+            out.push_str("    this_ptr <- llvm_alloc (llvm_packed_struct_type\n");
+            out.push_str("        [ llvm_pointer (llvm_int 64)  // vptr\n");
+            for (_, fty, _) in &ctor.layout_fields {
+                let width = ctor_field_width(fty);
+                out.push_str(&format!("        , llvm_int {width}\n"));
+            }
+            if pad_bytes > 0 {
+                out.push_str(&format!(
+                    "        , llvm_array {pad_bytes} (llvm_int 8)\n",
+                ));
+            }
+            out.push_str("        ]);\n");
         } else {
             out.push_str("\n    // this: passed in from operator new (precondition)\n");
             out.push_str("    this_ptr <- llvm_alloc_aligned 8 (llvm_int 64);\n");
@@ -259,15 +272,12 @@ fn emit_ctor_overrides(
             "        (llvm_global_initializer \"{safe_class}_vtable\");\n",
         ));
         if has_data_members {
+            let pad_bytes = ctor_trailing_padding(&ctor.layout_fields);
             out.push_str("    // Initialize vptr + all data members\n");
-            out.push_str("    llvm_points_to this_ptr (llvm_struct_value\n");
+            out.push_str("    llvm_points_to this_ptr (llvm_packed_struct_value\n");
             out.push_str("        [ vtable_ptr\n");
             for (fname, fty, default_lit) in &ctor.layout_fields {
-                let width = match fty {
-                    TypeInfo::SignedInt(w) | TypeInfo::UnsignedInt(w) => *w,
-                    TypeInfo::Bool => 1,
-                    _ => 64,
-                };
+                let width = ctor_field_width(fty);
                 let lit = if default_lit.is_empty() {
                     "0"
                 } else {
@@ -277,11 +287,26 @@ fn emit_ctor_overrides(
                     "        , llvm_term {{{{ {lit} : [{width}] }}}}  // {fname}\n",
                 ));
             }
+            if pad_bytes > 0 {
+                // Padding slot is `[N x i8]` in the struct type, so the
+                // value must be a Cryptol array literal of N bytes.
+                let zeros: Vec<&str> = (0..pad_bytes).map(|_| "0").collect();
+                out.push_str(&format!(
+                    "        , llvm_term {{{{ [{}] : [{pad_bytes}][8] }}}}  // padding\n",
+                    zeros.join(", "),
+                ));
+            }
             out.push_str("        ]);\n");
         } else {
             out.push_str("    llvm_points_to this_ptr vtable_ptr;\n");
         }
-        out.push_str("    llvm_return this_ptr;\n");
+        // MSVC constructors return `ptr` (the `this` argument); Itanium
+        // constructors return void. Selecting by mangling prefix:
+        // `_Z…` → Itanium, anything else (MSVC `??…`) → MSVC.
+        let returns_this = !ctor.mangled_name.starts_with("_Z");
+        if returns_this {
+            out.push_str("    llvm_return this_ptr;\n");
+        }
         out.push_str("};\n");
         out.push_str(&format!(
             "ov_{safe_class}_ctor <- llvm_unsafe_assume_spec m \"{}\" {safe_class}_ctor_override;\n\n",
@@ -395,6 +420,30 @@ pub fn emit_container_this(out: &mut String, param_name: &str, fields: &[FieldKi
         "    llvm_points_to {param_name}_ptr (llvm_packed_struct_value [{}]);\n",
         slot_values.join(", "),
     ));
+}
+
+/// Bit width for a class data-member field as emitted into a packed
+/// struct value. Mirrors the width logic used in `havoc_params`.
+fn ctor_field_width(fty: &TypeInfo) -> u32 {
+    match fty {
+        TypeInfo::SignedInt(w) | TypeInfo::UnsignedInt(w) => *w,
+        TypeInfo::Bool => 1,
+        _ => 64,
+    }
+}
+
+/// Compute trailing padding (bytes) for a polymorphic class layout so
+/// the packed struct (vptr + members) rounds up to 8-byte alignment,
+/// matching clang's x86_64 ABI.
+fn ctor_trailing_padding(fields: &[(String, TypeInfo, String)]) -> u32 {
+    let mut bits = 64u32; // vptr
+    for (_, fty, _) in fields {
+        let w = ctor_field_width(fty);
+        bits += w.max(8).next_multiple_of(8);
+    }
+    let bytes = bits.div_ceil(8);
+    let aligned = bytes.next_multiple_of(8);
+    aligned - bytes
 }
 
 #[cfg(test)]

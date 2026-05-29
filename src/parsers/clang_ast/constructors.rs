@@ -92,6 +92,16 @@ impl<'a> Visitor for CtorVisitor<'a> {
 /// The LLVM IR-text parser keeps surrounding quotes on MSVC-mangled
 /// names; we strip them before comparison so quoted and unquoted forms
 /// match.
+///
+/// Itanium ABI emits multiple constructor variants:
+///   - C1 = complete object constructor (standalone allocation)
+///   - C2 = base object constructor (as subobject)
+///   - C3 = allocating constructor
+/// The clang AST exposes the C1 mangling, but the compiler often emits
+/// only C2 if no C1 call site exists. When the AST's C1 symbol is
+/// missing from the bitcode but C2 (or C3) is present, transparently
+/// substitute the available variant so the override still applies.
+/// Same logic applies for destructors (D0/D1/D2).
 pub fn filter_ctors_by_ir_symbols(
     ctors: &mut Vec<ClassConstructor>,
     ir_funcs: &[FunctionInfo],
@@ -102,16 +112,23 @@ pub fn filter_ctors_by_ir_symbols(
         .collect();
     let before = ctors.len();
     let mut dropped: Vec<String> = Vec::new();
-    ctors.retain(|c| {
+    ctors.retain_mut(|c| {
         if ir_symbols.contains(c.mangled_name.as_str()) {
-            true
-        } else {
-            dropped.push(format!(
-                "{} (symbol {} not in bitcode)",
-                c.class_name, c.mangled_name,
-            ));
-            false
+            return true;
         }
+        // Try Itanium ABI variant substitution: C1↔C2↔C3, D0↔D1↔D2.
+        if let Some(alt) = itanium_ctor_dtor_variants(&c.mangled_name)
+            .into_iter()
+            .find(|alt| ir_symbols.contains(alt.as_str()))
+        {
+            c.mangled_name = alt;
+            return true;
+        }
+        dropped.push(format!(
+            "{} (symbol {} not in bitcode)",
+            c.class_name, c.mangled_name,
+        ));
+        false
     });
     if !dropped.is_empty() {
         eprintln!(
@@ -125,6 +142,57 @@ pub fn filter_ctors_by_ir_symbols(
             eprintln!("  - {d}");
         }
     }
+}
+
+/// For an Itanium-ABI constructor or destructor mangling, return the
+/// alternative variant manglings to try (in priority order). The input
+/// is expected to embed `C<digit>` or `D<digit>` in the C++-name part
+/// of an Itanium mangled symbol (e.g. `_ZN1AC1Ev`); we substitute the
+/// digit with each of the other valid variants. Returns an empty Vec
+/// for non-Itanium (MSVC `??0...`) names.
+fn itanium_ctor_dtor_variants(mangled: &str) -> Vec<String> {
+    if !mangled.starts_with("_Z") {
+        return Vec::new();
+    }
+    // Scan for the FIRST occurrence of `C[123]` or `D[012]` followed
+    // by `E` (end of nested-name). The `E` disambiguates from class
+    // names that happen to contain `C1`/`D0`/etc.
+    let bytes = mangled.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i + 2 < bytes.len() {
+        let c = bytes[i];
+        let d = bytes[i + 1];
+        let e = bytes[i + 2];
+        if e == b'E' && ((c == b'C' && (d == b'1' || d == b'2' || d == b'3'))
+            || (c == b'D' && (d == b'0' || d == b'1' || d == b'2')))
+        {
+            // Generate alternatives by replacing the digit.
+            let alts: &[u8] = if c == b'C' {
+                match d {
+                    b'1' => &[b'2', b'3'],
+                    b'2' => &[b'1', b'3'],
+                    b'3' => &[b'1', b'2'],
+                    _ => &[],
+                }
+            } else {
+                match d {
+                    b'0' => &[b'1', b'2'],
+                    b'1' => &[b'2', b'0'],
+                    b'2' => &[b'1', b'0'],
+                    _ => &[],
+                }
+            };
+            for &alt in alts {
+                let mut s = mangled.as_bytes().to_vec();
+                s[i + 1] = alt;
+                out.push(String::from_utf8(s).expect("ASCII substitution"));
+            }
+            return out;
+        }
+        i += 1;
+    }
+    out
 }
 
 #[cfg(test)]
