@@ -194,6 +194,40 @@
         @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/rust_adversarial/raw_pointer_aliasing';    File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
         @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/rust_adversarial/symbol_collision';        File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
         @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/rust_adversarial/unreachable_unchecked';   File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
+
+        # ── STL coverage (verify.ps1) ───────────────────────────────────────
+        # "Typical C++" cases that exercise the standard library: <algorithm>,
+        # <numeric>, <utility>, <tuple>, <memory>, <vector>. Every entry in
+        # this section currently RESOLVES TO DISPROVED — not because the
+        # code is wrong, but because the tool's compositional havoc model
+        # treats every function in a system header as an adversarial extern.
+        # `std::max(y, y)` is a one-line `return a < b ? b : a;` in the
+        # bitcode, but the auto-spec lets the solver return ANYTHING from
+        # it, so equivalence with `add_one_spec` is refuted.
+        #
+        # This block documents the gap so regressions stand out (any case
+        # that flips from DISPROVED to VERIFIED in the future is a real
+        # improvement to celebrate, not a regression to fix). See
+        # tests/e2e/cases/10-stl-coverage/README.md for the matrix +
+        # rationale. The `algorithm_clamp` case requires C++17.
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/algorithm_max';          File = 'add_one_verified.cpp';  Expected = 'DISPROVED' }
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/algorithm_max';          File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/algorithm_min';          File = 'add_one_verified.cpp';  Expected = 'DISPROVED' }
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/algorithm_min';          File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/algorithm_clamp';        File = 'add_one_verified.cpp';  Expected = 'DISPROVED'; CxxStandard = 'c++17' }
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/algorithm_clamp';        File = 'add_one_disproved.cpp'; Expected = 'DISPROVED'; CxxStandard = 'c++17' }
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/numeric_accumulate';     File = 'add_one_verified.cpp';  Expected = 'DISPROVED' }
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/numeric_accumulate';     File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/pair_first';             File = 'add_one_verified.cpp';  Expected = 'DISPROVED' }
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/pair_first';             File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/tuple_get';              File = 'add_one_verified.cpp';  Expected = 'DISPROVED' }
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/tuple_get';              File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/vector_back_havoc';      File = 'add_one_verified.cpp';  Expected = 'DISPROVED' }
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/vector_back_havoc';      File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/unique_ptr_deref_havoc'; File = 'add_one_verified.cpp';  Expected = 'DISPROVED' }
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/unique_ptr_deref_havoc'; File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
+
+        # ── Box allocator: currently UNKNOWN due to MIR allocator model gap
         # box_allocator currently produces UNKNOWN under the default pipeline
         # (Box::new path the front-end can't model). Tracked separately; not
         # run by default to keep the suite green. To enable, add tag 'box_allocator'.

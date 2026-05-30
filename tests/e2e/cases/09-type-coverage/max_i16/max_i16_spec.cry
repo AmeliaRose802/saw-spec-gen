@@ -1,0 +1,8 @@
+// Cryptol spec: signed max of two 16-bit integers.
+//
+// Exercises signed-greater-than at 16 bits (`>$`); paired with
+// `max_i16` to confirm the gen-verify pipeline plumbs i16 widths
+// end-to-end.
+
+max_i16_spec : [16] -> [16] -> [16]
+max_i16_spec a b = if a >$ b then a else b
