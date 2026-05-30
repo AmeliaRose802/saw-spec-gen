@@ -4,8 +4,9 @@
 //! unspecified functions plus complete verification scripts. The module
 //! is organized into focused submodules:
 //!
-//! - [`writer`] — shared constants (`VOID_SAW_TYPE`, `INDENT`) and a
-//!   small infallible writer wrapper.
+//! - [`writer`] — shared `VOID_SAW_TYPE` constant and the
+//!   `is_void_saw_type` predicate used to short-circuit return-binding
+//!   in the various spec emitters.
 //! - [`names`] — identifier sanitization (`sanitize_name`,
 //!   `spec_safe_id`, `stub_function_name`).
 //! - [`types`] — SAW LLVM / MIR / LLVM-IR type-string mapping.

@@ -47,9 +47,7 @@ Encountered error while processing global @"_CT??_R0H@84":
 Illegal operation applied to pointer argument
 ```
 
-That was upstream bug
-[handoff_saw_msvc_eh_globals.md](../../../handoff_saw_msvc_eh_globals.md),
-fixed in `crucible-llvm`'s `Constant.hs` by treating
+The upstream fix landed in `crucible-llvm`'s `Constant.hs`: treat
 `ptrtoint(@A) - ptrtoint(@B)` on distinct symbols as
 `UndefConst (IntType n)` (and propagating that undef through `trunc`/
 `ZExt`/`SExt`). The metadata fields are never read by user code — only
@@ -128,7 +126,7 @@ in-Crucible fix is sufficient.
 ```
 
 Both cases are wired into the consolidated end-to-end test suite
-([`tests/e2e/cases.psd1`](../../../tests/e2e/cases.psd1),
-runner: [`tests/e2e/Run-E2ETests.ps1`](../../../tests/e2e/Run-E2ETests.ps1))
+([`tests/e2e/cases.psd1`](../../../cases.psd1),
+runner: [`tests/e2e/Run-E2ETests.ps1`](../../../Run-E2ETests.ps1))
 as regression tests. If SAW ever regresses on either case, the
 pre-commit hook and any CI invocation of the suite will notice.
