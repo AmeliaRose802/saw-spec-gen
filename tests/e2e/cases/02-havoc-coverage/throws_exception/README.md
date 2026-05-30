@@ -13,8 +13,8 @@ add_one_spec x = x + 1
 |------|--------------|------------|
 | [`add_one_verified.cpp`](add_one_verified.cpp) | plain `return x + 1` (no exceptions) | **VERIFIED** by z3 |
 | [`add_one_disproved.cpp`](add_one_disproved.cpp) | `if (x == 42) throw 1; return x + 1;` | **DISPROVED** with counterexample `x = 42` |
-| [`add_one_throws_caught.cpp`](add_one_throws_caught.cpp) | helper throws on `x == 42`, caller `catch(int)` swallows it and still returns `x + 1` | **VERIFIED** by z3 (requires exception-lower pass) |
-| [`add_one_multi_catch.cpp`](add_one_multi_catch.cpp) | two custom exception types; harmless catch falls through to `x + 1`, harmful catch returns `0` | **DISPROVED** with counterexample `x = 99` (requires exception-lower pass) |
+| [`add_one_throws_caught_verified.cpp`](add_one_throws_caught_verified.cpp) | helper throws on `x == 42`, caller `catch(int)` swallows it and still returns `x + 1` | **VERIFIED** by z3 (requires exception-lower pass) |
+| [`add_one_multi_catch_disproved.cpp`](add_one_multi_catch_disproved.cpp) | two custom exception types; harmless catch falls through to `x + 1`, harmful catch returns `0` | **DISPROVED** with counterexample `x = 99` (requires exception-lower pass) |
 
 The last two cases only verify when the standalone
 [`exception-lower`](https://github.com/AmeliaRose802/llvm-exception-lower)
@@ -125,8 +125,8 @@ appears, clang emits MSVC SEH funclet plumbing
 (`catchswitch` / `catchpad` / `catchret`) which `llvm-pretty-bc-parser`
 rejects (`FUNC_CODE_CATCHSWITCH`).
 
-[`add_one_throws_caught.cpp`](add_one_throws_caught.cpp) and
-[`add_one_multi_catch.cpp`](add_one_multi_catch.cpp) both depend on
+[`add_one_throws_caught_verified.cpp`](add_one_throws_caught_verified.cpp) and
+[`add_one_multi_catch_disproved.cpp`](add_one_multi_catch_disproved.cpp) both depend on
 funclet IR. `verify.ps1` runs the standalone
 [`exception-lower`](https://github.com/AmeliaRose802/llvm-exception-lower)
 pass on the freshly compiled bitcode before handing it to SAW; the
@@ -191,14 +191,14 @@ bash scripts/install-exception-lower.sh
 
 # Throws-caught case — VERIFIED (requires exception-lower)
 ./verify.ps1 `
-    -CppFile     tests\e2e\cases\02-havoc-coverage\throws_exception\add_one_throws_caught.cpp `
+    -CppFile     tests\e2e\cases\02-havoc-coverage\throws_exception\add_one_throws_caught_verified.cpp `
     -CryptolSpec tests\e2e\cases\02-havoc-coverage\throws_exception\add_one_spec.cry `
     -CryptolFn   add_one_spec `
     -Function    add_one
 
 # Multi-catch case — DISPROVED at x = 99 (requires exception-lower)
 ./verify.ps1 `
-    -CppFile     tests\e2e\cases\02-havoc-coverage\throws_exception\add_one_multi_catch.cpp `
+    -CppFile     tests\e2e\cases\02-havoc-coverage\throws_exception\add_one_multi_catch_disproved.cpp `
     -CryptolSpec tests\e2e\cases\02-havoc-coverage\throws_exception\add_one_spec.cry `
     -CryptolFn   add_one_spec `
     -Function    add_one
