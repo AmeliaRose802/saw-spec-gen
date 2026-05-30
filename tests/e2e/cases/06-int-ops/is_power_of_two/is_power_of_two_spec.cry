@@ -1,0 +1,15 @@
+// Cryptol spec: power-of-two predicate over uint32.
+//
+// Returns 1 iff x is exactly a positive power of two (so x = 2^k for
+// some 0 <= k < 32). Notably x = 0 returns 0, even though
+// `0 & (0 - 1)` is also 0.
+//
+// Exercises a (a) bit-trick implementation idiom and
+// (b) a 0/1-valued predicate-style return — both new in this
+// regression suite.
+
+is_power_of_two_spec : [32] -> [32]
+is_power_of_two_spec x =
+  if x == 0 then 0
+  else if (x && (x - 1)) == 0 then 1
+  else 0
