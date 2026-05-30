@@ -15,8 +15,10 @@ add_one_spec x = x + 1
 | [`add_one_disproved.cpp`](add_one_disproved.cpp) | `if (x == 42) throw 1; return x + 1;` | **DISPROVED** with counterexample `x = 42` |
 | [`add_one_throws_caught_verified.cpp`](add_one_throws_caught_verified.cpp) | helper throws on `x == 42`, caller `catch(int)` swallows it and still returns `x + 1` | **VERIFIED** by z3 (requires exception-lower pass) |
 | [`add_one_multi_catch_disproved.cpp`](add_one_multi_catch_disproved.cpp) | two custom exception types; harmless catch falls through to `x + 1`, harmful catch returns `0` | **DISPROVED** with counterexample `x = 99` (requires exception-lower pass) |
+| [`add_one_rethrow_disproved.cpp`](add_one_rethrow_disproved.cpp) | catch swallows then re-throws with `throw;` — exception escapes | **DISPROVED** with counterexample `x = 42` (requires exception-lower pass) |
+| [`add_one_nested_catch_verified.cpp`](add_one_nested_catch_verified.cpp) | nested try/catch: inner `catch(int)` swallows, outer `catch(...)` never fires | **VERIFIED** by z3 (requires exception-lower pass) |
 
-The last two cases only verify when the standalone
+The last four cases only verify when the standalone
 [`exception-lower`](https://github.com/AmeliaRose802/llvm-exception-lower)
 LLVM pass is available; see
 ["Catching the throw"](#catching-the-throw-via-exception-lower) below.
@@ -202,9 +204,23 @@ bash scripts/install-exception-lower.sh
     -CryptolSpec tests\e2e\cases\02-havoc-coverage\throws_exception\add_one_spec.cry `
     -CryptolFn   add_one_spec `
     -Function    add_one
+
+# Rethrow case — DISPROVED at x = 42 (requires exception-lower)
+./verify.ps1 `
+    -CppFile     tests\e2e\cases\02-havoc-coverage\throws_exception\add_one_rethrow_disproved.cpp `
+    -CryptolSpec tests\e2e\cases\02-havoc-coverage\throws_exception\add_one_spec.cry `
+    -CryptolFn   add_one_spec `
+    -Function    add_one
+
+# Nested try/catch case — VERIFIED (requires exception-lower)
+./verify.ps1 `
+    -CppFile     tests\e2e\cases\02-havoc-coverage\throws_exception\add_one_nested_catch_verified.cpp `
+    -CryptolSpec tests\e2e\cases\02-havoc-coverage\throws_exception\add_one_spec.cry `
+    -CryptolFn   add_one_spec `
+    -Function    add_one
 ```
 
-All four cases are wired into the consolidated end-to-end test suite
+All six cases are wired into the consolidated end-to-end test suite
 ([`tests/e2e/cases.psd1`](../../../tests/e2e/cases.psd1),
 runner: [`tests/e2e/Run-E2ETests.ps1`](../../../tests/e2e/Run-E2ETests.ps1))
 as regression tests. If SAW ever regresses on any case, the

@@ -61,6 +61,8 @@
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/throws_exception';           File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/throws_exception';           File = 'add_one_throws_caught_verified.cpp';     Expected = 'VERIFIED' }
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/throws_exception';           File = 'add_one_multi_catch_disproved.cpp';      Expected = 'DISPROVED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/throws_exception';           File = 'add_one_rethrow_disproved.cpp';          Expected = 'DISPROVED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/throws_exception';           File = 'add_one_nested_catch_verified.cpp';      Expected = 'VERIFIED' }
 
         # ── Rust havoc tests (verify-rust.ps1) ──────────────────────────────
         # Note: Rust has no havoc model in this verifier path — every
