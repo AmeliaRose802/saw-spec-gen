@@ -4,6 +4,7 @@
 //! imports the Cryptol spec, builds the equivalence body, and invokes
 //! `llvm_verify`.
 
+use super::bitcode_overrides::EmittedBitcodeOverrides;
 use super::path_utils::pathdiff_or_absolute;
 use super::stubs::AssembledStubs;
 use super::verify_script_steps::{
@@ -36,6 +37,7 @@ pub fn emit_verification_script(
     all_globals: &[GlobalVarInfo],
     constructors: &[ClassConstructor],
     stubs_status: &AssembledStubs,
+    bitcode_overrides: &EmittedBitcodeOverrides,
     output_dir: &Path,
 ) -> Result<()> {
     fs::create_dir_all(output_dir)?;
@@ -48,8 +50,10 @@ pub fn emit_verification_script(
     let cryptol_rel = pathdiff_or_absolute(cryptol_spec_path, output_dir);
 
     let needs_operator_new = external_calls.iter().any(is_operator_new);
-    let needs_experimental =
-        !external_calls.is_empty() || has_interfaces || !sub_callee_specs.is_empty();
+    let needs_experimental = !external_calls.is_empty()
+        || has_interfaces
+        || !sub_callee_specs.is_empty()
+        || !bitcode_overrides.is_empty();
 
     let mut out = String::new();
     let mut step = 1u32;
@@ -104,6 +108,22 @@ pub fn emit_verification_script(
             needs_operator_new,
             &mut override_names,
         );
+    }
+
+    // Bitcode-derived overrides for symbols the AST path filter dropped
+    // (notably `printf` and other system-header inline-defined functions)
+    // and for variadic functions whose body uses `llvm.va_*` intrinsics
+    // SAW cannot symbolically execute. See
+    // `src/transform/extern_override_scan.rs` for the analysis and
+    // `src/emit/saw_emit/bitcode_overrides.rs` for the emission contract.
+    if !bitcode_overrides.is_empty() {
+        step += 1;
+        out.push_str(&format!(
+            "// Step {step}: Bitcode-derived extern overrides\n",
+        ));
+        out.push_str(&bitcode_overrides.snippet);
+        out.push('\n');
+        override_names.extend(bitcode_overrides.override_names.iter().cloned());
     }
 
     if !sub_callee_specs.is_empty() {

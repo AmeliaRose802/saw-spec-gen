@@ -1,0 +1,4 @@
+module add_one_spec where
+
+add_one_spec : [32] -> [32]
+add_one_spec x = x + 1
