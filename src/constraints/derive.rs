@@ -5,6 +5,7 @@ use super::types::{
     AllocType, Annotation, FunctionInfo, Mutability, Nullability, ParamConstraint,
     ReturnConstraint, SpecConstraint, TypeInfo,
 };
+use super::value_clauses::value_clauses;
 use anyhow::Result;
 
 /// Derive SAW constraints from function info.
@@ -63,13 +64,18 @@ fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
             }
         } else {
             match inner_ty {
-                TypeInfo::Bool | TypeInfo::SignedInt(_) | TypeInfo::UnsignedInt(_) => {
-                    (AllocType::FreshVar, false)
-                }
+                // Scalar / scalar-like types pass by value through an
+                // `iN` register. Enums must be in this list too — the
+                // discriminant is a plain integer of `discriminant_bits`
+                // width and treating it as `AllocReadonly` makes SAW
+                // reject the call with "declared iN, provided iN*".
+                TypeInfo::Bool
+                | TypeInfo::SignedInt(_)
+                | TypeInfo::UnsignedInt(_)
+                | TypeInfo::Enum { .. } => (AllocType::FreshVar, false),
                 _ => match param.mutability {
                     Mutability::Readonly => (AllocType::AllocReadonly, true),
-                    Mutability::Mutable => (AllocType::AllocMutable, false),
-                    Mutability::WriteOnly => (AllocType::AllocMutable, false),
+                    Mutability::Mutable | Mutability::WriteOnly => (AllocType::AllocMutable, false),
                 },
             }
         };
@@ -84,29 +90,16 @@ fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
             ));
         }
 
-        // Type-level value constraints
-        match inner_ty {
-            TypeInfo::Bool => {}
-            TypeInfo::Enum {
-                variants,
-                discriminant_bits,
-                ..
-            } => {
-                let max_disc = variants.len() as u64 - 1;
-                preconditions.push(format!(
-                    "llvm_precond {{{{ {name}_disc <= ({max} : [{bits}]) }}}}",
-                    name = param.name,
-                    max = max_disc,
-                    bits = discriminant_bits,
-                ));
+        // Type-driven value constraints (saw-spec-gen-xip). The
+        // dispatcher lives in [`super::value_clauses`]; we only emit
+        // for FreshVar params because indirect (pointer-passed) values
+        // are named `{name}_before` in the auto-spec but `{name}` in
+        // the equiv-spec body. Indirect users can attach a precondition
+        // via `--precond` until that naming is unified.
+        if matches!(alloc_type, AllocType::FreshVar) {
+            for clause in value_clauses(inner_ty, &param.name) {
+                preconditions.push(format!("llvm_precond {{{{ {clause} }}}}"));
             }
-            TypeInfo::Option(_) => {
-                preconditions.push(format!(
-                    "llvm_precond {{{{ {name}_disc <= (1 : [8]) }}}}",
-                    name = param.name,
-                ));
-            }
-            _ => {}
         }
 
         // Annotation-driven constraints
@@ -187,27 +180,17 @@ fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
 fn derive_return_constraint(ty: &TypeInfo) -> ReturnConstraint {
     let mut value_constraints = Vec::new();
 
-    match ty {
-        TypeInfo::Bool => {}
-        TypeInfo::Enum {
-            variants,
-            discriminant_bits,
-            ..
-        } => {
-            let max_disc = variants.len() as u64 - 1;
-            value_constraints.push(format!(
-                "llvm_postcond {{{{ ret_disc <= ({max} : [{bits}]) }}}}",
-                max = max_disc,
-                bits = discriminant_bits,
-            ));
-        }
-        TypeInfo::Option(_) => {
-            value_constraints.push("llvm_postcond {{ ret_disc <= (1 : [8]) }}".into());
-        }
-        TypeInfo::UnsignedInt(bits) => {
-            value_constraints.push(format!("// unsigned {bits}-bit -- no extra constraint"));
-        }
-        _ => {}
+    // The return value is always named `ret` in the emitter (see
+    // `llvm_return.rs` / `mir_spec.rs`), so we feed that name to the
+    // generic [`value_clauses`] dispatcher and wrap each clause as a
+    // postcondition. New constrained return types automatically pick
+    // this up.
+    for clause in value_clauses(ty, "ret") {
+        value_constraints.push(format!("llvm_postcond {{{{ {clause} }}}}"));
+    }
+
+    if let TypeInfo::UnsignedInt(bits) = ty {
+        value_constraints.push(format!("// unsigned {bits}-bit -- no extra constraint"));
     }
 
     let is_sret = matches!(ty, TypeInfo::Struct { .. })
@@ -364,16 +347,21 @@ mod tests {
 
     #[test]
     fn test_derive_enum_discriminant_constraint() {
+        // Value-passed enum (the AttestKeyOwnership case from MSP). Must
+        // be allocated FreshVar (otherwise SAW gets `iN*` where the
+        // function declares `iN` and rejects the call) and the
+        // precondition must reference the bare parameter name `status`,
+        // not `status_disc` — there is no `_disc` variable in scope.
         let func = FunctionInfo {
             name: "check_status".into(),
             mangled_name: None,
             params: vec![ParamInfo {
                 name: "status".into(),
-                ty: TypeInfo::Pointer(Box::new(TypeInfo::Enum {
+                ty: TypeInfo::Enum {
                     name: "Status".into(),
                     variants: vec!["Ok".into(), "Err".into(), "Pending".into()],
-                    discriminant_bits: 64,
-                })),
+                    discriminant_bits: 8,
+                },
                 mutability: Mutability::Readonly,
                 nullable: Nullability::NonNull,
                 annotations: vec![],
@@ -388,10 +376,51 @@ mod tests {
             annotations: vec![],
         };
         let specs = derive_constraints(&[func]).unwrap();
+        assert_eq!(specs[0].params[0].alloc_type, AllocType::FreshVar);
+        let pre = specs[0].params[0].preconditions.join("\n");
+        assert!(pre.contains("llvm_precond"), "no llvm_precond: {pre}");
+        assert!(
+            pre.contains("status <= (2 : [8])"),
+            "expected `status <= (2 : [8])`, got: {pre}",
+        );
+        assert!(!pre.contains("status_disc"), "no `status_disc` var: {pre}");
+    }
+
+    #[test]
+    fn test_derive_enum_indirect_skips_precondition() {
+        // Pointer-to-enum (rare but legal). The discriminant lives in
+        // heap memory and the equiv-spec/auto-spec emitters disagree on
+        // the variable name, so emit no automatic precondition. Users
+        // can attach one via `--precond` if they need it.
+        let func = FunctionInfo {
+            name: "set_status".into(),
+            mangled_name: None,
+            params: vec![ParamInfo {
+                name: "out".into(),
+                ty: TypeInfo::Pointer(Box::new(TypeInfo::Enum {
+                    name: "Status".into(),
+                    variants: vec!["Ok".into(), "Err".into()],
+                    discriminant_bits: 32,
+                })),
+                mutability: Mutability::Mutable,
+                nullable: Nullability::NonNull,
+                annotations: vec![],
+            }],
+            return_type: TypeInfo::Void,
+            can_throw: false,
+            is_virtual: false,
+            has_body: true,
+            is_system: false,
+            called_functions: vec![],
+            referenced_globals: vec![],
+            annotations: vec![],
+        };
+        let specs = derive_constraints(&[func]).unwrap();
+        assert_eq!(specs[0].params[0].alloc_type, AllocType::AllocMutable);
         assert!(specs[0].params[0]
             .preconditions
             .iter()
-            .any(|p| p.contains("2")));
+            .all(|p| !p.contains("llvm_precond")));
     }
 
     #[test]
@@ -433,11 +462,15 @@ mod tests {
             annotations: vec![],
         };
         let specs = derive_constraints(&[func]).unwrap();
-        assert!(specs[0]
-            .return_constraint
-            .value_constraints
-            .iter()
-            .any(|c| c.contains("ret_disc")));
+        let constraints = specs[0].return_constraint.value_constraints.join("\n");
+        assert!(
+            constraints.contains("ret <= (1 : [32])"),
+            "expected `ret <= (1 : [32])`, got: {constraints}",
+        );
+        assert!(
+            !constraints.contains("ret_disc"),
+            "must not reference nonexistent `ret_disc`: {constraints}",
+        );
     }
 
     #[test]

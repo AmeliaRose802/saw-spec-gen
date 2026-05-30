@@ -159,6 +159,20 @@
         @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'tests/e2e/cases/04-cpp-rust-equivalence/sat_add_optimized';   Cpp = 'sat_add.cpp';     Rust = 'sat_add_disproved.rs'; Cry = 'sat_add_spec.cry';     CryptolFn = 'sat_add_spec';     Function = 'sat_add';     Expected = 'NOT EQUIVALENT' }
         @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'tests/e2e/cases/04-cpp-rust-equivalence/not_operator_trap'; Cpp = 'negate.cpp';     Rust = 'negate.rs';           Cry = 'negate_spec.cry';      CryptolFn = 'negate_spec';      Function = 'negate';      Expected = 'NOT EQUIVALENT' }
 
+        # ── Enum type-constraint tests (saw-spec-gen-xip) ───────────────────
+        # Without the auto-emitted `llvm_precond {{ r <= (variants-1 : [N]) }}`,
+        # SAW explores out-of-range discriminants and DISPROVES the spec. With
+        # the precondition the generated SAW script verifies that the C++
+        # implementation matches its Cryptol spec on every legal variant.
+        @{ Tag = 'enum_constraints'; Runner = 'cpp';  Dir = 'tests/e2e/cases/07-enum-constraints/auth_enum'; File = 'auth_enum_verified.cpp'; Expected = 'VERIFIED'; Cry = 'auth_enum_spec.cry'; CryptolFn = 'classify_spec'; Function = 'classify' }
+        # Rust verifies even without a precondition because rustc lowers
+        # the exhaustive `match` so out-of-range tags hit LLVM
+        # `unreachable` (UB → vacuously valid). The case is registered
+        # as a regression: if the Rust pipeline ever stops emitting that
+        # unreachable, we want to notice and emit the precondition there
+        # too (verify-rust.ps1 doesn't currently use saw-spec-gen).
+        @{ Tag = 'enum_constraints'; Runner = 'rust'; Dir = 'tests/e2e/cases/07-enum-constraints/auth_enum'; File = 'auth_enum_verified.rs';  Expected = 'VERIFIED'; Cry = 'auth_enum_spec.cry'; CryptolFn = 'classify_spec'; Function = 'classify' }
+
         # ── Unknown concrete-impl dyn-trait case — removed pending real
         #    tool support. See bd issue saw-spec-gen-uki: restore once
         #    verify-rust.ps1 can derive a TraitSchema + fat-pointer

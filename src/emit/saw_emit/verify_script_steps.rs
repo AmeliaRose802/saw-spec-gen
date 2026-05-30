@@ -16,6 +16,23 @@ pub(super) fn is_operator_new(spec: &SpecConstraint) -> bool {
     spec.function_name == "operator new" || spec.mangled_name.as_deref() == Some("??2@YAPEAX_K@Z")
 }
 
+/// Emit the per-parameter `llvm_precond` clauses derived in
+/// [`crate::constraints::derive`]. Lines that look like comments are
+/// passed through verbatim; everything else gets a trailing `;`.
+fn emit_param_preconditions(out: &mut String, preconditions: &[String]) {
+    for pre in preconditions {
+        let trimmed = pre.trim_start();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.starts_with("//") {
+            out.push_str(&format!("    {pre}\n"));
+        } else {
+            out.push_str(&format!("    {pre};\n"));
+        }
+    }
+}
+
 pub(super) fn emit_load_bitcode_step(
     out: &mut String,
     step: &mut u32,
@@ -214,6 +231,7 @@ pub(super) fn emit_equiv_spec_body(
                     "    {} <- llvm_fresh_var \"{}\" ({});\n",
                     param.name, param.name, param.saw_type,
                 ));
+                emit_param_preconditions(out, &param.preconditions);
                 cryptol_args.push(param.name.clone());
                 execute_args.push(format!("llvm_term {}", param.name));
             }
@@ -236,6 +254,7 @@ pub(super) fn emit_equiv_spec_body(
                 out.push_str(&format!(
                     "    llvm_points_to {ptr_name} (llvm_term {val_name});\n",
                 ));
+                emit_param_preconditions(out, &param.preconditions);
                 cryptol_args.push(val_name);
                 execute_args.push(ptr_name);
             }
