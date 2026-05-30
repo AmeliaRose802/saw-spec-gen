@@ -39,24 +39,54 @@ pub fn parse_sal_annotation(attr: &AstNode) -> Option<Annotation> {
 }
 
 fn classify(value: &str) -> Option<Annotation> {
-    let inner_count = |prefix: &str| -> Option<usize> {
-        value
-            .strip_prefix(prefix)?
-            .strip_suffix(')')?
-            .parse::<usize>()
-            .ok()
+    // Inner-text extractor: returns the substring between the macro's
+    // outer parentheses, e.g. "_In_reads_(nm)" -> "nm".
+    let inner_text =
+        |prefix: &str| -> Option<&str> { value.strip_prefix(prefix)?.strip_suffix(')') };
+    // Sized variants: try a decimal literal first, then fall back to
+    // a parameter-reference. `_In_reads_(8)` => InReads(8);
+    // `_In_reads_(nm)` => InReadsParam("nm"). Anything more complex
+    // (e.g. `_In_reads_(nm * 2)`) is captured as a paramref string —
+    // the emitter can decide what to do with non-trivial expressions
+    // rather than the parser silently dropping the annotation.
+    let classify_sized = |prefix: &str,
+                          lit: fn(usize) -> Annotation,
+                          param: fn(String) -> Annotation|
+     -> Option<Annotation> {
+        let inner = inner_text(prefix)?;
+        let trimmed = inner.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        if let Ok(n) = trimmed.parse::<usize>() {
+            Some(lit(n))
+        } else {
+            Some(param(trimmed.to_string()))
+        }
     };
-    if let Some(n) = inner_count("_In_reads_(") {
-        return Some(Annotation::InReads(n));
+    if let Some(a) = classify_sized("_In_reads_(", Annotation::InReads, Annotation::InReadsParam) {
+        return Some(a);
     }
-    if let Some(n) = inner_count("_In_reads_bytes_(") {
-        return Some(Annotation::InReads(n));
+    if let Some(a) = classify_sized(
+        "_In_reads_bytes_(",
+        Annotation::InReads,
+        Annotation::InReadsParam,
+    ) {
+        return Some(a);
     }
-    if let Some(n) = inner_count("_Out_writes_(") {
-        return Some(Annotation::OutWrites(n));
+    if let Some(a) = classify_sized(
+        "_Out_writes_(",
+        Annotation::OutWrites,
+        Annotation::OutWritesParam,
+    ) {
+        return Some(a);
     }
-    if let Some(n) = inner_count("_Out_writes_bytes_(") {
-        return Some(Annotation::OutWrites(n));
+    if let Some(a) = classify_sized(
+        "_Out_writes_bytes_(",
+        Annotation::OutWrites,
+        Annotation::OutWritesParam,
+    ) {
+        return Some(a);
     }
     match value {
         "_In_" | "_In_opt_" => Some(Annotation::InReads(0)),
@@ -96,6 +126,35 @@ mod tests {
     fn parses_out_writes() {
         let a = parse(json!({"kind": "AnnotateAttr", "value": "_Out_writes_(32)"}));
         assert_eq!(parse_sal_annotation(&a), Some(Annotation::OutWrites(32)));
+    }
+
+    #[test]
+    fn parses_in_reads_param_reference() {
+        // The common SAL form from real Windows headers: the count is
+        // the name of a sibling parameter.
+        let a = parse(json!({"kind": "AnnotateAttr", "value": "_In_reads_(nm)"}));
+        assert_eq!(
+            parse_sal_annotation(&a),
+            Some(Annotation::InReadsParam("nm".into()))
+        );
+    }
+
+    #[test]
+    fn parses_out_writes_param_reference() {
+        let a = parse(json!({"kind": "AnnotateAttr", "value": "_Out_writes_(buflen)"}));
+        assert_eq!(
+            parse_sal_annotation(&a),
+            Some(Annotation::OutWritesParam("buflen".into()))
+        );
+    }
+
+    #[test]
+    fn parses_in_reads_bytes_param_reference() {
+        let a = parse(json!({"kind": "AnnotateAttr", "value": "_In_reads_bytes_(cb)"}));
+        assert_eq!(
+            parse_sal_annotation(&a),
+            Some(Annotation::InReadsParam("cb".into()))
+        );
     }
 
     #[test]

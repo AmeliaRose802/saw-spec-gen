@@ -1,0 +1,7 @@
+// Cryptol spec: clamp negative i64 ("long") values to zero.
+//
+// Exercises signed-less-than at 64 bits — the widest signed integer
+// the type-coverage suite reaches.
+
+clamp_neg_i64_spec : [64] -> [64]
+clamp_neg_i64_spec x = if x <$ 0 then 0 else x

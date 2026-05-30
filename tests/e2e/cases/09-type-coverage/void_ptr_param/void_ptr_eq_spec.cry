@@ -1,0 +1,7 @@
+// Cryptol spec — when the C++ parameter type is `const void*`, the
+// saw-spec-gen harness lowers each pointer to `llvm_int 64` (raw pointer
+// bits) and passes both bit-patterns to the spec. The implementation
+// returns 1 iff the two pointer values are equal, else 0.
+
+void_ptr_eq_spec : [64] -> [64] -> [32]
+void_ptr_eq_spec a b = if a == b then 1 else 0

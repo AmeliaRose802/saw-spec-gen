@@ -1,0 +1,19 @@
+// Cryptol spec: identity-on-discriminant for an AuthResult enum.
+//
+// The implementation switches over `enum class AuthResult : uint8_t`
+// with three valid tags (0, 1, 2) and ends with __builtin_unreachable()
+// (or `unreachable_unchecked` in Rust) so any other discriminant is
+// undefined behaviour at the source level.
+//
+// SAW models the LLVM `unreachable` instruction as a verification
+// failure when reached. Without a type-derived `r <= 2` precondition,
+// the solver picks `r = 0xff` (or any value outside the enum range),
+// the switch falls through to the unreachable, and verification
+// DISPROVES with a counterexample SAW believes is impossible.
+//
+// The whole point of beads `saw-spec-gen-xip` is to make saw-spec-gen
+// emit that precondition automatically from the EnumDecl / mir-json
+// ADT info so this case VERIFIES.
+
+classify_spec : [8] -> [32]
+classify_spec r = zext r

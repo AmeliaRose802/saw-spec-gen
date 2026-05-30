@@ -1,0 +1,9 @@
+// Cryptol spec: bool-or widened to u32.
+//
+// The saw-spec-gen harness wraps each LLVM-i1 input with `(name ! 0)`
+// at the call boundary, so by the time the spec sees the arguments
+// they are already `Bit` (not `[1]`). Use `\/` directly.
+
+bool_or_to_u32_spec : Bit -> Bit -> [32]
+bool_or_to_u32_spec a b =
+  if a \/ b then 1 else 0

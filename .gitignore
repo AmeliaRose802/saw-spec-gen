@@ -15,6 +15,9 @@ tests/e2e/cases/specs/
 tests/e2e/cases/rust_specs/
 tests/e2e/cases/rust_demo_specs/
 
+# saw-spec-gen `dump-types` artifact at repo root (per-run, not source).
+/types.json
+
 # Loose test artifacts
 _test_ast.json
 tests/e2e/cases/_test.saw

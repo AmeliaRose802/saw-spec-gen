@@ -37,14 +37,16 @@ pub fn resolve_param_behavior(param: &ParamInfo) -> HavocBehavior {
     let sal_says_readonly = param
         .annotations
         .iter()
-        .any(|a| matches!(a, Annotation::InReads(_)));
+        .any(|a| matches!(a, Annotation::InReads(_) | Annotation::InReadsParam(_)));
     if type_says_const || sal_says_readonly {
         return HavocBehavior::Preserved;
     }
-    let sal_says_writable = param
-        .annotations
-        .iter()
-        .any(|a| matches!(a, Annotation::OutWrites(_) | Annotation::Inout));
+    let sal_says_writable = param.annotations.iter().any(|a| {
+        matches!(
+            a,
+            Annotation::OutWrites(_) | Annotation::OutWritesParam(_) | Annotation::Inout
+        )
+    });
     if sal_says_writable {
         return HavocBehavior::Havoced;
     }
@@ -270,6 +272,8 @@ pub fn annotation_label(annotations: &[Annotation], is_preserved: bool) -> Strin
             Annotation::InReads(n) => return format!("_In_reads_({n}) → preserved"),
             Annotation::OutWrites(0) => return "_Out_ → HAVOCED".into(),
             Annotation::OutWrites(n) => return format!("_Out_writes_({n}) → HAVOCED"),
+            Annotation::InReadsParam(p) => return format!("_In_reads_({p}) → preserved"),
+            Annotation::OutWritesParam(p) => return format!("_Out_writes_({p}) → HAVOCED"),
             Annotation::Inout => return "_Inout_ → HAVOCED".into(),
             _ => {}
         }
@@ -372,6 +376,50 @@ mod tests {
             annotations: vec![Annotation::Inout],
         };
         assert_eq!(resolve_param_behavior(&p), HavocBehavior::Havoced);
+    }
+
+    #[test]
+    fn void_pointer_param_does_not_emit_comment_in_alloc_slot() {
+        // Bug #11 regression guard at the havoc-spec emission layer:
+        // an opaque mutable `void*` parameter must never produce
+        // `llvm_alloc (// void)` (which SAW parses as an unterminated
+        // expression). Any `//` substring inside parentheses indicates
+        // a code-gen bug.
+        let mut method = make_iface_method("MemoryResource", "do_deallocate", TypeInfo::Void, 200);
+        // Replace the synthetic `this` with a real `void*` param.
+        method.method.params = vec![
+            ParamInfo {
+                name: "this".into(),
+                ty: TypeInfo::Pointer(Box::new(TypeInfo::Opaque {
+                    name: "Self".into(),
+                    size_bytes: 0,
+                })),
+                mutability: Mutability::Readonly,
+                nullable: Nullability::NonNull,
+                annotations: vec![],
+            },
+            ParamInfo {
+                name: "p".into(),
+                ty: TypeInfo::Pointer(Box::new(TypeInfo::Void)),
+                mutability: Mutability::Mutable,
+                nullable: Nullability::NonNull,
+                annotations: vec![],
+            },
+        ];
+        let spec = generate_havoc_spec(&method, &[], None, None);
+        for (i, line) in spec.lines().enumerate() {
+            if let Some(open) = line.find('(') {
+                let inside = &line[open + 1..];
+                assert!(
+                    !inside.contains("//"),
+                    "line {i} has `//` inside expression: {line}",
+                );
+            }
+        }
+        assert!(
+            spec.contains("p_ptr <- llvm_alloc (llvm_int 8)"),
+            "expected `p_ptr <- llvm_alloc (llvm_int 8)` in:\n{spec}",
+        );
     }
 
     #[test]

@@ -1,0 +1,8 @@
+// Cryptol spec for the value written through `out`.
+//
+// The implementation returns void; this spec describes what the
+// caller observes via the out-parameter:
+//     *out = x + 1
+
+void_out_inc_spec : [32] -> [32]
+void_out_inc_spec x = x + 1

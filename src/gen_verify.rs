@@ -404,75 +404,59 @@ pub fn run(
         saw_emit::AssembledStubs::NoStubs
     };
 
-    // Compositional sub-function overrides.
+    // In-module sub-callees with a body are NOT havoc-overridden — SAW
+    // executes their real bodies during symbolic execution. The two
+    // discrimination layers we keep:
     //
-    // Each in-module function the target directly calls is replaced by an
-    // adversarial (havoc) override.  Skip callees already covered elsewhere:
-    // virtuals (vtable stubs), constructors (interface overrides), and
-    // system / external functions.
-    let ctor_mangled: HashSet<String> = ctors.iter().map(|c| c.mangled_name.clone()).collect();
-    let external_mangled: HashSet<String> = external_calls
-        .iter()
-        .filter_map(|s| s.mangled_name.clone())
-        .collect();
-    let mut sub_callee_specs: Vec<constraints::SpecConstraint> = Vec::new();
-    let mut seen_sub: HashSet<String> = HashSet::new();
-    for c in &target_fn.called_functions {
-        if !seen_sub.insert(c.mangled_name.clone()) {
-            continue;
-        }
-        if c.mangled_name == target_mangled {
-            continue;
-        }
-        if ctor_mangled.contains(&c.mangled_name) {
-            continue;
-        }
-        if external_mangled.contains(&c.mangled_name) {
-            continue;
-        }
-        if c.name.starts_with("__builtin_") || c.mangled_name.starts_with("__builtin_") {
-            continue;
-        }
-        let callee = fn_by_mangled
-            .get(&c.mangled_name)
-            .or_else(|| fn_by_name.get(&c.name))
-            .copied();
-        let Some(callee) = callee else { continue };
-        if !callee.has_body || callee.is_system || callee.is_virtual {
-            continue;
-        }
-        let spec = all_specs
-            .iter()
-            .find(|s| s.mangled_name.as_deref() == Some(c.mangled_name.as_str()));
-        if let Some(spec) = spec {
-            sub_callee_specs.push(spec.clone());
-        }
-    }
-    if !sub_callee_specs.is_empty() {
-        let experimental_dir = output.join("specs_experimental");
-        std::fs::create_dir_all(&experimental_dir)?;
-        for spec in &sub_callee_specs {
-            saw_emit::emit_single_experimental_spec(spec, &all_globals, false, &experimental_dir)?;
-        }
-        eprintln!(
-            "Generated {} sub-function override specs (compositional)",
-            sub_callee_specs.len(),
-        );
-    }
+    //   * `external_calls` (built earlier via callgraph::external_callees)
+    //     filters to `!has_body`, so genuinely undefined callees — printf,
+    //     libc, externs from other TUs — still get an adversarial spec.
+    //   * vtable dispatches and constructors are handled by the vtable
+    //     stub / interface-override layers; nothing to do here.
+    //
+    // What this loop used to do — havoc *every* body-having in-module
+    // callee — is wrong for callees defined inline in headers (e.g. a
+    // helper in `my_header.hpp` that gets inlined into the TU still ends
+    // up with `has_body == true`). Havoc'ing it produced spurious
+    // DISPROVED counterexamples for code that just called a trivial
+    // helper. Empty list = no compositional havoc step emitted.
+    let sub_callee_specs: Vec<constraints::SpecConstraint> = Vec::new();
 
     // Apply the same `llvm_alias` resolution / dereferenceable fallback to
-    // every spec that will be emitted as an override (sub-callees and
-    // externals), not just the target.  Without this the override files
+    // every spec that will be emitted as an override (externals only now —
+    // sub-callees are empty above).  Without this the override files
     // contain `llvm_alias "ShortName"` references that SAW can't load
     // against the bitcode's mangled struct table.
-    for spec in &mut sub_callee_specs {
-        resolve_spec_types_quiet(spec, &ir_struct_sizes);
-    }
     let mut external_calls_owned: Vec<constraints::SpecConstraint> =
         external_calls.iter().map(|s| (*s).clone()).collect();
     for spec in &mut external_calls_owned {
         resolve_spec_types_quiet(spec, &ir_struct_sizes);
     }
+
+    // Bitcode-driven extern override scan. The AST pipeline above only
+    // sees declarations the path filter kept; anything filtered as a
+    // system header (e.g. `printf` in MSVC's `<cstdio>`) is invisible
+    // even when the TU actually calls it, and SAW then aborts on
+    // `internal: error: in printf`. A second pass on the LLVM IR text
+    // covers declare-only externs and variadic functions whose body
+    // uses `llvm.va_*` intrinsics Crucible-LLVM can't simulate.
+    // AST-derived overrides take precedence — we pass their symbols
+    // as `already_covered` so the bitcode scan doesn't double-emit.
+    // See `src/emit/saw_emit/bitcode_overrides.rs` for the contract.
+    let already_covered: Vec<String> = external_calls_owned
+        .iter()
+        .filter_map(|s| {
+            s.mangled_name
+                .clone()
+                .or_else(|| Some(s.function_name.clone()))
+        })
+        .collect();
+    let bitcode_overrides = saw_emit::scan_and_emit_bitcode_overrides(
+        llvm_ir_path,
+        &target_mangled,
+        &already_covered,
+        &all_globals,
+    );
 
     saw_emit::emit_verification_script(
         bitcode,
@@ -489,6 +473,7 @@ pub fn run(
         &all_globals,
         &ctors,
         &stubs_status,
+        &bitcode_overrides,
         output,
     )?;
 
