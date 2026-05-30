@@ -183,16 +183,42 @@ Show-Side "C++"  $cppResult
 Show-Side "Rust" $rustResult
 
 # ── Bottom-line verdict ───────────────────────────────────────────────────────
+
+# Also emit a combined result.json (side='equiv') so the collect-results
+# adapter sees one entry per case rather than two per-side files only.
+# Schema kept in sync with verify.ps1 / verify-rust.ps1 via the shared
+# helper.  See docs/result-json.md.
+. (Join-Path $ScriptRoot 'scripts/Write-ResultJson.ps1')
+function Write-EquivResultJson([string]$verdict) {
+    $cex = @()
+    if ($cppResult -and $cppResult.verdict -eq 'DISPROVED' -and $cppResult.counterexample) {
+        $cex = @($cppResult.counterexample)
+    } elseif ($rustResult -and $rustResult.verdict -eq 'DISPROVED' -and $rustResult.counterexample) {
+        $cex = @($rustResult.counterexample)
+    }
+    Write-VerifyResult `
+        -OutputDir      $OutputDir `
+        -Side           'equiv' `
+        -Function       $Function `
+        -CryptolFn      $CryptolFn `
+        -Verdict        $verdict `
+        -Counterexample $cex `
+        -Solver         'z3' `
+        -ImplFile       ((Split-Path -Leaf $CppFile) + ' | ' + (Split-Path -Leaf $RustFile))
+}
+
 if ($cppOk -and $rustOk) {
     Write-Host "  RESULT: EQUIVALENT" -ForegroundColor Green
     Write-Host "    Both implementations agree with $CryptolFn," -ForegroundColor Green
     Write-Host "    therefore they agree with each other on every input." -ForegroundColor Green
     Write-Host ""
+    Write-EquivResultJson 'EQUIVALENT'
     exit 0
 } else {
     Write-Host "  RESULT: NOT EQUIVALENT" -ForegroundColor Red
     if (-not $cppOk)  { Write-Host "    C++  implementation disagrees with $CryptolFn." -ForegroundColor Red }
     if (-not $rustOk) { Write-Host "    Rust implementation disagrees with $CryptolFn." -ForegroundColor Red }
     Write-Host ""
+    Write-EquivResultJson 'NOT EQUIVALENT'
     exit 1
 }

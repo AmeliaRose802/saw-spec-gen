@@ -5,8 +5,10 @@
 //! dispatches into `commands::*` defined below.
 
 // Top-level utilities that stay at the crate root.
+pub mod collect_results;
 pub mod commands;
 pub mod constraints;
+pub mod dump_types;
 pub mod gen_verify;
 pub mod mangle;
 

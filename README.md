@@ -71,7 +71,8 @@ pwsh scripts/init.ps1            # or:  bash scripts/init.sh
 The output directory (`out_<basename>/`) contains every intermediate file
 — the `.bc`, the AST JSON, every generated override spec, the
 `verify.saw` script, and a structured `result.json` machine-readable
-verdict.
+verdict.  The `result.json` shape is documented in
+[`docs/result-json.md`](docs/result-json.md) (schema version `1`).
 
 ## The verification model
 

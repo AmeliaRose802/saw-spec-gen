@@ -392,19 +392,24 @@ Write-Host "══════════════════════�
 Write-Host " Result" -ForegroundColor Cyan
 Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
 
-# Helper: write a small result.json that verify-equiv.ps1 reads to render
-# its combined verdict. Shape kept in sync with verify.ps1.
+# Shared writer — emits a versioned result.json shape consumed by
+# verify-equiv.ps1, the e2e runner, and the `saw-spec-gen
+# collect-results` adapter.  See docs/result-json.md for the schema.
+. (Join-Path $ScriptRoot 'scripts/Write-ResultJson.ps1')
 function Write-ResultJson($verdict, $cex, $expected, $actual) {
-    $payload = [PSCustomObject]@{
-        side           = "rust"
-        function       = $Function
-        cryptol_fn     = $CryptolFn
-        verdict        = $verdict
-        counterexample = $cex      # ordered list of @{ name=...; value=... }
-        expected       = $expected # Cryptol value at cex inputs (as string)
-        actual         = $actual   # Rust value at cex inputs   (as string)
+    $payloadArgs = @{
+        OutputDir      = $OutputDir
+        Side           = 'rust'
+        Function       = $Function
+        CryptolFn      = $CryptolFn
+        Verdict        = $verdict
+        Counterexample = @($cex)
+        Solver         = 'z3'
+        ImplFile       = (Split-Path -Leaf $RustFile)
     }
-    $payload | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $OutputDir "result.json") -Encoding utf8
+    if ($expected) { $payloadArgs['Expected'] = [string]$expected }
+    if ($actual)   { $payloadArgs['Actual']   = [string]$actual   }
+    Write-VerifyResult @payloadArgs
 }
 
 if ($sawOut -match "Counterexample") {

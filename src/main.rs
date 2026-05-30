@@ -287,6 +287,72 @@ enum Commands {
         #[arg(long)]
         output: PathBuf,
     },
+
+    /// Aggregate per-run `result.json` files into a single
+    /// `proof_manifest.json` for `pretty-specs --proof-status`.
+    ///
+    /// Walks `--root` recursively, reads every `result.json` (produced
+    /// by `verify.ps1` / `verify-rust.ps1` / `verify-equiv.ps1`),
+    /// validates the `schema_version`, and emits one manifest entry
+    /// per file mapped to `proven` / `failed` / `not_attempted`.
+    ///
+    /// Usage: saw-spec-gen collect-results --root runs/ \
+    ///          --output proof_manifest.json
+    CollectResults {
+        /// Directory to scan recursively for `result.json` files.
+        #[arg(long)]
+        root: PathBuf,
+
+        /// Output manifest path.
+        #[arg(long, default_value = "proof_manifest.json")]
+        output: PathBuf,
+
+        /// Optional JSON map `{ "impl_fn": "cryptol_fn", ... }` used to
+        /// re-key entries when the implementation function name
+        /// differs from the Cryptol `Item::Function.name`.
+        #[arg(long)]
+        cryptol_fn_map: Option<PathBuf>,
+
+        /// Output shape: `flat` (default) emits a single array;
+        /// `structured` groups entries by key (reserved for the
+        /// pretty-specs-ua2 closed-loop integration).
+        #[arg(long, default_value = "flat")]
+        format: String,
+    },
+
+    /// Serialize per-function parameter / return type information and
+    /// referenced struct layouts to a single `types.json` document.
+    ///
+    /// Reads any combination of `--ast`, `--mir`, and `--llvm-ir` (at
+    /// least one required), runs the same extraction pipeline as
+    /// `gen-verify`, and writes the schema-versioned JSON used by
+    /// downstream tools (notably `pretty-specs`) for type-aware spec
+    /// rendering.
+    ///
+    /// Usage: saw-spec-gen dump-types --ast ast.json \
+    ///          --llvm-ir build/out.ll --output types.json
+    DumpTypes {
+        /// Clang AST JSON (`clang -Xclang -ast-dump=json`).
+        #[arg(long)]
+        ast: Option<PathBuf>,
+
+        /// mir-json output (`linked-mir.json`).
+        #[arg(long)]
+        mir: Option<PathBuf>,
+
+        /// LLVM textual IR (`.ll`).
+        #[arg(long = "llvm-ir")]
+        llvm_ir: Option<PathBuf>,
+
+        /// Output `types.json` path.
+        #[arg(long, default_value = "types.json")]
+        output: PathBuf,
+
+        /// Optional substring filter applied independently to each
+        /// parser (same semantics as `gen-verify --filter`).
+        #[arg(long)]
+        filter: Option<String>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -348,5 +414,27 @@ fn main() -> Result<()> {
             keep,
         } => commands::filter_ast(input, output, keep),
         Commands::PatchLlvmIr { input, output } => commands::patch_llvm_ir_cmd(input, output),
+        Commands::CollectResults {
+            root,
+            output,
+            cryptol_fn_map,
+            format,
+        } => {
+            let fmt = saw_spec_gen::collect_results::ManifestFormat::parse(&format)?;
+            saw_spec_gen::collect_results::run(&root, &output, cryptol_fn_map.as_deref(), fmt)
+        }
+        Commands::DumpTypes {
+            ast,
+            mir,
+            llvm_ir,
+            output,
+            filter,
+        } => saw_spec_gen::dump_types::run(
+            ast.as_deref(),
+            mir.as_deref(),
+            llvm_ir.as_deref(),
+            &output,
+            filter.as_deref(),
+        ),
     }
 }
