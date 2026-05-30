@@ -80,4 +80,32 @@ mod tests {
         let m = collect_all_enum_bits(&ast);
         assert_eq!(m.get("E"), Some(&64));
     }
+
+    /// Regression for Bug B in
+    /// `SAW_SPEC_GEN_BUG_REPORT_arg_type_mismatch.md`: every
+    /// `std::`-prefixed integer typedef must resolve to the same
+    /// width as its unqualified C counterpart. Without this, an
+    /// `enum class : std::uint8_t` falls through to the 32-bit
+    /// default and the generator emits `llvm_int 32` for what the
+    /// IR actually exposes as `i8`.
+    #[test]
+    fn enum_bits_from_underlying_handles_std_qualified_typedefs() {
+        assert_eq!(enum_bits_from_underlying("std::uint8_t"), 8);
+        assert_eq!(enum_bits_from_underlying("std::int8_t"), 8);
+        assert_eq!(enum_bits_from_underlying("std::uint16_t"), 16);
+        assert_eq!(enum_bits_from_underlying("std::int16_t"), 16);
+        assert_eq!(enum_bits_from_underlying("std::uint32_t"), 32);
+        assert_eq!(enum_bits_from_underlying("std::int32_t"), 32);
+        assert_eq!(enum_bits_from_underlying("std::uint64_t"), 64);
+        assert_eq!(enum_bits_from_underlying("std::int64_t"), 64);
+        // Pointer-sized typedefs (x86_64 ABI).
+        assert_eq!(enum_bits_from_underlying("std::size_t"), 64);
+        assert_eq!(enum_bits_from_underlying("size_t"), 64);
+        assert_eq!(enum_bits_from_underlying("intptr_t"), 64);
+        // Unqualified C forms still resolve.
+        assert_eq!(enum_bits_from_underlying("uint8_t"), 8);
+        assert_eq!(enum_bits_from_underlying("uint32_t"), 32);
+        // Unknown spellings still fall back to 32.
+        assert_eq!(enum_bits_from_underlying("MyOpaqueType"), 32);
+    }
 }
