@@ -100,6 +100,19 @@ if ($All) {
     $selected  = @($cases | Where-Object { $tagSet.Contains($_.Tag.ToLowerInvariant()) })
 }
 
+# ── Platform skip: honour SkipOn = 'Windows' | 'Linux' ────────────────────
+$onWindows = $PSVersionTable.PSEdition -eq 'Desktop' -or $env:OS -eq 'Windows_NT' -or
+             ($PSVersionTable.Platform -and $PSVersionTable.Platform -eq 'Win32NT')
+$currentOS = if ($onWindows) { 'Windows' } else { 'Linux' }
+$beforeSkip = $selected.Count
+$selected  = @($selected | Where-Object {
+    -not $_.SkipOn -or $_.SkipOn -ne $currentOS
+})
+$skipped = $beforeSkip - $selected.Count
+if ($skipped -gt 0) {
+    Write-Host "  ($skipped case(s) skipped on $currentOS)" -ForegroundColor DarkYellow
+}
+
 if ($selected.Count -eq 0) {
     Write-Error "No cases match the requested tags: $($Tag -join ',')"
 }
