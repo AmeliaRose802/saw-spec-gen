@@ -1,40 +1,24 @@
 # Agent Instructions
 
-This project uses **bd** (beads) for issue tracking. Run `bd prime` for full workflow context.
-
-## Quick Reference
-
-```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work atomically
-bd close <id>         # Complete work
-bd dolt push          # Push beads data to remote
-```
+This project uses **bd** (beads) for issue tracking — see the
+auto-managed section at the bottom of this file, or run `bd prime`
+for full workflow context.
 
 ## Non-Interactive Shell Commands
 
-**ALWAYS use non-interactive flags** with file operations to avoid hanging on confirmation prompts.
+Shell commands like `cp`, `mv`, `rm` may be aliased to `-i` mode on
+some systems and hang waiting for y/n. **Always pass non-interactive
+flags:**
 
-Shell commands like `cp`, `mv`, and `rm` may be aliased to include `-i` (interactive) mode on some systems, causing the agent to hang indefinitely waiting for y/n input.
-
-**Use these forms instead:**
 ```bash
-# Force overwrite without prompting
-cp -f source dest           # NOT: cp source dest
-mv -f source dest           # NOT: mv source dest
-rm -f file                  # NOT: rm file
-
-# For recursive operations
-rm -rf directory            # NOT: rm -r directory
-cp -rf source dest          # NOT: cp -r source dest
+cp -f source dest       # NOT: cp source dest
+mv -f source dest
+rm -f file              # rm -rf for recursive
+cp -rf source dest      # recursive copy
 ```
 
-**Other commands that may prompt:**
-- `scp` - use `-o BatchMode=yes` for non-interactive
-- `ssh` - use `-o BatchMode=yes` to fail instead of prompting
-- `apt-get` - use `-y` flag
-- `brew` - use `HOMEBREW_NO_AUTO_UPDATE=1` env var
+Other commands worth knowing: `scp`/`ssh` with `-o BatchMode=yes`,
+`apt-get -y`, `HOMEBREW_NO_AUTO_UPDATE=1`.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
 ## Beads Issue Tracker
