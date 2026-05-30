@@ -111,19 +111,11 @@ Write-Host ""
 Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
 Write-Host " Step 1: Compile $baseName.cpp → bitcode" -ForegroundColor Cyan
 Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
-# Use -O1 for the bitcode SAW consumes. On Itanium ABI (Linux/macOS) the
-# extra optimization is what lets clang fold a polymorphic
-# `c->method()` (with `c` selected across a branch) into a direct load
-# from the selected vtable address — see commit log for the symbolic
-# function-pointer issue. MSVC behaves the same way at -O0, so this is a
-# safe uniform setting.
-& $clang -c -emit-llvm -O1 -fno-rtti -target $llvmTarget $CppFile -o $bcFile 2>&1
+& $clang -c -emit-llvm -O0 -fno-rtti -target $llvmTarget $CppFile -o $bcFile 2>&1
 if ($LASTEXITCODE -ne 0) { Write-Error "clang failed"; exit 1 }
 Write-Host "  → $bcFile ($((Get-Item $bcFile).Length) bytes)" -ForegroundColor Green
 
 # Also emit IR text so gen-verify can resolve fully qualified struct names.
-# Keep -O0 here so saw-spec-gen sees the original struct/field layout
-# rather than the post-optimization view.
 & $clang -S -emit-llvm -O0 -fno-rtti -target $llvmTarget $CppFile -o $llFile 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  warning: failed to emit .ll (continuing without struct-size resolution)" -ForegroundColor Yellow
@@ -132,30 +124,14 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "  → $llFile" -ForegroundColor Green
 }
 
-# ── Step 1.5: Patch the -O1 bitcode for SAW/Crucible quirks ───────────────────
-# Disassemble the -O1 .bc, run textual patches, reassemble.  This
-# preserves clang's -O1 optimisation choices (which SAW handles well)
-# instead of clobbering the .bc with -O0 IR and re-optimising through
-# `opt -O1` (which can introduce LLVM intrinsics SAW doesn't support,
-# e.g. llvm.uadd.sat.i32, and adds nsw/nuw flags that cause false
-# DISPROVED verdicts).
-#
-# Patches applied:
-#   --poison-to-undef : replace `poison` literals with `undef`.
-#   --strip-nsw-nuw   : remove nsw/nuw flags that cause SAW to see poison.
-#   --strip-msvc-eh   : (MSVC only) drop exception-handling xdata globals.
-$llvmDis = Join-Path (Split-Path $llvmAs -Parent) 'llvm-dis'
-if (Test-Path $llvmDis) {
-    $patchedLl = Join-Path $OutputDir "${baseName}_patched.ll"
-    & $llvmDis $bcFile -o $patchedLl 2>&1
-    if ($LASTEXITCODE -ne 0) { Write-Error "llvm-dis failed"; exit 1 }
-
-    $patchArgs = @('patch-llvm-ir', '--input', $patchedLl, '--output', $patchedLl,
-                   '--poison-to-undef', '--strip-nsw-nuw')
-    if ($isMsvc) { $patchArgs += '--strip-msvc-eh' }
-    & $specGen @patchArgs 2>&1 | Write-Host
+# ── Step 1.5: Patch IR for SAW/Crucible quirks ────────────────────────────────
+# All passes are safe no-ops when their patterns are absent, so we run
+# unconditionally: strip-msvc-eh, poison-to-undef, strip-nsw-nuw, etc.
+if ($llFile) {
+    $patchedLl = $llFile  # in-place rewrite
+    & $specGen patch-llvm-ir --input $llFile --output $patchedLl 2>&1 | Write-Host
     if ($LASTEXITCODE -ne 0) { Write-Error "patch-llvm-ir failed"; exit 1 }
-
+    # Re-assemble the .bc so SAW sees the patched module.
     & $llvmAs $patchedLl -o $bcFile 2>&1
     if ($LASTEXITCODE -ne 0) { Write-Error "llvm-as (post-patch) failed"; exit 1 }
 }

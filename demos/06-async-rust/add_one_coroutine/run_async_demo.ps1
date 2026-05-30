@@ -106,8 +106,7 @@ if (-not $llvmAs) {
 }
 & $specGen patch-llvm-ir `
     --input  $llFile `
-    --output $llFile `
-    --poison-to-undef 2>&1 | Write-Host
+    --output $llFile 2>&1 | Write-Host
 if ($LASTEXITCODE -ne 0) { Write-Error "patch-llvm-ir failed"; exit 1 }
 & $llvmAs $llFile -o $bcFile 2>&1
 if ($LASTEXITCODE -ne 0) { Write-Error "llvm-as (post-patch) failed"; exit 1 }
