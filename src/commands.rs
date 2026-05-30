@@ -338,8 +338,9 @@ pub fn patch_llvm_ir_cmd(input: PathBuf, output: PathBuf) -> Result<()> {
     );
     let stats = patch_llvm_ir::patch_llvm_ir_file(&input, &output)?;
     eprintln!(
-        "  EH globals stripped: {}, poison→undef: {}, nsw/nuw stripped: {}, sat intrinsics expanded: {}",
+        "  EH globals stripped: {}, Itanium typeinfo stripped: {}, poison→undef: {}, nsw/nuw stripped: {}, sat intrinsics expanded: {}",
         stats.eh_globals_stripped,
+        stats.itanium_typeinfo_stripped,
         stats.poison_replaced,
         stats.nsw_nuw_stripped,
         stats.sat_intrinsics_expanded,
