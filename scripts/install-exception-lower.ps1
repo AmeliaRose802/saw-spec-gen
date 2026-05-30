@@ -27,7 +27,7 @@
 
 .PARAMETER ReleaseTag
     Which release of llvm-exception-lower to download prebuilt binaries
-    from (default: v0.2.0). The asset name is derived from the host
+    from (default: v0.3.0). The asset name is derived from the host
     platform: exception-lower-{platform}-{arch}.{ext} where {ext} is
     .zip on Windows and .tar.gz elsewhere.
 
