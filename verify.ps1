@@ -93,6 +93,11 @@ $llvmAs    = $tools.LlvmAs
 $saw       = $tools.Saw
 $llvmTarget= $tools.LlvmTarget   # e.g. x86_64-pc-windows-msvc / -unknown-linux-gnu
 $isMsvc    = $llvmTarget -match 'windows-msvc'
+# Host executable suffix for the counterexample probe (Step 5b). Without
+# this, Windows produces an extensionless file that PowerShell refuses to
+# run mid-pipeline ("Cannot run a document in the middle of a pipeline"),
+# turning every DISPROVED case into an EXCEPTION.
+$exeExt    = if ($IsWindows) { '.exe' } else { '' }
 
 # ── All artifacts go under $OutputDir ──────────────────────────────────────────
 $bcFile   = Join-Path $OutputDir "$baseName.bc"
