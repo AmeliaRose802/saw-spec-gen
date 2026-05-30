@@ -47,23 +47,23 @@ pwsh scripts/init.ps1            # or:  bash scripts/init.sh
 
 # Verify a C++ function against a Cryptol spec.
 ./verify.ps1 `
-    -CppFile     demos/01-tutorial/bounded_loop/add_one_verified.cpp `
-    -CryptolSpec demos/01-tutorial/bounded_loop/add_one_spec.cry `
+    -CppFile     tests/e2e/cases/01-tutorial/bounded_loop/add_one_verified.cpp `
+    -CryptolSpec tests/e2e/cases/01-tutorial/bounded_loop/add_one_spec.cry `
     -CryptolFn   add_one_spec `
     -Function    add_one
 
 # Same for Rust.
 ./verify-rust.ps1 `
-    -RustFile    demos/01-tutorial/bounded_loop/add_one_verified.rs `
-    -CryptolSpec demos/01-tutorial/bounded_loop/add_one_spec.cry `
+    -RustFile    tests/e2e/cases/01-tutorial/bounded_loop/add_one_verified.rs `
+    -CryptolSpec tests/e2e/cases/01-tutorial/bounded_loop/add_one_spec.cry `
     -CryptolFn   add_one_spec `
     -Function    add_one
 
 # Prove both implementations match the same spec (and so each other).
 ./verify-equiv.ps1 `
-    -CppFile     demos/02-havoc-coverage/nothing_sketchy/add_one_verified.cpp `
-    -RustFile    demos/02-havoc-coverage/nothing_sketchy/add_one_verified.rs `
-    -CryptolSpec demos/02-havoc-coverage/nothing_sketchy/add_one_spec.cry `
+    -CppFile     tests/e2e/cases/02-havoc-coverage/nothing_sketchy/add_one_verified.cpp `
+    -RustFile    tests/e2e/cases/02-havoc-coverage/nothing_sketchy/add_one_verified.rs `
+    -CryptolSpec tests/e2e/cases/02-havoc-coverage/nothing_sketchy/add_one_spec.cry `
     -CryptolFn   add_one_spec `
     -Function    add_one
 ```
@@ -221,18 +221,17 @@ per-method `*_havoc_spec.saw` for every virtual method, ready to
 
 ## Examples
 
-Working end-to-end demos live in [demos/](demos/), grouped by role:
+End-to-end tests live in [tests/e2e/cases/](tests/e2e/cases/), grouped by role:
 
 | Directory | What it shows |
 |---|---|
 | `01-tutorial/bounded_loop/` | The hello-world: prove `add_one`/`sum_first_n` in C++ and Rust against the same Cryptol spec |
 | `01-tutorial/csep590b_c04/` | Course-problem suite (clamp_sub, safe_mul, count_groups, make_change, isqrt) — buggy + fixed variants in both languages |
 | `02-havoc-coverage/` | One folder per hazard scenario (`pointer_aliasing`, `class_member_clobbered`, `throws_exception`, `ctor_stub_false_verdicts`, …); each holds the C++ and Rust `_verified`/`_disproved` pair plus a shared Cryptol spec, so you can diff languages on the same hazard |
-| `03-rust-trait-dispatch/` | Rust-only: `static_dispatch`, `dynamic_dispatch`, `external_crate`, `unknown_impl` — trait virtual calls and their override modelling |
+| `03-rust-trait-dispatch/` | Rust-only: `static_dispatch`, `dynamic_dispatch`, `external_crate` — trait virtual calls and their override modelling |
 | `04-cpp-rust-equivalence/` | True cross-language equivalence cases driven by `verify-equiv.ps1` (`compute_fee_reordered`, `sat_add_optimized`, `not_operator_trap`) |
 | `05-string-ops/has_null_byte/` | SWAR null-byte detection (real libc `strlen` bit-trick over a packed 64-bit word) |
-| `05-string-ops/count_digits/` | C-string + `std::string` variants, both verifying and counterexample-producing |
-| `06-async-rust/` | Verify a Rust `async fn` by targeting its coroutine `resume` symbol |
+| `05-string-ops/count_digits/` | C-string `count_digits` over `_In_reads_(8) const char*` — verifying and counterexample variants |
 | `99-research/rust_adversarial/` | "Sneaky" Rust patterns (interior mutability, raw aliasing, drop side effects, `unreachable_unchecked`, …) — every disproved case shows the harness catching what unit tests would miss |
 | `99-research/box_allocator/` | Known-`UNKNOWN` case (`Box::new` path the front-end can't model yet) |
 
@@ -262,22 +261,22 @@ emitter doesn't know which language the input came from.
 # Rust crate tests.
 cargo test --release
 
-# Full end-to-end SAW demo regressions (auto-skips if SAW not installed).
-pwsh tests/saw_demos/Run-SawDemos.ps1
+# Full end-to-end SAW test regressions (auto-skips if SAW not installed).
+pwsh tests/e2e/Run-E2ETests.ps1
 
 # Filter by tag.
-pwsh tests/saw_demos/Run-SawDemos.ps1 -Tag cpp_havoc,bounded_loop
+pwsh tests/e2e/Run-E2ETests.ps1 -Tag cpp_havoc,bounded_loop
 
 # Dry-run.
-pwsh tests/saw_demos/Run-SawDemos.ps1 -List
+pwsh tests/e2e/Run-E2ETests.ps1 -List
 ```
 
-Add new demos by appending entries to
-[tests/saw_demos/cases.psd1](tests/saw_demos/cases.psd1) — don't write
+Add new cases by appending entries to
+[tests/e2e/cases.psd1](tests/e2e/cases.psd1) — don't write
 bespoke runner scripts.
 
 The pre-commit hook (`git config core.hooksPath .githooks`) runs the
-line-count check and the demo suite. Skip the SAW portion with
+line-count check and the end-to-end test suite. Skip the SAW portion with
 `SKIP_SAW_TESTS=1` for a fast amend.
 
 ## Project rules

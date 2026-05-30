@@ -1,8 +1,8 @@
 name: Publish CI image
 
 # Builds and publishes the pre-baked toolchain image used by the Linux
-# saw-demos job in ci.yml. The image bundles SAW 1.5, LLVM 20.1.6,
-# PowerShell 7.6.2, and a stable Rust toolchain so the demo job skips
+# e2e-tests job in ci.yml. The image bundles SAW 1.5, LLVM 20.1.6,
+# PowerShell 7.6.2, and a stable Rust toolchain so the e2e-tests job skips
 # the ~1.2 GB install dance every run.
 #
 # Triggers:

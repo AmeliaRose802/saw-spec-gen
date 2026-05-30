@@ -42,8 +42,8 @@
     Output directory for all generated artifacts. Defaults to "out/" next to the .cpp file.
 
 .EXAMPLE
-    .\verify.ps1 -CppFile demos\01-tutorial\bounded_loop\add_one_verified.cpp -CryptolSpec demos\01-tutorial\bounded_loop\add_one_spec.cry -CryptolFn add_one_spec -Function add_one
-    .\verify.ps1 -CppFile demos\01-tutorial\bounded_loop\add_one_verified.cpp -CryptolSpec demos\01-tutorial\bounded_loop\add_one_spec.cry -CryptolFn add_one_spec -Function add_one -OutputDir my_output
+    .\verify.ps1 -CppFile tests\e2e\cases\01-tutorial\bounded_loop\add_one_verified.cpp -CryptolSpec tests\e2e\cases\01-tutorial\bounded_loop\add_one_spec.cry -CryptolFn add_one_spec -Function add_one
+    .\verify.ps1 -CppFile tests\e2e\cases\01-tutorial\bounded_loop\add_one_verified.cpp -CryptolSpec tests\e2e\cases\01-tutorial\bounded_loop\add_one_spec.cry -CryptolFn add_one_spec -Function add_one -OutputDir my_output
 #>
 
 param(
@@ -71,7 +71,7 @@ $OutputDir = Resolve-Path $OutputDir
 
 # ── Find tools ─────────────────────────────────────────────────────────────────
 # All tool discovery (clang, llvm-as, saw, z3, saw-spec-gen) lives in the
-# shared helper so verify.ps1 / verify-rust.ps1 / demo scripts agree on
+# shared helper so verify.ps1 / verify-rust.ps1 / end-to-end test scripts agree on
 # search order and cross-platform behaviour. The helper consults env
 # vars, ~/.saw-spec-gen/env.ps1, PATH, then platform-specific defaults.
 # Run scripts/init.ps1 (Windows) or scripts/init.sh (Linux/macOS) once
