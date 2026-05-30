@@ -87,7 +87,9 @@ RUN curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
       -o /etc/apt/trusted.gpg.d/llvm-snapshot.asc \
  && echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main" \
       >> /etc/apt/sources.list \
- && apt-get update && apt-get install -y --no-install-recommends llvm-18-dev \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+      llvm-18-dev zlib1g-dev libzstd-dev \
  && git clone --depth=1 --branch=v0.3.1 \
       https://github.com/AmeliaRose802/llvm-exception-lower.git /tmp/el-src \
  && mkdir /tmp/el-build && cd /tmp/el-build \
@@ -97,7 +99,7 @@ RUN curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
  && mkdir -p /root/.saw-spec-gen/exception-lower/bin \
  && cp -f /tmp/el-build/exception-lower /root/.saw-spec-gen/exception-lower/bin/ \
  && rm -rf /tmp/el-src /tmp/el-build \
- && apt-get purge -y llvm-18-dev && apt-get autoremove -y \
+ && apt-get purge -y llvm-18-dev zlib1g-dev libzstd-dev && apt-get autoremove -y \
  && rm -rf /var/lib/apt/lists/* \
  && /root/.saw-spec-gen/exception-lower/bin/exception-lower --help 2>&1 | head -1
 
