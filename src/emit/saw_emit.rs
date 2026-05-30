@@ -39,6 +39,12 @@ mod verify_script_steps;
 mod vtable_ir;
 mod writer;
 
+// Cross-emitter helpers (Cryptol/LLVM bridge) used by both this
+// module's C++ generator and the standalone Rust generator in
+// `crate::gen_verify_rust`. Public so the Rust path can reuse it
+// without a circular dep on `verify_script_steps`.
+pub mod cryptol_bridge;
+
 // Re-export the public surface that the rest of the crate depends on.
 // `allow(unused_imports)` is appropriate here because this is a binary
 // crate — not every re-export is consumed by `main.rs`, but the items

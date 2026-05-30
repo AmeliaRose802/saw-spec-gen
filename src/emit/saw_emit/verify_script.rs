@@ -136,6 +136,7 @@ pub fn emit_verification_script(
         &cryptol_args,
         &execute_args,
         sub_callee_specs,
+        &target_fn.return_type,
     );
 
     step += 1;

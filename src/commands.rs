@@ -9,8 +9,8 @@ use anyhow::Result;
 use std::path::PathBuf;
 
 use crate::{
-    clang_ast, constraints, cryptol_emit, gen_verify, llvm_ir, mir_json, patch_llvm_ir,
-    rust_trait_emit, saw_emit,
+    clang_ast, constraints, cryptol_emit, gen_verify, gen_verify_rust, llvm_ir, mir_json,
+    patch_llvm_ir, rust_trait_emit, saw_emit,
 };
 
 pub fn from_clang_ast(
@@ -306,6 +306,26 @@ pub fn gen_rust_trait_stubs(schema: PathBuf, output: PathBuf) -> Result<()> {
         output.display(),
     );
     Ok(())
+}
+
+/// Implementation of `gen-verify-rust`. See [`gen_verify_rust::run`]
+/// for the heavy lifting.
+pub fn gen_verify_rust_cmd(
+    llvm_ir: PathBuf,
+    bitcode: PathBuf,
+    cryptol_spec: PathBuf,
+    cryptol_fn: String,
+    function: String,
+    output: PathBuf,
+) -> Result<()> {
+    gen_verify_rust::run(
+        &llvm_ir,
+        &bitcode,
+        &cryptol_spec,
+        &cryptol_fn,
+        &function,
+        &output,
+    )
 }
 
 pub fn filter_ast(input: PathBuf, output: PathBuf, keep: Vec<PathBuf>) -> Result<()> {

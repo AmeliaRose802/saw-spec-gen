@@ -5,6 +5,7 @@
 //! function appends its corresponding chunk of SAWScript to the `out`
 //! buffer.
 
+use super::cryptol_bridge::{cryptol_arg_for, cryptol_return_for};
 use super::names::{sanitize_name, spec_safe_id, stub_function_name};
 use super::overrides::{container_layout_for, emit_container_this};
 use super::stubs::AssembledStubs;
@@ -232,7 +233,12 @@ pub(super) fn emit_equiv_spec_body(
                     param.name, param.name, param.saw_type,
                 ));
                 emit_param_preconditions(out, &param.preconditions);
-                cryptol_args.push(param.name.clone());
+                let arg_ty = target_fn
+                    .params
+                    .get(i)
+                    .map(|p| &p.ty)
+                    .unwrap_or(&TypeInfo::Void);
+                cryptol_args.push(cryptol_arg_for(&param.name, arg_ty));
                 execute_args.push(format!("llvm_term {}", param.name));
             }
             AllocType::AllocReadonly | AllocType::AllocMutable => {
@@ -255,7 +261,12 @@ pub(super) fn emit_equiv_spec_body(
                     "    llvm_points_to {ptr_name} (llvm_term {val_name});\n",
                 ));
                 emit_param_preconditions(out, &param.preconditions);
-                cryptol_args.push(val_name);
+                let arg_ty = target_fn
+                    .params
+                    .get(i)
+                    .map(|p| &p.ty)
+                    .unwrap_or(&TypeInfo::Void);
+                cryptol_args.push(cryptol_arg_for(&val_name, arg_ty));
                 execute_args.push(ptr_name);
             }
         }
@@ -290,6 +301,7 @@ pub(super) fn emit_postcondition_and_close(
     cryptol_args: &[String],
     execute_args: &[String],
     sub_callee_specs: &[SpecConstraint],
+    return_type: &TypeInfo,
 ) {
     out.push_str(&format!(
         "    llvm_execute_func [{}];\n\n",
@@ -300,11 +312,25 @@ pub(super) fn emit_postcondition_and_close(
     } else {
         format!("{} {}", cryptol_fn, cryptol_args.join(" "))
     };
-    if sub_callee_specs.is_empty() {
+    let cryptol_return = cryptol_return_for(&cryptol_call, return_type);
+    let is_void_return = matches!(return_type, TypeInfo::Void);
+    if is_void_return {
+        // Void-returning target: no `llvm_return` to emit. The harness
+        // still proves "no UB" (load module + execute), and any
+        // `_Out_` parameters require a hand-written
+        // `llvm_points_to <ptr> ...` postcondition — the auto-generator
+        // does not yet thread output-buffer values back through Cryptol
+        // (tracked separately; see tests/e2e/cases/09-type-coverage/void_out_inc).
+        out.push_str("    // Void return — no llvm_return to emit.\n");
+        out.push_str(&format!(
+            "    // (Cryptol spec `{}` is referenced for documentation only.)\n",
+            cryptol_return,
+        ));
+    } else if sub_callee_specs.is_empty() {
         out.push_str("    // Postcondition: C++ result == Cryptol spec\n");
         out.push_str(&format!(
             "    llvm_return (llvm_term {{{{ {} }}}});\n",
-            cryptol_call,
+            cryptol_return,
         ));
     } else {
         out.push_str("    // TODO: Compositional postcondition — fill in by hand.\n");
@@ -317,7 +343,7 @@ pub(super) fn emit_postcondition_and_close(
         out.push_str("    // the target's own parameters and is almost certainly incomplete.\n");
         out.push_str(&format!(
             "    llvm_return (llvm_term {{{{ {} }}}});  // <-- replace with full mapping\n",
-            cryptol_call,
+            cryptol_return,
         ));
     }
     out.push_str("};\n\n");
@@ -380,3 +406,7 @@ pub(super) fn emit_verify_step(
         "print \"=== VERIFIED: {function_name} == {cryptol_fn} ===\";\n",
     ));
 }
+
+#[cfg(test)]
+#[path = "verify_script_steps_tests.rs"]
+mod tests;

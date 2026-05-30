@@ -227,6 +227,53 @@ enum Commands {
         output: PathBuf,
     },
 
+    /// Generate a SAW verification script + meta sidecar that proves
+    /// a Rust function (compiled to LLVM bitcode) matches a Cryptol
+    /// spec. The Rust analog of `gen-verify`.
+    ///
+    /// Walks the disassembled IR for `--llvm-ir`, resolves the
+    /// mangled symbol whose name segment matches `--function`, builds
+    /// a `(iN, …) -> iN` SAWScript with the same Bit/`[1]` Cryptol
+    /// bridge the C++ generator uses, and writes:
+    ///
+    /// * `verify_rust.saw` — runnable SAW script
+    /// * `verify_rust.meta.json` — mangled name, arg bit widths,
+    ///   globals; consumed by `verify-rust.ps1` for counterexample
+    ///   pretty-printing.
+    ///
+    /// Usage: saw-spec-gen gen-verify-rust \
+    ///          --llvm-ir add_one.ll --bitcode add_one.bc \
+    ///          --cryptol-spec add_one_spec.cry --cryptol-fn add_one_spec \
+    ///          --function add_one --output out_rust_add_one/
+    GenVerifyRust {
+        /// Path to the disassembled LLVM IR (`.ll`) produced by
+        /// `llvm-dis` from the same bitcode passed to `--bitcode`.
+        #[arg(long = "llvm-ir")]
+        llvm_ir: PathBuf,
+
+        /// Path to the LLVM bitcode (`.bc`) the SAW script will
+        /// `llvm_load_module`.
+        #[arg(long)]
+        bitcode: PathBuf,
+
+        /// Cryptol spec file (`.cry`) copied next to the script.
+        #[arg(long = "cryptol-spec")]
+        cryptol_spec: PathBuf,
+
+        /// Name of the Cryptol function to verify the Rust fn against.
+        #[arg(long = "cryptol-fn")]
+        cryptol_fn: String,
+
+        /// Source-level Rust function name (e.g. `add_one`).
+        #[arg(long)]
+        function: String,
+
+        /// Output directory for `verify_rust.saw`,
+        /// `verify_rust.meta.json`, and the copied Cryptol spec.
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+
     /// Strip system-header decls from a clang AST dump.
     ///
     /// Reads `--input` JSON, drops every top-level declaration whose
@@ -408,6 +455,21 @@ fn main() -> Result<()> {
         Commands::GenRustTraitStubs { schema, output } => {
             commands::gen_rust_trait_stubs(schema, output)
         }
+        Commands::GenVerifyRust {
+            llvm_ir,
+            bitcode,
+            cryptol_spec,
+            cryptol_fn,
+            function,
+            output,
+        } => commands::gen_verify_rust_cmd(
+            llvm_ir,
+            bitcode,
+            cryptol_spec,
+            cryptol_fn,
+            function,
+            output,
+        ),
         Commands::FilterAst {
             input,
             output,
