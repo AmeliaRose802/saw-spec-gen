@@ -54,6 +54,25 @@ pub fn load_optional(path: Option<&Path>) -> Result<(HashMap<String, usize>, Vec
     Ok((sizes, funcs))
 }
 
+/// Read the first ~50 lines of an `.ll` text file looking for a
+/// `target triple = "..."` directive and return its value. Returns
+/// `None` when the file is missing, the directive isn't present in the
+/// header, or quoting is malformed.
+pub fn read_target_triple(ll_path: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(ll_path).ok()?;
+    for line in text.lines().take(50) {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("target triple") {
+            let after_eq = rest.split_once('=').map(|(_, r)| r.trim())?;
+            let unquoted = after_eq.trim_matches('"');
+            if !unquoted.is_empty() {
+                return Some(unquoted.to_string());
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

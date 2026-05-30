@@ -111,6 +111,7 @@ fn emit_clang_ast_stubs(
         &classes_with_vdtor,
         output,
         None,
+        None,
     )?;
     eprintln!(
         "Generated {} interface stubs in {}",
@@ -329,39 +330,19 @@ pub fn filter_ast(input: PathBuf, output: PathBuf, keep: Vec<PathBuf>) -> Result
     Ok(())
 }
 
-pub fn patch_llvm_ir_cmd(
-    input: PathBuf,
-    output: PathBuf,
-    strip_msvc_eh: bool,
-    poison_to_undef: bool,
-) -> Result<()> {
-    if !strip_msvc_eh && !poison_to_undef {
-        anyhow::bail!(
-            "patch-llvm-ir: pass at least one of \
-             --strip-msvc-eh / --poison-to-undef",
-        );
-    }
+pub fn patch_llvm_ir_cmd(input: PathBuf, output: PathBuf) -> Result<()> {
     eprintln!(
         "Patching LLVM IR: {} -> {}",
         input.display(),
         output.display(),
     );
-    let opts = patch_llvm_ir::PatchOptions {
-        strip_msvc_eh,
-        poison_to_undef,
-    };
-    let stats = patch_llvm_ir::patch_llvm_ir_file(&input, &output, opts)?;
-    if strip_msvc_eh {
-        eprintln!(
-            "  stripped {} MSVC EH metadata global(s)",
-            stats.eh_globals_stripped,
-        );
-    }
-    if poison_to_undef {
-        eprintln!(
-            "  replaced {} poison literal(s) with undef",
-            stats.poison_replaced,
-        );
-    }
+    let stats = patch_llvm_ir::patch_llvm_ir_file(&input, &output)?;
+    eprintln!(
+        "  EH globals stripped: {}, poison→undef: {}, nsw/nuw stripped: {}, sat intrinsics expanded: {}",
+        stats.eh_globals_stripped,
+        stats.poison_replaced,
+        stats.nsw_nuw_stripped,
+        stats.sat_intrinsics_expanded,
+    );
     Ok(())
 }

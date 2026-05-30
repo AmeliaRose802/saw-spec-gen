@@ -3,7 +3,18 @@
 //! For each polymorphic class found by the AST walker we emit:
 //!
 //! * one LLVM IR stub function per *originating* virtual method, and
-//! * a `@class_vtable` global whose slots point at those stubs.
+//! * a `@class_vtable` global whose slots point at those stubs
+//!   (referenced by the per-class `alloc_<class>_this` helper in
+//!   `interface_overrides.saw`), and
+//! * on Itanium-ABI targets (Linux / macOS / *BSD), an *additional*
+//!   `@_ZTV<mangled>` global with the Itanium leader-slot layout
+//!   (`[null offset-to-top, null RTTI, stub1, stub2, ...]`) and
+//!   `linkonce_odr` linkage. When the stub bitcode is linked into the
+//!   compiled C++ bitcode via `llvm-link --override`, this global
+//!   *replaces* the compiler-emitted vtable. Constructors that
+//!   compute `this->vptr = _ZTV<C> + 16` therefore land on stub
+//!   function pointers, and SAW's virtual dispatch resolves to the
+//!   havoc spec instead of the real method body.
 //!
 //! Derived classes whose methods carry `OverrideAttr` reuse the
 //! originating class's stub — every level of the hierarchy stores
@@ -18,9 +29,7 @@
 use super::havoc::generate_havoc_spec;
 use super::names::sanitize_name;
 use super::overrides::generate_override_index_with_vtable;
-use super::types::{
-    ir_default_return, method_param_ir_pieces, sret_inner_ir_type, type_to_llvm_ir,
-};
+use super::vtable_ir::generate_llvm_ir_stubs;
 use crate::clang_ast::{ClassConstructor, InterfaceMethod};
 use crate::constraints::GlobalVarInfo;
 use anyhow::{Context, Result};
@@ -34,6 +43,11 @@ use std::path::Path;
 /// - `vtable_stubs.ll`: stubs + concrete vtable globals (LLVM text IR).
 /// - `<class>_<method>_havoc_spec.saw`: one havoc spec per originating method.
 /// - `interface_overrides.saw`: override bindings + per-class `alloc_<class>_this`.
+///
+/// `target_triple` is the `target triple = "..."` string from the
+/// compiled C++ bitcode (None ⇒ assume MSVC). It selects the vtable
+/// ABI layout — Itanium emits additional `_ZTV<mangled>` globals that
+/// override the compiler's vtables; see the module-level docs.
 pub fn emit_interface_stubs(
     methods: &[InterfaceMethod],
     constructors: &[ClassConstructor],
@@ -41,6 +55,7 @@ pub fn emit_interface_stubs(
     classes_with_vdtor: &HashSet<String>,
     output_dir: &Path,
     cryptol_fn: Option<&str>,
+    target_triple: Option<&str>,
 ) -> Result<()> {
     if methods.is_empty() {
         return Ok(());
@@ -64,7 +79,7 @@ pub fn emit_interface_stubs(
 
     // Write the LLVM IR stub file (no C compiler needed).
     let ll_path = output_dir.join("vtable_stubs.ll");
-    let ll_content = generate_llvm_ir_stubs(&by_class, classes_with_vdtor);
+    let ll_content = generate_llvm_ir_stubs(&by_class, classes_with_vdtor, target_triple);
     fs::write(&ll_path, &ll_content)
         .with_context(|| format!("Failed to write {}", ll_path.display()))?;
 
@@ -175,7 +190,18 @@ pub fn link_stubs_with_main(
     let combined_path = output_dir.join(combined_filename);
     let candidates: &[&str] = &["llvm-link", "llvm-link.exe"];
     for cmd in candidates {
+        // `--override=<stubs.bc>` tells llvm-link to take the
+        // definitions of any symbols present in the stub bitcode as
+        // canonical, overriding the same-named symbols in the main
+        // bitcode. This is what makes the Itanium-ABI `_ZTV<C>`
+        // override actually win over the compiler-emitted vtable —
+        // without it, llvm-link sees both as `linkonce_odr` and is
+        // free to pick either. For MSVC-shaped stubs (which use
+        // disjoint symbol names like `@<class>_vtable`) the flag is a
+        // harmless no-op.
+        let override_arg = format!("--override={}", stubs_bc_path.display());
         match std::process::Command::new(cmd)
+            .arg(&override_arg)
             .arg(main_bitcode)
             .arg(&stubs_bc_path)
             .arg("-o")
@@ -236,148 +262,6 @@ impl AssembledStubs {
     }
 }
 
-/// Generate the LLVM IR text (`vtable_stubs.ll`) with stub functions and
-/// concrete vtable globals for every class in `by_class`.
-pub fn generate_llvm_ir_stubs(
-    by_class: &BTreeMap<String, Vec<&InterfaceMethod>>,
-    classes_with_vdtor: &HashSet<String>,
-) -> String {
-    let originating = compute_originating_classes(by_class);
-    let resolve_stub_class = |m: &InterfaceMethod| -> String {
-        if m.is_override {
-            originating
-                .get(&m.method.name)
-                .cloned()
-                .unwrap_or_else(|| m.class_name.clone())
-        } else {
-            m.class_name.clone()
-        }
-    };
-    let stub_name_for = |m: &InterfaceMethod| -> String {
-        let cls = resolve_stub_class(m);
-        format!(
-            "{}_{}_stub",
-            sanitize_name(&cls).to_lowercase(),
-            sanitize_name(&m.method.name).to_lowercase(),
-        )
-    };
-
-    let mut out = String::new();
-    out.push_str("; Auto-generated vtable stubs for SAW verification\n");
-    out.push_str("; Load directly: m_stubs <- llvm_load_module \"vtable_stubs.ll\";\n");
-    out.push_str("; Or assemble:   llvm-as vtable_stubs.ll -o vtable_stubs.bc\n");
-    out.push_str(";\n");
-    out.push_str("; SAW resolves indirect vtable calls through these:\n");
-    out.push_str(";   this->vptr -> vtable[slot] -> stub function -> havoc spec\n\n");
-    out.push_str("target datalayout = \"e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"\n");
-    out.push_str("target triple = \"x86_64-pc-windows-msvc\"\n\n");
-
-    for (class_name, class_methods) in by_class {
-        let safe_class = sanitize_name(class_name).to_lowercase();
-        let has_vdtor = classes_with_vdtor.contains(class_name.as_str());
-
-        out.push_str(&format!("; ---- {class_name} vtable ----\n\n"));
-
-        // MSVC ABI: a single deleting-destructor slot when the class has
-        // a virtual dtor. Itanium would carry a pair (complete + deleting);
-        // matching the wrong ABI shifts every method slot by one.
-        if has_vdtor {
-            out.push_str(&format!(
-                "define void @{safe_class}_deleting_dtor_stub(ptr %self, i32 %flags) {{\n  ret void\n}}\n\n"
-            ));
-        }
-
-        for method in class_methods {
-            if method.is_override {
-                continue;
-            }
-            emit_stub_for_method(&mut out, class_name, &stub_name_for(method), method);
-        }
-
-        let dtor_slots = if has_vdtor { 1 } else { 0 };
-        let slot_count = class_methods.len() + dtor_slots;
-        out.push_str(&format!("; Concrete vtable for {class_name}\n"));
-        out.push_str(&format!(
-            "@{safe_class}_vtable = global [{slot_count} x ptr] [\n"
-        ));
-        let mut first = true;
-        if has_vdtor {
-            out.push_str(&format!("  ptr @{safe_class}_deleting_dtor_stub"));
-            first = false;
-        }
-        for method in class_methods {
-            let stub_name = stub_name_for(method);
-            if first {
-                out.push_str(&format!("  ptr @{stub_name}"));
-                first = false;
-            } else {
-                out.push_str(&format!(",\n  ptr @{stub_name}"));
-            }
-        }
-        out.push_str("\n]\n\n");
-    }
-    out
-}
-
-/// Build `method_name → originating_class` for use when redirecting
-/// override vtable slots.
-fn compute_originating_classes(
-    by_class: &BTreeMap<String, Vec<&InterfaceMethod>>,
-) -> HashMap<String, String> {
-    let mut originating: HashMap<String, String> = HashMap::new();
-    for methods in by_class.values() {
-        for m in methods {
-            if !m.is_override {
-                originating
-                    .entry(m.method.name.clone())
-                    .or_insert_with(|| m.class_name.clone());
-            }
-        }
-    }
-    originating
-}
-
-/// Emit one stub function definition. Handles MSVC ABI sret lowering
-/// for aggregate returns (the sret pointer is inserted at index 1,
-/// right after the implicit `this`).
-fn emit_stub_for_method(
-    out: &mut String,
-    class_name: &str,
-    stub_name: &str,
-    method: &InterfaceMethod,
-) {
-    let param_strs = method_param_ir_pieces(&method.method);
-    let (ret_ir, params_ir) = match sret_inner_ir_type(&method.method.return_type) {
-        Some(inner) => {
-            let mut parts: Vec<String> = Vec::new();
-            if let Some(this_p) = param_strs.first() {
-                parts.push(this_p.clone());
-            }
-            parts.push(format!("ptr sret({inner}) %retptr"));
-            for p in param_strs.iter().skip(1) {
-                parts.push(p.clone());
-            }
-            ("void".to_string(), parts.join(", "))
-        }
-        None => (
-            type_to_llvm_ir(&method.method.return_type),
-            param_strs.join(", "),
-        ),
-    };
-    out.push_str(&format!(
-        "; {class_name}::{} [{}]\n",
-        method.method.name,
-        if method.is_pure {
-            "pure virtual"
-        } else {
-            "virtual"
-        },
-    ));
-    out.push_str(&format!("define {ret_ir} @{stub_name}({params_ir}) {{\n"));
-    out.push_str(&format!("  {}\n", ir_default_return(&ret_ir)));
-    out.push_str("}\n\n");
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -424,7 +308,7 @@ mod tests {
         ];
         let dir = std::env::temp_dir().join("saw_spec_gen_vtable_order");
         let _ = fs::remove_dir_all(&dir);
-        emit_interface_stubs(&methods, &[], &[], &HashSet::new(), &dir, None).unwrap();
+        emit_interface_stubs(&methods, &[], &[], &HashSet::new(), &dir, None, None).unwrap();
         let ll = fs::read_to_string(dir.join("vtable_stubs.ll")).unwrap();
         let vtable_section = ll.split("@irv_vtable").nth(1).expect("vtable missing");
         let valid_pos = vtable_section
@@ -447,7 +331,7 @@ mod tests {
         let methods = vec![make_iface_method("IKeyStore", "Read", large, 100)];
         let dir = std::env::temp_dir().join("saw_spec_gen_vtable_sret");
         let _ = fs::remove_dir_all(&dir);
-        emit_interface_stubs(&methods, &[], &[], &HashSet::new(), &dir, None).unwrap();
+        emit_interface_stubs(&methods, &[], &[], &HashSet::new(), &dir, None, None).unwrap();
         let ll = fs::read_to_string(dir.join("vtable_stubs.ll")).unwrap();
         let stub_line = ll
             .lines()
@@ -469,7 +353,7 @@ mod tests {
         )];
         let dir = std::env::temp_dir().join("saw_spec_gen_vtable_no_sret");
         let _ = fs::remove_dir_all(&dir);
-        emit_interface_stubs(&methods, &[], &[], &HashSet::new(), &dir, None).unwrap();
+        emit_interface_stubs(&methods, &[], &[], &HashSet::new(), &dir, None, None).unwrap();
         let ll = fs::read_to_string(dir.join("vtable_stubs.ll")).unwrap();
         let stub_line = ll
             .lines()
@@ -489,7 +373,7 @@ mod tests {
         let methods = vec![make_iface_method("IKeyStore", "Read", tuple_ret, 100)];
         let dir = std::env::temp_dir().join("saw_spec_gen_vtable_sret_unsized");
         let _ = fs::remove_dir_all(&dir);
-        emit_interface_stubs(&methods, &[], &[], &HashSet::new(), &dir, None).unwrap();
+        emit_interface_stubs(&methods, &[], &[], &HashSet::new(), &dir, None, None).unwrap();
         let ll = fs::read_to_string(dir.join("vtable_stubs.ll")).unwrap();
         let stub_line = ll
             .lines()
@@ -510,7 +394,7 @@ mod tests {
         let methods = vec![make_iface_method("IKeyStore", "Read", large, 100)];
         let dir = std::env::temp_dir().join("saw_spec_gen_vtable_sret_order");
         let _ = fs::remove_dir_all(&dir);
-        emit_interface_stubs(&methods, &[], &[], &HashSet::new(), &dir, None).unwrap();
+        emit_interface_stubs(&methods, &[], &[], &HashSet::new(), &dir, None, None).unwrap();
         let ll = fs::read_to_string(dir.join("vtable_stubs.ll")).unwrap();
         let stub_line = ll
             .lines()

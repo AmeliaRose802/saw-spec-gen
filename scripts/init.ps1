@@ -128,15 +128,14 @@ Write-Host "  cargo: $cargo" -ForegroundColor Green
 
 # ── Step 2: build saw-spec-gen ────────────────────────────────────────────
 Write-Step 'Step 2: cargo build --release'
-$specGenPath = Join-Path $RepoRoot ("target/release/saw-spec-gen" + $(if ($platform -eq 'Windows') { '.exe' } else { '' }))
-if ((Test-Path -LiteralPath $specGenPath) -and (-not $Force)) {
-    Write-Host "  already built: $specGenPath" -ForegroundColor DarkGreen
-} else {
-    Push-Location $RepoRoot
-    try { & cargo build --release } finally { Pop-Location }
-    if ($LASTEXITCODE -ne 0) { Write-Error 'cargo build failed'; exit 1 }
-    Write-Host "  built: $specGenPath" -ForegroundColor Green
-}
+# Build-SawSpecGen rebuilds when the binary is missing OR stale (any Rust
+# source newer than the binary). This matters in CI, where the `target/`
+# cache can restore an out-of-date saw-spec-gen from a previous commit —
+# a plain Test-Path "already built" check would silently keep the stale
+# binary and surface as spurious end-to-end EXCEPTIONs (e.g. an outdated
+# `patch-llvm-ir`). cargo's own fingerprinting makes the no-op case cheap.
+$specGenPath = Build-SawSpecGen -RepoRoot $RepoRoot
+Write-Host "  built: $specGenPath" -ForegroundColor Green
 
 # ── Step 3: clang / llvm tools ────────────────────────────────────────────
 Write-Step 'Step 3: clang + llvm-as'

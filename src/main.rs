@@ -277,8 +277,7 @@ enum Commands {
     /// Pipeline: `clang -S -emit-llvm` -> `patch-llvm-ir` ->
     /// `llvm-as` -> SAW.
     ///
-    /// Usage: saw-spec-gen patch-llvm-ir --input in.ll --output out.ll \
-    ///          --strip-msvc-eh --poison-to-undef
+    /// Usage: saw-spec-gen patch-llvm-ir --input in.ll --output out.ll
     PatchLlvmIr {
         /// Input `.ll` file.
         #[arg(long)]
@@ -287,14 +286,6 @@ enum Commands {
         /// Output `.ll` file. May be the same path as `--input`.
         #[arg(long)]
         output: PathBuf,
-
-        /// Strip MSVC C++ EH metadata globals.
-        #[arg(long)]
-        strip_msvc_eh: bool,
-
-        /// Replace `poison` literals with `undef`.
-        #[arg(long)]
-        poison_to_undef: bool,
     },
 }
 
@@ -356,11 +347,6 @@ fn main() -> Result<()> {
             output,
             keep,
         } => commands::filter_ast(input, output, keep),
-        Commands::PatchLlvmIr {
-            input,
-            output,
-            strip_msvc_eh,
-            poison_to_undef,
-        } => commands::patch_llvm_ir_cmd(input, output, strip_msvc_eh, poison_to_undef),
+        Commands::PatchLlvmIr { input, output } => commands::patch_llvm_ir_cmd(input, output),
     }
 }
