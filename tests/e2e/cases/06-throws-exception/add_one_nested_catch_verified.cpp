@@ -1,10 +1,17 @@
 // DEMO: nested try/catch — inner catch swallows, outer never fires.
 //
-// A helper throws on `x == 42`. The inner try/catch catches `int`
-// and swallows it (volatile write, then falls through). The outer
-// try/catch catches `...` (catch-all) and would return 0, but it is
-// never reached because the inner catch already handled the
-// exception.
+// An inline throw fires on `x == 42`. The inner try/catch catches
+// `BadInput` and swallows it (volatile write, then falls through).
+// The outer try/catch catches `...` (catch-all) and would return 0,
+// but it is never reached because the inner catch already handled
+// the exception.
+//
+// The throw is inline (not in a helper) because exception-lower's
+// per-function error-flag mechanism does not propagate across call
+// boundaries when SAW executes the callee inline. The exception
+// type is a struct (not `int`) so that the typeinfo is defined
+// in-module, avoiding SAW's limitation with external typeinfo
+// symbols like `@_ZTIi`.
 //
 // For all inputs the function returns `x + 1`:
 //   * x != 42 → no throw, straight to `return x + 1`.
@@ -19,20 +26,17 @@
 
 #include <cstdint>
 
-static volatile uint32_t g_inner_observed;
+struct BadInput {};
 
-static uint32_t maybe_throw(uint32_t x) {
-    if (x == 42u) {
-        throw 1;
-    }
-    return 0;
-}
+static volatile uint32_t g_inner_observed;
 
 uint32_t add_one(uint32_t x) {
     try {
         try {
-            (void)maybe_throw(x);
-        } catch (int) {
+            if (x == 42u) {
+                throw BadInput{};
+            }
+        } catch (const BadInput&) {
             // Inner catch swallows the exception harmlessly.
             g_inner_observed = x;
         }

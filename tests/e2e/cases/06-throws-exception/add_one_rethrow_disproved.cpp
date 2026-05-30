@@ -1,7 +1,12 @@
 // DEMO: catch-and-rethrow — the exception escapes the function.
 //
-// The throw is inline (not in a helper), so after the exception-lower
-// pass the error-flag branch is visible to SAW in `add_one` itself.
+// The throw is inline (not in a helper) because exception-lower's
+// per-function error-flag mechanism does not propagate across call
+// boundaries when SAW executes the callee inline.  The exception
+// type is a struct (not `int`) so that the typeinfo is defined
+// in-module, avoiding SAW's limitation with external typeinfo
+// symbols like `@_ZTIi`.
+//
 // The catch arm clears the flag, logs a side-effect, then re-throws
 // with `throw;` — which sets the error flag again and returns a
 // sentinel. The re-throw path returns `0` (not `x + 1`), so SAW
@@ -15,14 +20,16 @@
 
 #include <cstdint>
 
+struct BadInput {};
+
 static volatile uint32_t g_rethrow_observed;
 
 uint32_t add_one(uint32_t x) {
     try {
         if (x == 42u) {
-            throw 1;
+            throw BadInput{};
         }
-    } catch (int) {
+    } catch (const BadInput&) {
         // Log an observable, then re-throw — exception escapes.
         g_rethrow_observed = x;
         throw;

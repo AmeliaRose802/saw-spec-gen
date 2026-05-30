@@ -96,6 +96,12 @@ pub fn run(
         llvm_ir_path.is_some(),
     );
 
+    // If the LLVM IR contains exception-lower globals (@__exclow_error_*),
+    // inject them into the target spec so that SAW allocates them.
+    if let Some(ir_path) = llvm_ir_path {
+        inject_exclow_globals(&mut target_spec, ir_path);
+    }
+
     let all_globals = clang_ast::extract_all_globals(&parsed_ast)?;
     let all_specs = constraints::derive_constraints(&all_functions)?;
 
@@ -465,4 +471,53 @@ pub fn run(
     eprintln!("Generated verification script in {}", output.display());
     eprintln!("Run with: saw {}/verify.saw", output.display());
     Ok(())
+}
+
+/// Scan the lowered LLVM IR for exception-lower globals and add them to
+/// the target spec so SAW can allocate them. The exception-lower pass
+/// synthesises `@__exclow_error_flag`, `@__exclow_error_typeinfo`, and
+/// `@__exclow_error_value` — none of which appear in the clang AST.
+fn inject_exclow_globals(spec: &mut constraints::SpecConstraint, ir_path: &Path) {
+    use crate::constraints::types::{GlobalVarInfo, TypeInfo};
+
+    let text = match std::fs::read_to_string(ir_path) {
+        Ok(t) => t,
+        Err(_) => return,
+    };
+
+    // Quick check: if the flag global isn't present, there's nothing to do.
+    if !text.contains("@__exclow_error_flag") {
+        return;
+    }
+
+    let exclow_globals = [
+        GlobalVarInfo {
+            name: "__exclow_error_flag".into(),
+            mangled_name: "__exclow_error_flag".into(),
+            ty: TypeInfo::Bool,
+            init_value: Some("0".into()),
+        },
+        GlobalVarInfo {
+            name: "__exclow_error_typeinfo".into(),
+            mangled_name: "__exclow_error_typeinfo".into(),
+            ty: TypeInfo::Pointer(Box::new(TypeInfo::UnsignedInt(8))),
+            init_value: None,
+        },
+        GlobalVarInfo {
+            name: "__exclow_error_value".into(),
+            mangled_name: "__exclow_error_value".into(),
+            ty: TypeInfo::Pointer(Box::new(TypeInfo::UnsignedInt(8))),
+            init_value: None,
+        },
+    ];
+
+    for g in exclow_globals {
+        if !spec
+            .referenced_globals
+            .iter()
+            .any(|existing| existing.mangled_name == g.mangled_name)
+        {
+            spec.referenced_globals.push(g);
+        }
+    }
 }
