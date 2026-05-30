@@ -33,10 +33,8 @@
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/nothing_sketchy';            File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
         # SAW executes OkLog::log() inline — concrete body is safe -> VERIFIED.
         # SusLog::log() clobbers a global -> DISPROVED.
-        # Skip on Windows: MSVC inlines printf → __stdio_common_vfprintf, which
-        # SAW cannot handle ("Failed to load function handle").
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/concrete_type_safe';         File = 'add_one_verified.cpp';                   Expected = 'VERIFIED';  SkipOn = 'Windows' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/concrete_type_safe';         File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED'; SkipOn = 'Windows' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/concrete_type_safe';         File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/concrete_type_safe';         File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/class_member_clobbered';     File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/class_member_clobbered';     File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/global_memory_clobbered';    File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
@@ -61,11 +59,10 @@
         # C++ exception lowering: total Cryptol spec, partial impl.
         @{ Tag = 'cpp_throws'; Runner = 'cpp'; Dir = 'tests/e2e/cases/06-throws-exception';           File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
         @{ Tag = 'cpp_throws'; Runner = 'cpp'; Dir = 'tests/e2e/cases/06-throws-exception';           File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
-        # Skip on Windows: exception-lower cannot be built on CI (missing DIA SDK).
-        @{ Tag = 'cpp_throws'; Runner = 'cpp'; Dir = 'tests/e2e/cases/06-throws-exception';           File = 'add_one_throws_caught_verified.cpp';     Expected = 'VERIFIED';  SkipOn = 'Windows' }
-        @{ Tag = 'cpp_throws'; Runner = 'cpp'; Dir = 'tests/e2e/cases/06-throws-exception';           File = 'add_one_multi_catch_disproved.cpp';      Expected = 'DISPROVED'; SkipOn = 'Windows' }
-        @{ Tag = 'cpp_throws'; Runner = 'cpp'; Dir = 'tests/e2e/cases/06-throws-exception';           File = 'add_one_rethrow_disproved.cpp';          Expected = 'DISPROVED'; SkipOn = 'Windows' }
-        @{ Tag = 'cpp_throws'; Runner = 'cpp'; Dir = 'tests/e2e/cases/06-throws-exception';           File = 'add_one_nested_catch_verified.cpp';      Expected = 'VERIFIED';  SkipOn = 'Windows' }
+        @{ Tag = 'cpp_throws'; Runner = 'cpp'; Dir = 'tests/e2e/cases/06-throws-exception';           File = 'add_one_throws_caught_verified.cpp';     Expected = 'VERIFIED' }
+        @{ Tag = 'cpp_throws'; Runner = 'cpp'; Dir = 'tests/e2e/cases/06-throws-exception';           File = 'add_one_multi_catch_disproved.cpp';      Expected = 'DISPROVED' }
+        @{ Tag = 'cpp_throws'; Runner = 'cpp'; Dir = 'tests/e2e/cases/06-throws-exception';           File = 'add_one_rethrow_disproved.cpp';          Expected = 'DISPROVED' }
+        @{ Tag = 'cpp_throws'; Runner = 'cpp'; Dir = 'tests/e2e/cases/06-throws-exception';           File = 'add_one_nested_catch_verified.cpp';      Expected = 'VERIFIED' }
 
         # ── Rust havoc tests (verify-rust.ps1) ──────────────────────────────
         # Note: Rust has no havoc model in this verifier path — every
