@@ -1,0 +1,4 @@
+module bump_spec where
+
+bump_spec : [32] -> [32]
+bump_spec x = x + 1

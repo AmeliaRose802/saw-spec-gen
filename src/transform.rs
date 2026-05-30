@@ -4,6 +4,8 @@
 
 pub mod alias_fallbacks;
 pub mod alias_fallbacks_ir;
+pub mod eh_globals;
+pub mod extern_override_scan;
 pub mod patch_llvm_ir;
 pub mod spec_rewrite;
 pub mod type_resolve;

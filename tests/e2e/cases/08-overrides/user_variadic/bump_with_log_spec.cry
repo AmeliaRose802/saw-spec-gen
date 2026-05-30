@@ -1,0 +1,8 @@
+// Cryptol spec for bump_with_log: identical semantics to bump.cpp's
+// pure return value. The user_log call has observable side effects
+// (touches the va_list, returns its first vararg) but the C++ caller
+// discards its return value, so the post-condition is just `x + 1`.
+module bump_with_log_spec where
+
+bump_with_log_spec : [32] -> [32]
+bump_with_log_spec x = x + 1

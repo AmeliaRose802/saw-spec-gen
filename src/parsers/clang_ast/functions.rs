@@ -162,13 +162,28 @@ pub fn parse_function_decl(
     let return_type = parse_return_type(&qual_type, ctx);
     let is_virtual = node.r#virtual == Some(true);
     let has_body = node.inner.iter().any(|c| c.kind == "CompoundStmt");
-    let is_system = node
-        .loc
-        .as_ref()
-        .and_then(|l| l.included_from.as_deref())
-        .and_then(|i| i.file.as_deref())
-        .map(is_system_include_path)
-        .unwrap_or(false);
+    let is_system = {
+        let loc = node.loc.as_ref();
+        // Check includedFrom.file first (standard case on Linux),
+        // then fall back to loc.file (some clang versions put the
+        // path there instead).
+        let from_include = loc
+            .and_then(|l| l.included_from.as_deref())
+            .and_then(|i| i.file.as_deref())
+            .map(is_system_include_path);
+        let from_file = loc
+            .and_then(|l| l.file.as_deref())
+            .map(is_system_include_path);
+        match from_include.or(from_file) {
+            Some(v) => v,
+            // No source-file path at all: compiler built-in or
+            // implicit declaration (common when cross-compiling for
+            // MSVC on Linux where SDK headers are absent). Treat
+            // body-less declarations as system functions so their
+            // havoc specs don't clobber user globals.
+            None => !has_body,
+        }
+    };
 
     Some(FunctionInfo {
         name,

@@ -76,7 +76,17 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
 # Tools on PATH for any shell (bash, pwsh, ...). discover-tools.ps1 also
 # probes $HOME/.saw-spec-gen/{llvm,saw}/bin explicitly so this is belt-
 # and-braces.
-ENV PATH=/root/.saw-spec-gen/llvm/bin:/root/.saw-spec-gen/saw/bin:/usr/local/cargo/bin:${PATH}
+ENV PATH=/root/.saw-spec-gen/llvm/bin:/root/.saw-spec-gen/saw/bin:/root/.saw-spec-gen/exception-lower/bin:/usr/local/cargo/bin:${PATH}
+
+# ── llvm-exception-lower (C++ throw/catch lowering for SAW) ───────────
+# Download the prebuilt Linux binary from the release.
+RUN mkdir -p /root/.saw-spec-gen/exception-lower/bin \
+ && curl -fsSL -o /tmp/el.tar.gz \
+      "https://github.com/AmeliaRose802/llvm-exception-lower/releases/download/v0.3.1/exception-lower-linux-x64.tar.gz" \
+ && tar -xzf /tmp/el.tar.gz -C /root/.saw-spec-gen/exception-lower/bin/ --strip-components=1 \
+ && rm -f /tmp/el.tar.gz \
+ && chmod +x /root/.saw-spec-gen/exception-lower/bin/exception-lower \
+ && /root/.saw-spec-gen/exception-lower/bin/exception-lower --help 2>&1 | head -1
 
 LABEL org.opencontainers.image.source="https://github.com/AmeliaRose802/saw-spec-gen" \
       org.opencontainers.image.description="saw-spec-gen CI toolchain: SAW ${SAW_VERSION}, LLVM ${LLVM_VERSION}, PowerShell ${PWSH_VERSION}, Rust ${RUST_TOOLCHAIN}" \

@@ -90,7 +90,9 @@ Add-SolverDirToPath -Tools $tools
 
 $clang     = $tools.Clang
 $llvmAs    = $tools.LlvmAs
+$llvmDis   = $tools.LlvmDis
 $saw       = $tools.Saw
+$exceptionLower = $tools.ExceptionLower
 $llvmTarget= $tools.LlvmTarget   # e.g. x86_64-pc-windows-msvc / -unknown-linux-gnu
 $isMsvc    = $llvmTarget -match 'windows-msvc'
 # Host executable suffix for the counterexample probe (Step 5b). Without
@@ -121,6 +123,20 @@ if ($LASTEXITCODE -ne 0) {
 } else {
     Write-Host "  → $llFile" -ForegroundColor Green
 }
+
+# ── Step 1.25: Lower C++ exception handling (optional) ────────────────────────
+# Delegates to scripts/ensure-exception-lower.ps1 which handles
+# auto-install (MSVC only) and the actual lowering pass.
+$exceptionLower = & (Join-Path $ScriptRoot 'scripts/ensure-exception-lower.ps1') `
+    -ExceptionLower $exceptionLower `
+    -IsMsvc $isMsvc `
+    -ScriptRoot $ScriptRoot `
+    -BcFile $bcFile `
+    -LlFile $llFile `
+    -LlvmDis $llvmDis `
+    -OutputDir $OutputDir `
+    -BaseName $baseName `
+    -Tools $tools
 
 # ── Step 1.5: Patch IR for SAW/Crucible quirks ────────────────────────────────
 # All passes are safe no-ops when their patterns are absent, so we run
