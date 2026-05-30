@@ -271,6 +271,34 @@ pub(super) fn emit_equiv_spec_body(
             }
         }
     }
+
+    // sret: when the C++ function returns an aggregate that the MSVC
+    // x64 ABI passes via a hidden output pointer, the LLVM signature
+    // has `ptr sret(T)` in argument position 0 (free function) or 1
+    // (instance method, immediately after `this`). Without inserting
+    // that pointer here, SAW rejects the verify with
+    // "Type mismatch in argument 0 ... declared with type: ptr, but
+    // provided argument has incompatible type: iN". See
+    // `SAW_SPEC_GEN_BUG_REPORT_sret_not_detected.md`.
+    if target_spec.return_constraint.is_sret {
+        out.push_str("\n    // sret: aggregate return passed via hidden output pointer.\n");
+        out.push_str(&format!(
+            "    result_ptr <- llvm_alloc ({});\n",
+            target_spec.return_constraint.saw_type,
+        ));
+        let has_this = target_fn
+            .params
+            .first()
+            .map(|p| p.name == "this")
+            .unwrap_or(false);
+        let insert_idx = if has_this && !execute_args.is_empty() {
+            1
+        } else {
+            0
+        };
+        execute_args.insert(insert_idx, "result_ptr".to_string());
+    }
+
     out.push('\n');
 
     for global in &target_spec.referenced_globals {
@@ -302,6 +330,7 @@ pub(super) fn emit_postcondition_and_close(
     execute_args: &[String],
     sub_callee_specs: &[SpecConstraint],
     return_type: &TypeInfo,
+    is_sret: bool,
 ) {
     out.push_str(&format!(
         "    llvm_execute_func [{}];\n\n",
@@ -314,7 +343,26 @@ pub(super) fn emit_postcondition_and_close(
     };
     let cryptol_return = cryptol_return_for(&cryptol_call, return_type);
     let is_void_return = matches!(return_type, TypeInfo::Void);
-    if is_void_return {
+    if is_sret {
+        // Aggregate return via hidden sret pointer: the LLVM function
+        // returns void, so `llvm_return` would be a no-op. Bind the
+        // Cryptol value into `*result_ptr` via `llvm_points_to`.
+        // `result_ptr` was allocated and inserted into the argument
+        // list by `emit_equiv_spec_body`.
+        if sub_callee_specs.is_empty() {
+            out.push_str("    // Postcondition (sret): *result_ptr == Cryptol spec\n");
+        } else {
+            out.push_str("    // TODO: Compositional sret postcondition — fill in by hand.\n");
+            out.push_str("    // The sub-function overrides above return fresh symbolic values;\n");
+            out.push_str("    // thread them into the Cryptol call below before relying on\n");
+            out.push_str("    // this assertion. The auto-derived call uses only the target's\n");
+            out.push_str("    // own parameters and is almost certainly incomplete.\n");
+        }
+        out.push_str(&format!(
+            "    llvm_points_to result_ptr (llvm_term {{{{ {} }}}});\n",
+            cryptol_return,
+        ));
+    } else if is_void_return {
         // Void-returning target: no `llvm_return` to emit. The harness
         // still proves "no UB" (load module + execute), and any
         // `_Out_` parameters require a hand-written

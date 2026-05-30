@@ -157,6 +157,7 @@ pub fn emit_verification_script(
         &execute_args,
         sub_callee_specs,
         &target_fn.return_type,
+        target_spec.return_constraint.is_sret,
     );
 
     step += 1;

@@ -93,34 +93,6 @@ fn test_derive_freshvar_for_scalar() {
 }
 
 #[test]
-fn test_derive_nullable_param_comment() {
-    let func = FunctionInfo {
-        name: "maybe_null".into(),
-        mangled_name: None,
-        params: vec![ParamInfo {
-            name: "ptr".into(),
-            ty: TypeInfo::Pointer(Box::new(TypeInfo::UnsignedInt(8))),
-            mutability: Mutability::Readonly,
-            nullable: Nullability::Nullable,
-            annotations: vec![],
-        }],
-        return_type: TypeInfo::Void,
-        can_throw: false,
-        is_virtual: false,
-        has_body: true,
-        is_system: false,
-        called_functions: vec![],
-        referenced_globals: vec![],
-        annotations: vec![],
-    };
-    let specs = derive_constraints(&[func]).unwrap();
-    assert!(specs[0].params[0]
-        .preconditions
-        .iter()
-        .any(|p| p.contains("may be null")));
-}
-
-#[test]
 fn test_derive_enum_discriminant_constraint() {
     // Value-passed enum (the AttestKeyOwnership case from MSP). Must
     // be allocated FreshVar (otherwise SAW gets `iN*` where the

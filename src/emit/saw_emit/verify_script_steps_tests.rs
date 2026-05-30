@@ -69,6 +69,7 @@ fn emit_postcondition_wraps_bool_return() {
         ],
         &[],
         &TypeInfo::Bool,
+        false,
     );
 
     assert!(
@@ -90,6 +91,7 @@ fn emit_postcondition_does_not_wrap_int_return() {
         &["llvm_term x".to_string()],
         &[],
         &TypeInfo::SignedInt(32),
+        false,
     );
 
     assert!(
@@ -99,5 +101,38 @@ fn emit_postcondition_does_not_wrap_int_return() {
     assert!(
         !out.contains(": [1]"),
         "non-bool return should not get [..] : [1] wrapping; got:\n{out}"
+    );
+}
+
+/// sret return: the postcondition must bind into `*result_ptr` via
+/// `llvm_points_to`, NOT emit `llvm_return` (the LLVM function
+/// returns void when sret is in play).
+#[test]
+fn emit_postcondition_uses_points_to_for_sret_return() {
+    let mut out = String::new();
+    emit_postcondition_and_close(
+        &mut out,
+        "getStatus",
+        &["x".to_string()],
+        &["result_ptr".to_string(), "llvm_term x".to_string()],
+        &[],
+        // The C++-level return type is the aggregate; the LLVM-level
+        // signature lowers it to void+sret. The is_sret=true flag is
+        // what tells the emitter which form to use.
+        &TypeInfo::Struct {
+            name: "EnrollmentStatus".into(),
+            size_bytes: None,
+            fields: vec![],
+        },
+        true,
+    );
+
+    assert!(
+        out.contains("llvm_points_to result_ptr (llvm_term {{ getStatus x }});"),
+        "expected sret postcondition to bind into result_ptr; got:\n{out}"
+    );
+    assert!(
+        !out.contains("llvm_return"),
+        "sret must NOT use llvm_return (LLVM function returns void); got:\n{out}"
     );
 }

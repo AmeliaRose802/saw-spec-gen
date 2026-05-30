@@ -8,6 +8,21 @@ use super::types::{
 use super::value_clauses::value_clauses;
 use anyhow::Result;
 
+/// Default symbolic upper bound used when a pointer parameter has a
+/// parameter-reference SAL annotation (`_In_reads_(<name>)` /
+/// `_Out_writes_(<name>)`) rather than a decimal literal length. The
+/// emitted spec allocates `[MAX][8]` for the buffer and adds an
+/// `llvm_precond {{ <name> <= MAX }}` to bound the dynamic length.
+///
+/// 16 is large enough to cover the common short-buffer cases
+/// (UUIDs / handles / counters) without exploding solver time. Users
+/// who need larger buffers can either:
+///   - hand-edit the generated `verify.saw` to use a different bound
+///     and matching precondition, or
+///   - file the constant as a CLI knob (`--paramref-max-len`) in a
+///     follow-up.
+pub const DEFAULT_PARAMREF_MAX_LEN: usize = 16;
+
 /// Derive SAW constraints from function info.
 pub fn derive_constraints(functions: &[FunctionInfo]) -> Result<Vec<SpecConstraint>> {
     functions.iter().map(derive_function_constraints).collect()
@@ -16,6 +31,11 @@ pub fn derive_constraints(functions: &[FunctionInfo]) -> Result<Vec<SpecConstrai
 fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
     let mut params = Vec::new();
     let mut postconditions = Vec::new();
+
+    // Collect parameter names up-front so unsized-pointer warnings can
+    // point the user at a likely length-companion parameter
+    // (e.g. `buf` + `buf_len`, or `n` + any pointer).
+    let all_param_names: Vec<String> = func.params.iter().map(|p| p.name.clone()).collect();
 
     // Check function-level annotations for NoThrow override
     let can_throw = if func
@@ -42,9 +62,17 @@ fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
         // one byte and every `s[i]` for i > 0 would fault with "outside
         // of the allocation".  The annotation is the only way the spec
         // generator can know the caller's buffer-size contract.
-        let buffer_len = if is_indirect {
+        //
+        // Returns `(N, Option<paramref>)`: the second element is
+        // `Some(name)` when the length came from a sibling-parameter
+        // reference; that name is used downstream to emit an
+        // `llvm_precond {{ name <= N }}` bound.
+        let buffer_len: Option<(usize, Option<String>)> = if is_indirect {
             param.annotations.iter().find_map(|a| match a {
-                Annotation::InReads(n) | Annotation::OutWrites(n) if *n > 1 => Some(*n),
+                Annotation::InReads(n) | Annotation::OutWrites(n) if *n > 1 => Some((*n, None)),
+                Annotation::InReadsParam(p) | Annotation::OutWritesParam(p) => {
+                    Some((DEFAULT_PARAMREF_MAX_LEN, Some(p.clone())))
+                }
                 _ => None,
             })
         } else {
@@ -75,8 +103,8 @@ fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
             // function and to the Cryptol callsite as the same `[64]`.
             "llvm_int 64".to_string()
         } else {
-            match buffer_len {
-                Some(n) => format!("llvm_array {n} ({element_saw})"),
+            match &buffer_len {
+                Some((n, _)) => format!("llvm_array {n} ({element_saw})"),
                 None => element_saw,
             }
         };
@@ -111,8 +139,55 @@ fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
 
         let mut preconditions = Vec::new();
 
-        // Nullable handling
-        if param.nullable == Nullability::Nullable && !matches!(alloc_type, AllocType::FreshVar) {
+        // Loud-TODO emission for unsized pointers. Previously this was
+        // a "may be null -- spec assumes non-null" note, which was
+        // misleading: the underlying allocation is a single element,
+        // and the resulting spec is almost certainly wrong for any
+        // length-prefixed buffer parameter. Replace with an explicit
+        // TODO that names a likely length-companion sibling parameter,
+        // so the user can either add a SAL annotation upstream or
+        // hand-edit the generated allocation.
+        let has_size_annotation = param.annotations.iter().any(|a| {
+            matches!(
+                a,
+                Annotation::InReads(_)
+                    | Annotation::OutWrites(_)
+                    | Annotation::InReadsParam(_)
+                    | Annotation::OutWritesParam(_)
+                    | Annotation::Dereferenceable(_)
+            )
+        });
+        if is_indirect
+            && !void_ptr_as_value
+            && !matches!(alloc_type, AllocType::FreshVar)
+            && !has_size_annotation
+        {
+            let companion = guess_length_companion(&param.name, &all_param_names);
+            preconditions.push(format!(
+                "// TODO[saw-spec-gen]: pointer parameter `{}` has no size annotation.",
+                param.name,
+            ));
+            match companion {
+                Some(c) => preconditions.push(format!(
+                    "//   Heuristic: sibling parameter `{c}` looks like its length.",
+                )),
+                None => preconditions
+                    .push("//   No obvious length-companion parameter was found.".into()),
+            }
+            preconditions.push(
+                "//   The auto-spec allocates a single element, which is almost certainly wrong"
+                    .into(),
+            );
+            preconditions.push(
+                "//   for a buffer. Fix by adding _In_reads_(N) / _Out_writes_(N) to the C++ decl,"
+                    .into(),
+            );
+            preconditions.push(
+                "//   or by hand-editing this file to use (llvm_array N (llvm_int 8)).".into(),
+            );
+        } else if param.nullable == Nullability::Nullable
+            && !matches!(alloc_type, AllocType::FreshVar)
+        {
             preconditions.push(format!(
                 "// NOTE: {} may be null -- spec assumes non-null",
                 param.name,
@@ -142,6 +217,25 @@ fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
                 Annotation::OutWrites(n) if *n > 0 => {
                     preconditions.push(format!(
                         "// _Out_writes_({n}) -- writable buffer for {n} elements"
+                    ));
+                }
+                Annotation::InReadsParam(pname) | Annotation::OutWritesParam(pname) => {
+                    let kind = if matches!(ann, Annotation::InReadsParam(_)) {
+                        "_In_reads_"
+                    } else {
+                        "_Out_writes_"
+                    };
+                    preconditions.push(format!(
+                        "// TODO[saw-spec-gen]: {kind}({pname}) -- buffer length conveyed by",
+                    ));
+                    preconditions.push(format!(
+                        "//   sibling parameter `{pname}`. Auto-spec sized buffer to upper bound",
+                    ));
+                    preconditions.push(format!(
+                        "//   {DEFAULT_PARAMREF_MAX_LEN}; raise/lower by hand if needed.",
+                    ));
+                    preconditions.push(format!(
+                        "llvm_precond {{{{ ({pname} : [64]) <= {DEFAULT_PARAMREF_MAX_LEN} }}}}",
                     ));
                 }
                 Annotation::Dereferenceable(n) => {
@@ -222,8 +316,29 @@ fn derive_return_constraint(ty: &TypeInfo) -> ReturnConstraint {
         value_constraints.push(format!("// unsigned {bits}-bit -- no extra constraint"));
     }
 
-    let is_sret = matches!(ty, TypeInfo::Struct { .. })
-        || matches!(ty, TypeInfo::Opaque { size_bytes, .. } if *size_bytes > 8);
+    // sret detection: any aggregate that the MSVC x64 ABI lowers to a
+    // hidden output-pointer parameter.
+    //
+    // - `TypeInfo::Struct` always passes via sret in MSVC: the AST may
+    //   have failed to compute `size_bytes` (e.g. the struct contains
+    //   `std::optional<T>` whose size we don't model), but the ABI
+    //   classification is independent of our size resolution.
+    // - `TypeInfo::Opaque` with a known size > 8 bytes is an
+    //   unresolved aggregate; treat as sret.
+    // - `TypeInfo::Opaque` with size 0 whose name looks like a
+    //   templated/qualified C++ type (`std::tuple<…>`, `Foo::Bar`) is
+    //   almost certainly an aggregate the AST couldn't expand; treat
+    //   as sret here so [`crate::emit::saw_emit::verify_script_steps`]
+    //   inserts a `result_ptr` arg rather than silently dropping it.
+    let is_sret = match ty {
+        TypeInfo::Struct { .. } => true,
+        TypeInfo::Opaque { size_bytes, .. } if *size_bytes > 8 => true,
+        TypeInfo::Opaque {
+            size_bytes: 0,
+            name,
+        } if name.contains('<') || name.contains("::") => true,
+        _ => false,
+    };
 
     let returns_pointer = matches!(ty, TypeInfo::Pointer(_));
 
@@ -245,6 +360,51 @@ fn derive_return_constraint(ty: &TypeInfo) -> ReturnConstraint {
     }
 }
 
+/// Heuristic: scan the function's other parameter names for one that
+/// looks like a length companion for the given pointer parameter.
+///
+/// Recognized shapes (case-insensitive):
+///   - `n`, `len`, `count`, `size`, `length`         -- bare length names
+///   - `<ptr>_len`, `<ptr>_count`, `<ptr>_size`,
+///     `<ptr>_length`, `<ptr>_n`                     -- suffix style
+///   - `n<ptr>`, `c<ptr>`, `cb<ptr>`, `cch<ptr>`,
+///     `len_<ptr>`, `size_<ptr>`                     -- prefix / Win32 style
+///
+/// Returns the first matching sibling parameter's name (preserving
+/// original casing), or `None` if no candidate is found.
+fn guess_length_companion(ptr_name: &str, all_names: &[String]) -> Option<String> {
+    let p = ptr_name.to_ascii_lowercase();
+    let bare = ["n", "len", "count", "size", "length", "num"];
+    let suffixes = [
+        "_len", "_count", "_size", "_length", "_n", "len", "count", "size",
+    ];
+    let prefixes = ["n", "c", "cb", "cch", "len_", "size_", "count_", "num_"];
+    for cand in all_names {
+        if cand == ptr_name {
+            continue;
+        }
+        let c = cand.to_ascii_lowercase();
+        if bare.contains(&c.as_str()) {
+            return Some(cand.clone());
+        }
+        for s in &suffixes {
+            if c == format!("{p}{s}") {
+                return Some(cand.clone());
+            }
+        }
+        for pre in &prefixes {
+            if c == format!("{pre}{p}") {
+                return Some(cand.clone());
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 #[path = "derive_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "derive_annotation_tests.rs"]
+mod annotation_tests;

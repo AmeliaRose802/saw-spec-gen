@@ -37,14 +37,16 @@ pub fn resolve_param_behavior(param: &ParamInfo) -> HavocBehavior {
     let sal_says_readonly = param
         .annotations
         .iter()
-        .any(|a| matches!(a, Annotation::InReads(_)));
+        .any(|a| matches!(a, Annotation::InReads(_) | Annotation::InReadsParam(_)));
     if type_says_const || sal_says_readonly {
         return HavocBehavior::Preserved;
     }
-    let sal_says_writable = param
-        .annotations
-        .iter()
-        .any(|a| matches!(a, Annotation::OutWrites(_) | Annotation::Inout));
+    let sal_says_writable = param.annotations.iter().any(|a| {
+        matches!(
+            a,
+            Annotation::OutWrites(_) | Annotation::OutWritesParam(_) | Annotation::Inout
+        )
+    });
     if sal_says_writable {
         return HavocBehavior::Havoced;
     }
@@ -270,6 +272,8 @@ pub fn annotation_label(annotations: &[Annotation], is_preserved: bool) -> Strin
             Annotation::InReads(n) => return format!("_In_reads_({n}) → preserved"),
             Annotation::OutWrites(0) => return "_Out_ → HAVOCED".into(),
             Annotation::OutWrites(n) => return format!("_Out_writes_({n}) → HAVOCED"),
+            Annotation::InReadsParam(p) => return format!("_In_reads_({p}) → preserved"),
+            Annotation::OutWritesParam(p) => return format!("_Out_writes_({p}) → HAVOCED"),
             Annotation::Inout => return "_Inout_ → HAVOCED".into(),
             _ => {}
         }

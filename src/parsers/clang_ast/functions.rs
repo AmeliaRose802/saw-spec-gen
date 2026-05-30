@@ -262,8 +262,8 @@ pub fn parse_param(node: &AstNode, ctx: &TypeContext) -> Option<ParamInfo> {
     // beats any SAL annotation; otherwise SAL can tighten Mutable into
     // Readonly/WriteOnly.
     mutability = annotations.iter().fold(mutability, |m, ann| match ann {
-        Annotation::InReads(_) => Mutability::Readonly,
-        Annotation::OutWrites(_) => {
+        Annotation::InReads(_) | Annotation::InReadsParam(_) => Mutability::Readonly,
+        Annotation::OutWrites(_) | Annotation::OutWritesParam(_) => {
             if m == Mutability::Readonly {
                 Mutability::Readonly
             } else {
