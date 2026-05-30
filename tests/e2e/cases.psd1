@@ -56,13 +56,13 @@
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/multi_method_ordering';      File = 'call_prepare_disproved.cpp';             Expected = 'DISPROVED' }
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/multi_method_ordering';      File = 'call_report_verified.cpp';               Expected = 'VERIFIED' }
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/multi_method_ordering';      File = 'call_extra_disproved.cpp';               Expected = 'DISPROVED' }
-        # MSVC C++ exception lowering: total Cryptol spec, partial impl.
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/throws_exception';           File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/throws_exception';           File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/throws_exception';           File = 'add_one_throws_caught_verified.cpp';     Expected = 'VERIFIED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/throws_exception';           File = 'add_one_multi_catch_disproved.cpp';      Expected = 'DISPROVED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/throws_exception';           File = 'add_one_rethrow_disproved.cpp';          Expected = 'DISPROVED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/throws_exception';           File = 'add_one_nested_catch_verified.cpp';      Expected = 'VERIFIED' }
+        # C++ exception lowering: total Cryptol spec, partial impl.
+        @{ Tag = 'cpp_throws'; Runner = 'cpp'; Dir = 'tests/e2e/cases/06-throws-exception';           File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
+        @{ Tag = 'cpp_throws'; Runner = 'cpp'; Dir = 'tests/e2e/cases/06-throws-exception';           File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
+        @{ Tag = 'cpp_throws'; Runner = 'cpp'; Dir = 'tests/e2e/cases/06-throws-exception';           File = 'add_one_throws_caught_verified.cpp';     Expected = 'VERIFIED' }
+        @{ Tag = 'cpp_throws'; Runner = 'cpp'; Dir = 'tests/e2e/cases/06-throws-exception';           File = 'add_one_multi_catch_disproved.cpp';      Expected = 'DISPROVED' }
+        @{ Tag = 'cpp_throws'; Runner = 'cpp'; Dir = 'tests/e2e/cases/06-throws-exception';           File = 'add_one_rethrow_disproved.cpp';          Expected = 'DISPROVED' }
+        @{ Tag = 'cpp_throws'; Runner = 'cpp'; Dir = 'tests/e2e/cases/06-throws-exception';           File = 'add_one_nested_catch_verified.cpp';      Expected = 'VERIFIED' }
 
         # ── Rust havoc tests (verify-rust.ps1) ──────────────────────────────
         # Note: Rust has no havoc model in this verifier path — every
