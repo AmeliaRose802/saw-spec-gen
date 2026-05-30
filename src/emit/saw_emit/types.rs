@@ -126,10 +126,18 @@ pub fn method_param_ir_pieces(func: &FunctionInfo) -> Vec<String> {
 /// Default return instruction for an LLVM IR type. Used to give the
 /// stub body something well-typed; the override replaces the body so
 /// this value is never observed at runtime.
+///
+/// Note: pointer types need `null` rather than the integer literal `0`,
+/// otherwise `llvm-as` rejects with "integer constant must have integer
+/// type". This bit anyone whose target signature transitively pulled in a
+/// pointer-returning virtual (e.g. `std::exception::what`, allocator
+/// `do_allocate`) — the stub file failed to assemble before SAW ever saw
+/// it.
 pub fn ir_default_return(ir_type: &str) -> String {
     match ir_type {
         "void" => "ret void".into(),
         "i1" => "ret i1 false".into(),
+        "ptr" => "ret ptr null".into(),
         t => format!("ret {t} 0"),
     }
 }
@@ -243,6 +251,10 @@ mod tests {
         assert_eq!(ir_default_return("void"), "ret void");
         assert_eq!(ir_default_return("i1"), "ret i1 false");
         assert_eq!(ir_default_return("i32"), "ret i32 0");
-        assert_eq!(ir_default_return("ptr"), "ret ptr 0");
+        // Pointer returns MUST use `null`, not the integer literal `0`.
+        // `llvm-as` rejects `ret ptr 0` with "integer constant must have
+        // integer type", which used to break every stub file containing a
+        // pointer-returning virtual (e.g. exception::what, do_allocate).
+        assert_eq!(ir_default_return("ptr"), "ret ptr null");
     }
 }
