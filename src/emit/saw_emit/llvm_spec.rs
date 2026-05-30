@@ -302,10 +302,18 @@ pub fn generate_unspecified_spec(spec: &SpecConstraint, all_globals: &[GlobalVar
     // Post-state: return value (if any) is unconstrained.
     if !crate::emit::saw_emit::writer::is_void_saw_type(&spec.return_constraint.saw_type) {
         if spec.return_constraint.returns_pointer {
+            // Allocate AND initialize the pointee with a fresh symbolic
+            // value. Without the `llvm_points_to`, any dereference in
+            // the caller hits uninitialized memory and SAW aborts with
+            // "Error during memory load" — that defeats the purpose of
+            // an adversarial spec, since the caller can't observe a
+            // value the solver was supposed to pick freely.
+            let ty = &spec.return_constraint.saw_type;
+            out.push_str(&format!("    ret_ptr <- llvm_alloc ({ty});\n"));
             out.push_str(&format!(
-                "    ret_ptr <- llvm_alloc ({});\n",
-                spec.return_constraint.saw_type,
+                "    ret_val <- llvm_fresh_var \"ret_val\" ({ty});\n"
             ));
+            out.push_str("    llvm_points_to ret_ptr (llvm_term ret_val);\n");
             out.push_str("    llvm_return ret_ptr;\n");
         } else {
             out.push_str(&format!(

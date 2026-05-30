@@ -2,6 +2,7 @@
 
 use super::functions::parse_function_decl;
 use super::node::AstNode;
+use super::system_headers::is_system_include_path;
 use super::type_ctx::{build as build_type_ctx, build_node_id_map, TypeContext};
 use super::visitor::{walk, ClassStack, Visitor, WalkAction};
 use crate::constraints::FunctionInfo;
@@ -111,6 +112,17 @@ fn propagate_through_bases(set: &mut HashSet<String>, bases: &HashMap<String, Ve
 
 /// Extract every virtual method from `ast`, optionally filtered by name
 /// substring. Carries enough metadata for vtable-slot ordering.
+///
+/// Classes whose declaration originates in a system/SDK header (per
+/// [`is_system_include_path`]) are skipped. STL classes like
+/// `std::exception` and `std::bad_variant_access` survive the AST
+/// path filter when they appear under a kept `namespace std { … }`
+/// wrapper, but the verifier has no business generating havoc specs
+/// and vtable stubs for them — the auto-emitted return-type lowering
+/// frequently disagrees with the stub's pointer signature (e.g.
+/// `what()` returns `const char *` but the spec generator falls
+/// back to `llvm_int 8`), aborting SAW load. User code that wants to
+/// model an STL virtual method should provide its own override.
 pub fn extract_virtual_methods(
     ast: &AstNode,
     filter: Option<&str>,
@@ -124,6 +136,9 @@ pub fn extract_virtual_methods(
         ctx: &ctx,
         id_to_name: &id_to_name,
         stack: ClassStack::new(),
+        current_file: None,
+        file_stack: Vec::new(),
+        system_depth: 0,
     };
     walk(ast, &mut v);
     Ok(out)
@@ -135,11 +150,46 @@ struct VMethodVisitor<'a> {
     ctx: &'a TypeContext,
     id_to_name: &'a HashMap<String, String>,
     stack: ClassStack,
+    /// Most recently seen `loc.file`. Clang elides this field on
+    /// consecutive siblings sharing the same source file, so we
+    /// remember it across the walk to recover the effective file for
+    /// elided nodes.
+    current_file: Option<String>,
+    /// Saved `current_file` at each class push, restored on pop, so a
+    /// class declared in user code immediately after a system-header
+    /// namespace doesn't inherit the system file.
+    file_stack: Vec<Option<String>>,
+    /// Depth into nested classes whose declaration is in a system
+    /// header. Methods are emitted only when this is zero.
+    system_depth: usize,
+}
+
+impl<'a> VMethodVisitor<'a> {
+    /// Update `current_file` from `node.loc.file` (if present) and
+    /// return whether the resulting effective file is a system header.
+    fn note_loc(&mut self, node: &AstNode) -> bool {
+        if let Some(file) = node.loc.as_ref().and_then(|l| l.file.as_deref()) {
+            self.current_file = Some(file.to_string());
+        }
+        self.current_file
+            .as_deref()
+            .is_some_and(is_system_include_path)
+    }
 }
 
 impl<'a> Visitor for VMethodVisitor<'a> {
     fn enter(&mut self, node: &AstNode) -> WalkAction {
-        if node.kind == "CXXMethodDecl" {
+        let in_system = self.note_loc(node);
+        let entering_class = node.class_name().is_some();
+        if entering_class {
+            // Snapshot current_file so the matching pop in `leave`
+            // restores the surrounding scope's effective file.
+            self.file_stack.push(self.current_file.clone());
+            if in_system {
+                self.system_depth += 1;
+            }
+        }
+        if node.kind == "CXXMethodDecl" && self.system_depth == 0 {
             let is_virtual = node.r#virtual == Some(true);
             let has_override = node.has_override_attr();
             if is_virtual || has_override {
@@ -171,7 +221,20 @@ impl<'a> Visitor for VMethodVisitor<'a> {
         WalkAction::Continue
     }
     fn leave(&mut self, node: &AstNode) {
-        self.stack.pop_if(node.class_name().is_some());
+        let was_class = node.class_name().is_some();
+        if was_class {
+            // Undo the system-header bookkeeping in the same order we
+            // applied it on enter (snapshot first, then maybe bump).
+            let was_system = self
+                .current_file
+                .as_deref()
+                .is_some_and(is_system_include_path);
+            if was_system && self.system_depth > 0 {
+                self.system_depth -= 1;
+            }
+            self.current_file = self.file_stack.pop().unwrap_or(None);
+        }
+        self.stack.pop_if(was_class);
     }
 }
 
@@ -285,5 +348,47 @@ mod tests {
         let s = classes_with_virtual_dtor(&ast);
         assert!(s.contains("Base"));
         assert!(s.contains("Derived"));
+    }
+
+    #[test]
+    fn skips_virtual_methods_from_system_headers() {
+        // Mirrors what happens with `#include <algorithm>` on MSVC: a
+        // `std::exception` decl with `what()` survives the path filter
+        // under a kept `namespace std { … }` wrapper. The visitor must
+        // not emit a havoc spec / vtable stub for it, because the
+        // resulting return-type lowering disagrees with the stub's
+        // pointer signature and aborts SAW load.
+        let ast = parse(json!({
+            "kind": "TranslationUnitDecl",
+            "inner": [
+                // User class — kept.
+                {
+                    "id": "0xUS",
+                    "kind": "CXXRecordDecl",
+                    "name": "IUserService",
+                    "loc": {"file": r"C:\repos\myproj\src\foo.cpp"},
+                    "inner": [{
+                        "kind": "CXXMethodDecl", "name": "process",
+                        "type": {"qualType": "int () const"},
+                        "virtual": true, "pure": true
+                    }]
+                },
+                // System class — dropped.
+                {
+                    "id": "0xSE",
+                    "kind": "CXXRecordDecl",
+                    "name": "exception",
+                    "loc": {"file": r"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.40.33807\include\vcruntime_exception.h"},
+                    "inner": [{
+                        "kind": "CXXMethodDecl", "name": "what",
+                        "type": {"qualType": "const char *() const"},
+                        "virtual": true
+                    }]
+                }
+            ]
+        }));
+        let m = extract_virtual_methods(&ast, None).unwrap();
+        assert_eq!(m.len(), 1, "system-header virtual methods must be skipped");
+        assert_eq!(m[0].method.name, "process");
     }
 }

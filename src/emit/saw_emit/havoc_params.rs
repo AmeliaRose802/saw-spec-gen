@@ -131,7 +131,7 @@ pub fn emit_adversarial_param(
     let ann_label = super::havoc::annotation_label(annotations, is_preserved);
 
     if name == "this" && matches!(inner_ty, TypeInfo::Opaque { size_bytes: 0, .. }) {
-        let saw_type = type_to_saw(inner_ty);
+        let saw_type = pointee_saw_type(inner_ty);
         setup.push_str(&format!("\n    // Parameter: {name} ({ann_label})\n"));
         setup.push_str(&format!("    {name}_ptr <- {alloc_kind} ({saw_type});\n"));
         return;
@@ -202,7 +202,7 @@ fn emit_opaque_pointer(
     postconds: &mut String,
     cryptol_post_expr: Option<&str>,
 ) {
-    let saw_type = type_to_saw(inner_ty);
+    let saw_type = pointee_saw_type(inner_ty);
     setup.push_str(&format!("\n    // Parameter: {name} ({ann_label})\n"));
     setup.push_str(&format!("    {name}_ptr <- {alloc_kind} ({saw_type});\n"));
     if is_preserved {
@@ -248,8 +248,8 @@ fn emit_sized_buffer(
     postconds: &mut String,
 ) {
     let elem_saw = match inner_ty {
-        TypeInfo::Pointer(elem) => type_to_saw(elem),
-        _ => type_to_saw(inner_ty),
+        TypeInfo::Pointer(elem) => pointee_saw_type(elem),
+        _ => pointee_saw_type(inner_ty),
     };
     let buf_type = format!("llvm_array {n} ({elem_saw})");
     setup.push_str(&format!(
@@ -314,7 +314,7 @@ pub fn emit_struct_decomposed(
         let var_name = format!("{param_name}_{field_name}");
         match field_ty {
             TypeInfo::Pointer(pointee) => {
-                let pointee_saw = type_to_saw(pointee);
+                let pointee_saw = pointee_saw_type(pointee);
                 let nested_alloc = if is_preserved {
                     "llvm_alloc_readonly"
                 } else {

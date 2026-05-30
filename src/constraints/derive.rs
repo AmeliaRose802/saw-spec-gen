@@ -1,6 +1,6 @@
 //! Derivation of [`SpecConstraint`] values from [`FunctionInfo`].
 
-use super::saw_type::type_to_saw;
+use super::saw_type::{pointee_saw_type, type_to_saw};
 use super::types::{
     AllocType, Annotation, FunctionInfo, Mutability, Nullability, ParamConstraint,
     ReturnConstraint, SpecConstraint, TypeInfo,
@@ -50,13 +50,42 @@ fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
         } else {
             None
         };
-        let element_saw = type_to_saw(inner_ty);
-        let saw_type = match buffer_len {
-            Some(n) => format!("llvm_array {n} ({element_saw})"),
-            None => element_saw,
+
+        // Bug #15: a raw `void*` (without a buffer-size annotation) is
+        // almost always used as a pointer-value, not as a backing
+        // buffer — e.g. `bool isNonNull(void* p)` reads the address,
+        // never `*p`. Allocating a 1-byte buffer for it would (a) force
+        // the pointer to be non-null, blocking the very case the
+        // function checks, and (b) hand the *buffer contents* to the
+        // Cryptol spec instead of the address. Lower these as a fresh
+        // 64-bit symbolic value so `llvm_execute_func [llvm_term p]`
+        // passes the address and the Cryptol spec sees the address.
+        // Opt back into buffer modeling by attaching an `_In_reads_(N)`
+        // (or sibling) annotation.
+        let void_ptr_as_value =
+            is_indirect && matches!(inner_ty, TypeInfo::Void) && buffer_len.is_none();
+
+        let element_saw = if is_indirect {
+            pointee_saw_type(inner_ty)
+        } else {
+            type_to_saw(inner_ty)
+        };
+        let saw_type = if void_ptr_as_value {
+            // Pointer-sized integer: passes through `llvm_term p` to the
+            // function and to the Cryptol callsite as the same `[64]`.
+            "llvm_int 64".to_string()
+        } else {
+            match buffer_len {
+                Some(n) => format!("llvm_array {n} ({element_saw})"),
+                None => element_saw,
+            }
         };
 
-        let (alloc_type, unchanged_after) = if is_indirect {
+        let (alloc_type, unchanged_after) = if void_ptr_as_value {
+            // Treat the address as a scalar passed by value — no
+            // backing buffer, no `unchanged_after` round-tripping.
+            (AllocType::FreshVar, false)
+        } else if is_indirect {
             match param.mutability {
                 Mutability::Readonly => (AllocType::AllocReadonly, true),
                 Mutability::Mutable => (AllocType::AllocMutable, false),
@@ -201,15 +230,7 @@ fn derive_return_constraint(ty: &TypeInfo) -> ReturnConstraint {
     // For pointer returns, the SAW type should be the pointee type (for llvm_alloc)
     let saw_type = if returns_pointer {
         match ty {
-            TypeInfo::Pointer(inner) => {
-                let inner_saw = type_to_saw(inner);
-                if inner_saw == "// void" {
-                    // void* → allocate a byte array
-                    "llvm_array 64 (llvm_int 8)".to_string()
-                } else {
-                    inner_saw
-                }
-            }
+            TypeInfo::Pointer(inner) => pointee_saw_type(inner),
             _ => type_to_saw(ty),
         }
     } else {
@@ -225,301 +246,5 @@ fn derive_return_constraint(ty: &TypeInfo) -> ReturnConstraint {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::constraints::ParamInfo;
-
-    #[test]
-    fn test_derive_readonly_param() {
-        let func = FunctionInfo {
-            name: "test_fn".into(),
-            mangled_name: None,
-            params: vec![ParamInfo {
-                name: "x".into(),
-                ty: TypeInfo::Pointer(Box::new(TypeInfo::SignedInt(32))),
-                mutability: Mutability::Readonly,
-                nullable: Nullability::NonNull,
-                annotations: vec![],
-            }],
-            return_type: TypeInfo::Void,
-            can_throw: false,
-            is_virtual: false,
-            has_body: true,
-            is_system: false,
-            called_functions: vec![],
-            referenced_globals: vec![],
-            annotations: vec![],
-        };
-        let specs = derive_constraints(&[func]).unwrap();
-        assert_eq!(specs.len(), 1);
-        assert_eq!(specs[0].params[0].alloc_type, AllocType::AllocReadonly);
-        assert!(specs[0].params[0].unchanged_after);
-    }
-
-    #[test]
-    fn test_derive_mutable_param() {
-        let func = FunctionInfo {
-            name: "test_fn".into(),
-            mangled_name: None,
-            params: vec![ParamInfo {
-                name: "buf".into(),
-                ty: TypeInfo::Pointer(Box::new(TypeInfo::UnsignedInt(8))),
-                mutability: Mutability::Mutable,
-                nullable: Nullability::NonNull,
-                annotations: vec![],
-            }],
-            return_type: TypeInfo::Void,
-            can_throw: false,
-            is_virtual: false,
-            has_body: true,
-            is_system: false,
-            called_functions: vec![],
-            referenced_globals: vec![],
-            annotations: vec![],
-        };
-        let specs = derive_constraints(&[func]).unwrap();
-        assert_eq!(specs[0].params[0].alloc_type, AllocType::AllocMutable);
-        assert!(!specs[0].params[0].unchanged_after);
-    }
-
-    #[test]
-    fn test_derive_freshvar_for_scalar() {
-        let func = FunctionInfo {
-            name: "add".into(),
-            mangled_name: None,
-            params: vec![
-                ParamInfo {
-                    name: "a".into(),
-                    ty: TypeInfo::SignedInt(32),
-                    mutability: Mutability::Readonly,
-                    nullable: Nullability::NonNull,
-                    annotations: vec![],
-                },
-                ParamInfo {
-                    name: "b".into(),
-                    ty: TypeInfo::SignedInt(32),
-                    mutability: Mutability::Readonly,
-                    nullable: Nullability::NonNull,
-                    annotations: vec![],
-                },
-            ],
-            return_type: TypeInfo::SignedInt(32),
-            can_throw: false,
-            is_virtual: false,
-            has_body: true,
-            is_system: false,
-            called_functions: vec![],
-            referenced_globals: vec![],
-            annotations: vec![],
-        };
-        let specs = derive_constraints(&[func]).unwrap();
-        assert_eq!(specs[0].params[0].alloc_type, AllocType::FreshVar);
-        assert_eq!(specs[0].params[1].alloc_type, AllocType::FreshVar);
-    }
-
-    #[test]
-    fn test_derive_nullable_param_comment() {
-        let func = FunctionInfo {
-            name: "maybe_null".into(),
-            mangled_name: None,
-            params: vec![ParamInfo {
-                name: "ptr".into(),
-                ty: TypeInfo::Pointer(Box::new(TypeInfo::UnsignedInt(8))),
-                mutability: Mutability::Readonly,
-                nullable: Nullability::Nullable,
-                annotations: vec![],
-            }],
-            return_type: TypeInfo::Void,
-            can_throw: false,
-            is_virtual: false,
-            has_body: true,
-            is_system: false,
-            called_functions: vec![],
-            referenced_globals: vec![],
-            annotations: vec![],
-        };
-        let specs = derive_constraints(&[func]).unwrap();
-        assert!(specs[0].params[0]
-            .preconditions
-            .iter()
-            .any(|p| p.contains("may be null")));
-    }
-
-    #[test]
-    fn test_derive_enum_discriminant_constraint() {
-        // Value-passed enum (the AttestKeyOwnership case from MSP). Must
-        // be allocated FreshVar (otherwise SAW gets `iN*` where the
-        // function declares `iN` and rejects the call) and the
-        // precondition must reference the bare parameter name `status`,
-        // not `status_disc` — there is no `_disc` variable in scope.
-        let func = FunctionInfo {
-            name: "check_status".into(),
-            mangled_name: None,
-            params: vec![ParamInfo {
-                name: "status".into(),
-                ty: TypeInfo::Enum {
-                    name: "Status".into(),
-                    variants: vec!["Ok".into(), "Err".into(), "Pending".into()],
-                    discriminant_bits: 8,
-                },
-                mutability: Mutability::Readonly,
-                nullable: Nullability::NonNull,
-                annotations: vec![],
-            }],
-            return_type: TypeInfo::Bool,
-            can_throw: false,
-            is_virtual: false,
-            has_body: true,
-            is_system: false,
-            called_functions: vec![],
-            referenced_globals: vec![],
-            annotations: vec![],
-        };
-        let specs = derive_constraints(&[func]).unwrap();
-        assert_eq!(specs[0].params[0].alloc_type, AllocType::FreshVar);
-        let pre = specs[0].params[0].preconditions.join("\n");
-        assert!(pre.contains("llvm_precond"), "no llvm_precond: {pre}");
-        assert!(
-            pre.contains("status <= (2 : [8])"),
-            "expected `status <= (2 : [8])`, got: {pre}",
-        );
-        assert!(!pre.contains("status_disc"), "no `status_disc` var: {pre}");
-    }
-
-    #[test]
-    fn test_derive_enum_indirect_skips_precondition() {
-        // Pointer-to-enum (rare but legal). The discriminant lives in
-        // heap memory and the equiv-spec/auto-spec emitters disagree on
-        // the variable name, so emit no automatic precondition. Users
-        // can attach one via `--precond` if they need it.
-        let func = FunctionInfo {
-            name: "set_status".into(),
-            mangled_name: None,
-            params: vec![ParamInfo {
-                name: "out".into(),
-                ty: TypeInfo::Pointer(Box::new(TypeInfo::Enum {
-                    name: "Status".into(),
-                    variants: vec!["Ok".into(), "Err".into()],
-                    discriminant_bits: 32,
-                })),
-                mutability: Mutability::Mutable,
-                nullable: Nullability::NonNull,
-                annotations: vec![],
-            }],
-            return_type: TypeInfo::Void,
-            can_throw: false,
-            is_virtual: false,
-            has_body: true,
-            is_system: false,
-            called_functions: vec![],
-            referenced_globals: vec![],
-            annotations: vec![],
-        };
-        let specs = derive_constraints(&[func]).unwrap();
-        assert_eq!(specs[0].params[0].alloc_type, AllocType::AllocMutable);
-        assert!(specs[0].params[0]
-            .preconditions
-            .iter()
-            .all(|p| !p.contains("llvm_precond")));
-    }
-
-    #[test]
-    fn test_derive_nothrow_annotation() {
-        let func = FunctionInfo {
-            name: "safe_fn".into(),
-            mangled_name: None,
-            params: vec![],
-            return_type: TypeInfo::Void,
-            can_throw: true,
-            is_virtual: false,
-            has_body: true,
-            is_system: false,
-            called_functions: vec![],
-            referenced_globals: vec![],
-            annotations: vec![Annotation::NoThrow],
-        };
-        let specs = derive_constraints(&[func]).unwrap();
-        assert!(!specs[0].can_throw);
-    }
-
-    #[test]
-    fn test_derive_return_enum_constraint() {
-        let func = FunctionInfo {
-            name: "get_status".into(),
-            mangled_name: None,
-            params: vec![],
-            return_type: TypeInfo::Enum {
-                name: "Status".into(),
-                variants: vec!["A".into(), "B".into()],
-                discriminant_bits: 32,
-            },
-            can_throw: false,
-            is_virtual: false,
-            has_body: true,
-            is_system: false,
-            called_functions: vec![],
-            referenced_globals: vec![],
-            annotations: vec![],
-        };
-        let specs = derive_constraints(&[func]).unwrap();
-        let constraints = specs[0].return_constraint.value_constraints.join("\n");
-        assert!(
-            constraints.contains("ret <= (1 : [32])"),
-            "expected `ret <= (1 : [32])`, got: {constraints}",
-        );
-        assert!(
-            !constraints.contains("ret_disc"),
-            "must not reference nonexistent `ret_disc`: {constraints}",
-        );
-    }
-
-    #[test]
-    fn test_derive_postconditions_readonly() {
-        let func = FunctionInfo {
-            name: "read_only".into(),
-            mangled_name: None,
-            params: vec![ParamInfo {
-                name: "data".into(),
-                ty: TypeInfo::Pointer(Box::new(TypeInfo::UnsignedInt(64))),
-                mutability: Mutability::Readonly,
-                nullable: Nullability::NonNull,
-                annotations: vec![],
-            }],
-            return_type: TypeInfo::Void,
-            can_throw: false,
-            is_virtual: false,
-            has_body: true,
-            is_system: false,
-            called_functions: vec![],
-            referenced_globals: vec![],
-            annotations: vec![],
-        };
-        let specs = derive_constraints(&[func]).unwrap();
-        assert!(specs[0]
-            .postconditions
-            .iter()
-            .any(|p| p.contains("data_before")));
-    }
-
-    #[test]
-    fn test_derive_must_inspect_result() {
-        let func = FunctionInfo {
-            name: "important".into(),
-            mangled_name: None,
-            params: vec![],
-            return_type: TypeInfo::SignedInt(32),
-            can_throw: false,
-            is_virtual: false,
-            has_body: true,
-            is_system: false,
-            called_functions: vec![],
-            referenced_globals: vec![],
-            annotations: vec![Annotation::MustInspectResult],
-        };
-        let specs = derive_constraints(&[func]).unwrap();
-        assert!(specs[0]
-            .postconditions
-            .iter()
-            .any(|p| p.contains("Must_inspect_result")));
-    }
-}
+#[path = "derive_tests.rs"]
+mod tests;
