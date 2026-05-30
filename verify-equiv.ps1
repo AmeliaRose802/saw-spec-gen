@@ -40,9 +40,9 @@
 
 .EXAMPLE
     .\verify-equiv.ps1 `
-        -CppFile     e2e-tests\02-havoc-coverage\nothing_sketchy\add_one_verified.cpp `
-        -RustFile    e2e-tests\02-havoc-coverage\nothing_sketchy\add_one_verified.rs `
-        -CryptolSpec e2e-tests\02-havoc-coverage\nothing_sketchy\add_one_spec.cry `
+        -CppFile     tests\e2e\cases\02-havoc-coverage\nothing_sketchy\add_one_verified.cpp `
+        -RustFile    tests\e2e\cases\02-havoc-coverage\nothing_sketchy\add_one_verified.rs `
+        -CryptolSpec tests\e2e\cases\02-havoc-coverage\nothing_sketchy\add_one_spec.cry `
         -CryptolFn   add_one_spec `
         -Function    add_one
 #>

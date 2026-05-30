@@ -42,8 +42,8 @@
     Output directory for all generated artifacts. Defaults to "out/" next to the .cpp file.
 
 .EXAMPLE
-    .\verify.ps1 -CppFile e2e-tests\01-tutorial\bounded_loop\add_one_verified.cpp -CryptolSpec e2e-tests\01-tutorial\bounded_loop\add_one_spec.cry -CryptolFn add_one_spec -Function add_one
-    .\verify.ps1 -CppFile e2e-tests\01-tutorial\bounded_loop\add_one_verified.cpp -CryptolSpec e2e-tests\01-tutorial\bounded_loop\add_one_spec.cry -CryptolFn add_one_spec -Function add_one -OutputDir my_output
+    .\verify.ps1 -CppFile tests\e2e\cases\01-tutorial\bounded_loop\add_one_verified.cpp -CryptolSpec tests\e2e\cases\01-tutorial\bounded_loop\add_one_spec.cry -CryptolFn add_one_spec -Function add_one
+    .\verify.ps1 -CppFile tests\e2e\cases\01-tutorial\bounded_loop\add_one_verified.cpp -CryptolSpec tests\e2e\cases\01-tutorial\bounded_loop\add_one_spec.cry -CryptolFn add_one_spec -Function add_one -OutputDir my_output
 #>
 
 param(

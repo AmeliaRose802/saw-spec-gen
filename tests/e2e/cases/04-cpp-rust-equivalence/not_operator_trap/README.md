@@ -54,9 +54,9 @@ From the repo root:
 
 ```powershell
 .\verify-equiv.ps1 `
-    -CppFile     e2e-tests\04-cpp-rust-equivalence\not_operator_trap\negate.cpp `
-    -RustFile    e2e-tests\04-cpp-rust-equivalence\not_operator_trap\negate.rs `
-    -CryptolSpec e2e-tests\04-cpp-rust-equivalence\not_operator_trap\negate_spec.cry `
+    -CppFile     tests\e2e\cases\04-cpp-rust-equivalence\not_operator_trap\negate.cpp `
+    -RustFile    tests\e2e\cases\04-cpp-rust-equivalence\not_operator_trap\negate.rs `
+    -CryptolSpec tests\e2e\cases\04-cpp-rust-equivalence\not_operator_trap\negate_spec.cry `
     -CryptolFn   negate_spec `
     -Function    negate
 ```

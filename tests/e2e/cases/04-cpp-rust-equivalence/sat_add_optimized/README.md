@@ -113,17 +113,17 @@ From the repo root:
 ```powershell
 # The correct port — should print EQUIVALENT
 .\verify-equiv.ps1 `
-    -CppFile     e2e-tests\04-cpp-rust-equivalence\sat_add_optimized\sat_add.cpp `
-    -RustFile    e2e-tests\04-cpp-rust-equivalence\sat_add_optimized\sat_add_verified.rs `
-    -CryptolSpec e2e-tests\04-cpp-rust-equivalence\sat_add_optimized\sat_add_spec.cry `
+    -CppFile     tests\e2e\cases\04-cpp-rust-equivalence\sat_add_optimized\sat_add.cpp `
+    -RustFile    tests\e2e\cases\04-cpp-rust-equivalence\sat_add_optimized\sat_add_verified.rs `
+    -CryptolSpec tests\e2e\cases\04-cpp-rust-equivalence\sat_add_optimized\sat_add_spec.cry `
     -CryptolFn   sat_add_spec `
     -Function    sat_add
 
 # The "clever" port — should print NOT EQUIVALENT with a concrete counterexample
 .\verify-equiv.ps1 `
-    -CppFile     e2e-tests\04-cpp-rust-equivalence\sat_add_optimized\sat_add.cpp `
-    -RustFile    e2e-tests\04-cpp-rust-equivalence\sat_add_optimized\sat_add_disproved.rs `
-    -CryptolSpec e2e-tests\04-cpp-rust-equivalence\sat_add_optimized\sat_add_spec.cry `
+    -CppFile     tests\e2e\cases\04-cpp-rust-equivalence\sat_add_optimized\sat_add.cpp `
+    -RustFile    tests\e2e\cases\04-cpp-rust-equivalence\sat_add_optimized\sat_add_disproved.rs `
+    -CryptolSpec tests\e2e\cases\04-cpp-rust-equivalence\sat_add_optimized\sat_add_spec.cry `
     -CryptolFn   sat_add_spec `
     -Function    sat_add
 ```

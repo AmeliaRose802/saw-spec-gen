@@ -59,15 +59,15 @@ the loops:
 ```powershell
 # C++ side
 .\verify.ps1 `
-    -CppFile     e2e-tests\01-tutorial\csep590b_c04\p1_clamp_sub\clamp_sub_verified.cpp `
-    -CryptolSpec e2e-tests\01-tutorial\csep590b_c04\p1_clamp_sub\clamp_sub_spec.cry `
+    -CppFile     tests\e2e\cases\01-tutorial\csep590b_c04\p1_clamp_sub\clamp_sub_verified.cpp `
+    -CryptolSpec tests\e2e\cases\01-tutorial\csep590b_c04\p1_clamp_sub\clamp_sub_spec.cry `
     -CryptolFn   clamp_sub_spec `
     -Function    clamp_sub
 
 # Rust side
 .\verify-rust.ps1 `
-    -RustFile    e2e-tests\01-tutorial\csep590b_c04\p1_clamp_sub\clamp_sub_verified.rs `
-    -CryptolSpec e2e-tests\01-tutorial\csep590b_c04\p1_clamp_sub\clamp_sub_spec.cry `
+    -RustFile    tests\e2e\cases\01-tutorial\csep590b_c04\p1_clamp_sub\clamp_sub_verified.rs `
+    -CryptolSpec tests\e2e\cases\01-tutorial\csep590b_c04\p1_clamp_sub\clamp_sub_spec.cry `
     -CryptolFn   clamp_sub_spec `
     -Function    clamp_sub
 ```

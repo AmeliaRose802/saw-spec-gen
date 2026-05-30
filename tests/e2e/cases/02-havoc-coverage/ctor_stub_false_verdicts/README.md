@@ -86,12 +86,12 @@ patterns; tests that should have failed could have spuriously passed.
 
 ```powershell
 # Should be VERIFIED — and is.
-./verify.ps1 -CppFile e2e-tests\02-havoc-coverage\ctor_stub_false_verdicts\add_one_verified.cpp `
-             -CryptolSpec e2e-tests\02-havoc-coverage\ctor_stub_false_verdicts\add_one_spec.cry `
+./verify.ps1 -CppFile tests\e2e\cases\02-havoc-coverage\ctor_stub_false_verdicts\add_one_verified.cpp `
+             -CryptolSpec tests\e2e\cases\02-havoc-coverage\ctor_stub_false_verdicts\add_one_spec.cry `
              -CryptolFn add_one_spec -Function add_one
 
 # Should be DISPROVED (with a counterexample at `this_bias__post`) — and is.
-./verify.ps1 -CppFile e2e-tests\02-havoc-coverage\ctor_stub_false_verdicts\add_one_disproved.cpp `
-             -CryptolSpec e2e-tests\02-havoc-coverage\ctor_stub_false_verdicts\add_one_spec.cry `
+./verify.ps1 -CppFile tests\e2e\cases\02-havoc-coverage\ctor_stub_false_verdicts\add_one_disproved.cpp `
+             -CryptolSpec tests\e2e\cases\02-havoc-coverage\ctor_stub_false_verdicts\add_one_spec.cry `
              -CryptolFn add_one_spec -Function add_one
 ```

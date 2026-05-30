@@ -22,7 +22,7 @@ FIX (applied):
   Ctor overrides now allocate the full class layout (`llvm_alloc
   (llvm_alias "class.<Layout>")`) and write each data member's
   in-class initializer via `llvm_struct_value` in the postcondition.
-  See `e2e-tests/02-havoc-coverage/ctor_stub_false_verdicts/README.md`.
+  See `tests/e2e/cases/02-havoc-coverage/ctor_stub_false_verdicts/README.md`.
 */
 
 class ILogger {

@@ -47,23 +47,23 @@ pwsh scripts/init.ps1            # or:  bash scripts/init.sh
 
 # Verify a C++ function against a Cryptol spec.
 ./verify.ps1 `
-    -CppFile     e2e-tests/01-tutorial/bounded_loop/add_one_verified.cpp `
-    -CryptolSpec e2e-tests/01-tutorial/bounded_loop/add_one_spec.cry `
+    -CppFile     tests/e2e/cases/01-tutorial/bounded_loop/add_one_verified.cpp `
+    -CryptolSpec tests/e2e/cases/01-tutorial/bounded_loop/add_one_spec.cry `
     -CryptolFn   add_one_spec `
     -Function    add_one
 
 # Same for Rust.
 ./verify-rust.ps1 `
-    -RustFile    e2e-tests/01-tutorial/bounded_loop/add_one_verified.rs `
-    -CryptolSpec e2e-tests/01-tutorial/bounded_loop/add_one_spec.cry `
+    -RustFile    tests/e2e/cases/01-tutorial/bounded_loop/add_one_verified.rs `
+    -CryptolSpec tests/e2e/cases/01-tutorial/bounded_loop/add_one_spec.cry `
     -CryptolFn   add_one_spec `
     -Function    add_one
 
 # Prove both implementations match the same spec (and so each other).
 ./verify-equiv.ps1 `
-    -CppFile     e2e-tests/02-havoc-coverage/nothing_sketchy/add_one_verified.cpp `
-    -RustFile    e2e-tests/02-havoc-coverage/nothing_sketchy/add_one_verified.rs `
-    -CryptolSpec e2e-tests/02-havoc-coverage/nothing_sketchy/add_one_spec.cry `
+    -CppFile     tests/e2e/cases/02-havoc-coverage/nothing_sketchy/add_one_verified.cpp `
+    -RustFile    tests/e2e/cases/02-havoc-coverage/nothing_sketchy/add_one_verified.rs `
+    -CryptolSpec tests/e2e/cases/02-havoc-coverage/nothing_sketchy/add_one_spec.cry `
     -CryptolFn   add_one_spec `
     -Function    add_one
 ```
@@ -221,7 +221,7 @@ per-method `*_havoc_spec.saw` for every virtual method, ready to
 
 ## Examples
 
-End-to-end tests live in [e2e-tests/](e2e-tests/), grouped by role:
+End-to-end tests live in [tests/e2e/cases/](tests/e2e/cases/), grouped by role:
 
 | Directory | What it shows |
 |---|---|

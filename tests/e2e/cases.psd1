@@ -29,36 +29,36 @@
 @{
     Cases = @(
         # ── C++ havoc tests (verify.ps1) ─────────────────────────────────────
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'e2e-tests/02-havoc-coverage/nothing_sketchy';            File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'e2e-tests/02-havoc-coverage/nothing_sketchy';            File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/nothing_sketchy';            File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/nothing_sketchy';            File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
         # Compositional gen-verify havocs all direct callees, so OkLog::log is
         # overridden adversarially and may clobber super_important -> DISPROVED.
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'e2e-tests/02-havoc-coverage/concrete_type_safe';         File = 'add_one_verified.cpp';                   Expected = 'DISPROVED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'e2e-tests/02-havoc-coverage/concrete_type_safe';         File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'e2e-tests/02-havoc-coverage/class_member_clobbered';     File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'e2e-tests/02-havoc-coverage/class_member_clobbered';     File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'e2e-tests/02-havoc-coverage/global_memory_clobbered';    File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'e2e-tests/02-havoc-coverage/global_memory_clobbered';    File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'e2e-tests/02-havoc-coverage/input_param_modified';       File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'e2e-tests/02-havoc-coverage/input_param_modified';       File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'e2e-tests/02-havoc-coverage/output_param_uninitialized'; File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'e2e-tests/02-havoc-coverage/output_param_uninitialized'; File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'e2e-tests/02-havoc-coverage/pointer_aliasing';           File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'e2e-tests/02-havoc-coverage/pointer_aliasing';           File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/concrete_type_safe';         File = 'add_one_verified.cpp';                   Expected = 'DISPROVED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/concrete_type_safe';         File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/class_member_clobbered';     File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/class_member_clobbered';     File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/global_memory_clobbered';    File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/global_memory_clobbered';    File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/input_param_modified';       File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/input_param_modified';       File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/output_param_uninitialized'; File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/output_param_uninitialized'; File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/pointer_aliasing';           File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/pointer_aliasing';           File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
         # `ctor_stub_false_verdicts` exhibits two patterns that historically
         # produced *false* verdicts (one falsely DISPROVED, one falsely
         # VERIFIED) before SAW fixes landed. Filenames now follow the
         # convention; the README captures the historical bug context.
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'e2e-tests/02-havoc-coverage/ctor_stub_false_verdicts';          File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'e2e-tests/02-havoc-coverage/ctor_stub_false_verdicts';          File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'e2e-tests/02-havoc-coverage/multi_method_ordering';      File = 'call_validate_verified.cpp';             Expected = 'VERIFIED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'e2e-tests/02-havoc-coverage/multi_method_ordering';      File = 'call_audit_verified.cpp';                Expected = 'VERIFIED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'e2e-tests/02-havoc-coverage/multi_method_ordering';      File = 'call_prepare_disproved.cpp';             Expected = 'DISPROVED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'e2e-tests/02-havoc-coverage/multi_method_ordering';      File = 'call_report_verified.cpp';               Expected = 'VERIFIED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'e2e-tests/02-havoc-coverage/multi_method_ordering';      File = 'call_extra_disproved.cpp';               Expected = 'DISPROVED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/ctor_stub_false_verdicts';          File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/ctor_stub_false_verdicts';          File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/multi_method_ordering';      File = 'call_validate_verified.cpp';             Expected = 'VERIFIED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/multi_method_ordering';      File = 'call_audit_verified.cpp';                Expected = 'VERIFIED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/multi_method_ordering';      File = 'call_prepare_disproved.cpp';             Expected = 'DISPROVED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/multi_method_ordering';      File = 'call_report_verified.cpp';               Expected = 'VERIFIED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/multi_method_ordering';      File = 'call_extra_disproved.cpp';               Expected = 'DISPROVED' }
         # MSVC C++ exception lowering: total Cryptol spec, partial impl.
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'e2e-tests/02-havoc-coverage/throws_exception';           File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
-        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'e2e-tests/02-havoc-coverage/throws_exception';           File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/throws_exception';           File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/throws_exception';           File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
 
         # ── Rust havoc tests (verify-rust.ps1) ──────────────────────────────
         # Note: Rust has no havoc model in this verifier path — every
@@ -70,20 +70,20 @@
         # but are not registered here. See README.md for the rationale.
         #
         # Smoke: pipeline end-to-end on the simplest possible case.
-        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'e2e-tests/02-havoc-coverage/nothing_sketchy';         File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
-        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'e2e-tests/02-havoc-coverage/nothing_sketchy';         File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
+        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'tests/e2e/cases/02-havoc-coverage/nothing_sketchy';         File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
+        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'tests/e2e/cases/02-havoc-coverage/nothing_sketchy';         File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
         # `static mut` global write tracked across a concrete method call.
-        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'e2e-tests/02-havoc-coverage/concrete_type_safe';      File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
+        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'tests/e2e/cases/02-havoc-coverage/concrete_type_safe';      File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
         # `&mut self` struct-field write tracked across a method call.
-        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'e2e-tests/02-havoc-coverage/class_member_clobbered';  File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
+        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'tests/e2e/cases/02-havoc-coverage/class_member_clobbered';  File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
         # `&mut u32` argument mutation tracked across a free-function call.
-        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'e2e-tests/02-havoc-coverage/input_param_modified';    File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
-        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'e2e-tests/03-rust-trait-dispatch/static_dispatch';   File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
-        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'e2e-tests/03-rust-trait-dispatch/static_dispatch';   File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
-        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'e2e-tests/03-rust-trait-dispatch/dynamic_dispatch';  File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
-        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'e2e-tests/03-rust-trait-dispatch/dynamic_dispatch';  File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
-        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'e2e-tests/03-rust-trait-dispatch/external_crate';    File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
-        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'e2e-tests/03-rust-trait-dispatch/external_crate';    File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
+        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'tests/e2e/cases/02-havoc-coverage/input_param_modified';    File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
+        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'tests/e2e/cases/03-rust-trait-dispatch/static_dispatch';   File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
+        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'tests/e2e/cases/03-rust-trait-dispatch/static_dispatch';   File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
+        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'tests/e2e/cases/03-rust-trait-dispatch/dynamic_dispatch';  File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
+        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'tests/e2e/cases/03-rust-trait-dispatch/dynamic_dispatch';  File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
+        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'tests/e2e/cases/03-rust-trait-dispatch/external_crate';    File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
+        @{ Tag = 'rust_havoc'; Runner = 'rust'; Dir = 'tests/e2e/cases/03-rust-trait-dispatch/external_crate';    File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
 
         # ── Bounded-loop tests (positive) ───────────────────────────────────
         # `add_one_verified.{cpp,rs}` in this dir duplicate the
@@ -91,79 +91,79 @@
         # remain on disk as a teaching introduction to the pipeline but
         # are not registered here. Only `sum_first_n` actually exercises
         # bounded-loop unrolling.
-        @{ Tag = 'bounded_loop'; Runner = 'cpp';  Dir = 'e2e-tests/01-tutorial/bounded_loop'; File = 'sum_first_n_verified.cpp';  Expected = 'VERIFIED'; Cry = 'sum_first_n_spec.cry'; CryptolFn = 'sum_first_n_spec'; Function = 'sum_first_n' }
-        @{ Tag = 'bounded_loop'; Runner = 'rust'; Dir = 'e2e-tests/01-tutorial/bounded_loop'; File = 'sum_first_n_verified.rs';   Expected = 'VERIFIED'; Cry = 'sum_first_n_spec.cry'; CryptolFn = 'sum_first_n_spec'; Function = 'sum_first_n' }
+        @{ Tag = 'bounded_loop'; Runner = 'cpp';  Dir = 'tests/e2e/cases/01-tutorial/bounded_loop'; File = 'sum_first_n_verified.cpp';  Expected = 'VERIFIED'; Cry = 'sum_first_n_spec.cry'; CryptolFn = 'sum_first_n_spec'; Function = 'sum_first_n' }
+        @{ Tag = 'bounded_loop'; Runner = 'rust'; Dir = 'tests/e2e/cases/01-tutorial/bounded_loop'; File = 'sum_first_n_verified.rs';   Expected = 'VERIFIED'; Cry = 'sum_first_n_spec.cry'; CryptolFn = 'sum_first_n_spec'; Function = 'sum_first_n' }
 
         # ── CSEP590B 26sp Coding Assignment 4 — end-to-end tests ─────────────────────────
         # Five problems × {verified, disproved} (Part A) or {verified}
         # (Part B), each ported to both C++ and Rust. See
-        # e2e-tests/01-tutorial/csep590b_c04/README.md for the assignment
+        # tests/e2e/cases/01-tutorial/csep590b_c04/README.md for the assignment
         # context and per-problem bounds.
         # Part A — counterexample finding (verified + disproved variants).
-        @{ Tag = 'csep590b_c04'; Runner = 'cpp';  Dir = 'e2e-tests/01-tutorial/csep590b_c04/p1_clamp_sub';    File = 'clamp_sub_verified.cpp';     Expected = 'VERIFIED';  Cry = 'clamp_sub_spec.cry';    CryptolFn = 'clamp_sub_spec';    Function = 'clamp_sub'    }
-        @{ Tag = 'csep590b_c04'; Runner = 'cpp';  Dir = 'e2e-tests/01-tutorial/csep590b_c04/p1_clamp_sub';    File = 'clamp_sub_disproved.cpp';    Expected = 'DISPROVED'; Cry = 'clamp_sub_spec.cry';    CryptolFn = 'clamp_sub_spec';    Function = 'clamp_sub'    }
-        @{ Tag = 'csep590b_c04'; Runner = 'rust'; Dir = 'e2e-tests/01-tutorial/csep590b_c04/p1_clamp_sub';    File = 'clamp_sub_verified.rs';      Expected = 'VERIFIED';  Cry = 'clamp_sub_spec.cry';    CryptolFn = 'clamp_sub_spec';    Function = 'clamp_sub'    }
-        @{ Tag = 'csep590b_c04'; Runner = 'rust'; Dir = 'e2e-tests/01-tutorial/csep590b_c04/p1_clamp_sub';    File = 'clamp_sub_disproved.rs';     Expected = 'DISPROVED'; Cry = 'clamp_sub_spec.cry';    CryptolFn = 'clamp_sub_spec';    Function = 'clamp_sub'    }
-        @{ Tag = 'csep590b_c04'; Runner = 'cpp';  Dir = 'e2e-tests/01-tutorial/csep590b_c04/p2_safe_mul';     File = 'safe_mul_verified.cpp';      Expected = 'VERIFIED';  Cry = 'safe_mul_spec.cry';     CryptolFn = 'safe_mul_spec';     Function = 'safe_mul'     }
-        @{ Tag = 'csep590b_c04'; Runner = 'cpp';  Dir = 'e2e-tests/01-tutorial/csep590b_c04/p2_safe_mul';     File = 'safe_mul_disproved.cpp';     Expected = 'DISPROVED'; Cry = 'safe_mul_spec.cry';     CryptolFn = 'safe_mul_spec';     Function = 'safe_mul'     }
-        @{ Tag = 'csep590b_c04'; Runner = 'rust'; Dir = 'e2e-tests/01-tutorial/csep590b_c04/p2_safe_mul';     File = 'safe_mul_verified.rs';       Expected = 'VERIFIED';  Cry = 'safe_mul_spec.cry';     CryptolFn = 'safe_mul_spec';     Function = 'safe_mul'     }
-        @{ Tag = 'csep590b_c04'; Runner = 'rust'; Dir = 'e2e-tests/01-tutorial/csep590b_c04/p2_safe_mul';     File = 'safe_mul_disproved.rs';      Expected = 'DISPROVED'; Cry = 'safe_mul_spec.cry';     CryptolFn = 'safe_mul_spec';     Function = 'safe_mul'     }
-        @{ Tag = 'csep590b_c04'; Runner = 'cpp';  Dir = 'e2e-tests/01-tutorial/csep590b_c04/p3_count_groups'; File = 'count_groups_verified.cpp';  Expected = 'VERIFIED';  Cry = 'count_groups_spec.cry'; CryptolFn = 'count_groups_spec'; Function = 'count_groups' }
-        @{ Tag = 'csep590b_c04'; Runner = 'cpp';  Dir = 'e2e-tests/01-tutorial/csep590b_c04/p3_count_groups'; File = 'count_groups_disproved.cpp'; Expected = 'DISPROVED'; Cry = 'count_groups_spec.cry'; CryptolFn = 'count_groups_spec'; Function = 'count_groups' }
-        @{ Tag = 'csep590b_c04'; Runner = 'rust'; Dir = 'e2e-tests/01-tutorial/csep590b_c04/p3_count_groups'; File = 'count_groups_verified.rs';   Expected = 'VERIFIED';  Cry = 'count_groups_spec.cry'; CryptolFn = 'count_groups_spec'; Function = 'count_groups' }
-        @{ Tag = 'csep590b_c04'; Runner = 'rust'; Dir = 'e2e-tests/01-tutorial/csep590b_c04/p3_count_groups'; File = 'count_groups_disproved.rs';  Expected = 'DISPROVED'; Cry = 'count_groups_spec.cry'; CryptolFn = 'count_groups_spec'; Function = 'count_groups' }
+        @{ Tag = 'csep590b_c04'; Runner = 'cpp';  Dir = 'tests/e2e/cases/01-tutorial/csep590b_c04/p1_clamp_sub';    File = 'clamp_sub_verified.cpp';     Expected = 'VERIFIED';  Cry = 'clamp_sub_spec.cry';    CryptolFn = 'clamp_sub_spec';    Function = 'clamp_sub'    }
+        @{ Tag = 'csep590b_c04'; Runner = 'cpp';  Dir = 'tests/e2e/cases/01-tutorial/csep590b_c04/p1_clamp_sub';    File = 'clamp_sub_disproved.cpp';    Expected = 'DISPROVED'; Cry = 'clamp_sub_spec.cry';    CryptolFn = 'clamp_sub_spec';    Function = 'clamp_sub'    }
+        @{ Tag = 'csep590b_c04'; Runner = 'rust'; Dir = 'tests/e2e/cases/01-tutorial/csep590b_c04/p1_clamp_sub';    File = 'clamp_sub_verified.rs';      Expected = 'VERIFIED';  Cry = 'clamp_sub_spec.cry';    CryptolFn = 'clamp_sub_spec';    Function = 'clamp_sub'    }
+        @{ Tag = 'csep590b_c04'; Runner = 'rust'; Dir = 'tests/e2e/cases/01-tutorial/csep590b_c04/p1_clamp_sub';    File = 'clamp_sub_disproved.rs';     Expected = 'DISPROVED'; Cry = 'clamp_sub_spec.cry';    CryptolFn = 'clamp_sub_spec';    Function = 'clamp_sub'    }
+        @{ Tag = 'csep590b_c04'; Runner = 'cpp';  Dir = 'tests/e2e/cases/01-tutorial/csep590b_c04/p2_safe_mul';     File = 'safe_mul_verified.cpp';      Expected = 'VERIFIED';  Cry = 'safe_mul_spec.cry';     CryptolFn = 'safe_mul_spec';     Function = 'safe_mul'     }
+        @{ Tag = 'csep590b_c04'; Runner = 'cpp';  Dir = 'tests/e2e/cases/01-tutorial/csep590b_c04/p2_safe_mul';     File = 'safe_mul_disproved.cpp';     Expected = 'DISPROVED'; Cry = 'safe_mul_spec.cry';     CryptolFn = 'safe_mul_spec';     Function = 'safe_mul'     }
+        @{ Tag = 'csep590b_c04'; Runner = 'rust'; Dir = 'tests/e2e/cases/01-tutorial/csep590b_c04/p2_safe_mul';     File = 'safe_mul_verified.rs';       Expected = 'VERIFIED';  Cry = 'safe_mul_spec.cry';     CryptolFn = 'safe_mul_spec';     Function = 'safe_mul'     }
+        @{ Tag = 'csep590b_c04'; Runner = 'rust'; Dir = 'tests/e2e/cases/01-tutorial/csep590b_c04/p2_safe_mul';     File = 'safe_mul_disproved.rs';      Expected = 'DISPROVED'; Cry = 'safe_mul_spec.cry';     CryptolFn = 'safe_mul_spec';     Function = 'safe_mul'     }
+        @{ Tag = 'csep590b_c04'; Runner = 'cpp';  Dir = 'tests/e2e/cases/01-tutorial/csep590b_c04/p3_count_groups'; File = 'count_groups_verified.cpp';  Expected = 'VERIFIED';  Cry = 'count_groups_spec.cry'; CryptolFn = 'count_groups_spec'; Function = 'count_groups' }
+        @{ Tag = 'csep590b_c04'; Runner = 'cpp';  Dir = 'tests/e2e/cases/01-tutorial/csep590b_c04/p3_count_groups'; File = 'count_groups_disproved.cpp'; Expected = 'DISPROVED'; Cry = 'count_groups_spec.cry'; CryptolFn = 'count_groups_spec'; Function = 'count_groups' }
+        @{ Tag = 'csep590b_c04'; Runner = 'rust'; Dir = 'tests/e2e/cases/01-tutorial/csep590b_c04/p3_count_groups'; File = 'count_groups_verified.rs';   Expected = 'VERIFIED';  Cry = 'count_groups_spec.cry'; CryptolFn = 'count_groups_spec'; Function = 'count_groups' }
+        @{ Tag = 'csep590b_c04'; Runner = 'rust'; Dir = 'tests/e2e/cases/01-tutorial/csep590b_c04/p3_count_groups'; File = 'count_groups_disproved.rs';  Expected = 'DISPROVED'; Cry = 'count_groups_spec.cry'; CryptolFn = 'count_groups_spec'; Function = 'count_groups' }
         # Part B — invariant finding (bounded reference impl only).
-        @{ Tag = 'csep590b_c04'; Runner = 'cpp';  Dir = 'e2e-tests/01-tutorial/csep590b_c04/p4_make_change';  File = 'make_change_verified.cpp';   Expected = 'VERIFIED';  Cry = 'make_change_spec.cry';  CryptolFn = 'make_change_spec';  Function = 'make_change'  }
-        @{ Tag = 'csep590b_c04'; Runner = 'rust'; Dir = 'e2e-tests/01-tutorial/csep590b_c04/p4_make_change';  File = 'make_change_verified.rs';    Expected = 'VERIFIED';  Cry = 'make_change_spec.cry';  CryptolFn = 'make_change_spec';  Function = 'make_change'  }
-        @{ Tag = 'csep590b_c04'; Runner = 'cpp';  Dir = 'e2e-tests/01-tutorial/csep590b_c04/p5_isqrt';        File = 'isqrt_verified.cpp';         Expected = 'VERIFIED';  Cry = 'isqrt_spec.cry';        CryptolFn = 'isqrt_spec';        Function = 'isqrt'        }
-        @{ Tag = 'csep590b_c04'; Runner = 'rust'; Dir = 'e2e-tests/01-tutorial/csep590b_c04/p5_isqrt';        File = 'isqrt_verified.rs';          Expected = 'VERIFIED';  Cry = 'isqrt_spec.cry';        CryptolFn = 'isqrt_spec';        Function = 'isqrt'        }
+        @{ Tag = 'csep590b_c04'; Runner = 'cpp';  Dir = 'tests/e2e/cases/01-tutorial/csep590b_c04/p4_make_change';  File = 'make_change_verified.cpp';   Expected = 'VERIFIED';  Cry = 'make_change_spec.cry';  CryptolFn = 'make_change_spec';  Function = 'make_change'  }
+        @{ Tag = 'csep590b_c04'; Runner = 'rust'; Dir = 'tests/e2e/cases/01-tutorial/csep590b_c04/p4_make_change';  File = 'make_change_verified.rs';    Expected = 'VERIFIED';  Cry = 'make_change_spec.cry';  CryptolFn = 'make_change_spec';  Function = 'make_change'  }
+        @{ Tag = 'csep590b_c04'; Runner = 'cpp';  Dir = 'tests/e2e/cases/01-tutorial/csep590b_c04/p5_isqrt';        File = 'isqrt_verified.cpp';         Expected = 'VERIFIED';  Cry = 'isqrt_spec.cry';        CryptolFn = 'isqrt_spec';        Function = 'isqrt'        }
+        @{ Tag = 'csep590b_c04'; Runner = 'rust'; Dir = 'tests/e2e/cases/01-tutorial/csep590b_c04/p5_isqrt';        File = 'isqrt_verified.rs';          Expected = 'VERIFIED';  Cry = 'isqrt_spec.cry';        CryptolFn = 'isqrt_spec';        Function = 'isqrt'        }
 
         # ── String operations (SWAR null-byte detection: real libc strlen
         #    bit-trick over a 64-bit word treated as 8 packed bytes). ───────
-        @{ Tag = 'string_ops'; Runner = 'cpp'; Dir = 'e2e-tests/05-string-ops/has_null_byte'; File = 'has_null_byte_verified.cpp';  Cry = 'has_null_byte_spec.cry'; CryptolFn = 'has_null_byte_spec'; Function = 'has_null_byte'; Expected = 'VERIFIED'  }
-        @{ Tag = 'string_ops'; Runner = 'cpp'; Dir = 'e2e-tests/05-string-ops/has_null_byte'; File = 'has_null_byte_disproved.cpp'; Cry = 'has_null_byte_spec.cry'; CryptolFn = 'has_null_byte_spec'; Function = 'has_null_byte'; Expected = 'DISPROVED' }
+        @{ Tag = 'string_ops'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/has_null_byte'; File = 'has_null_byte_verified.cpp';  Cry = 'has_null_byte_spec.cry'; CryptolFn = 'has_null_byte_spec'; Function = 'has_null_byte'; Expected = 'VERIFIED'  }
+        @{ Tag = 'string_ops'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/has_null_byte'; File = 'has_null_byte_disproved.cpp'; Cry = 'has_null_byte_spec.cry'; CryptolFn = 'has_null_byte_spec'; Function = 'has_null_byte'; Expected = 'DISPROVED' }
 
         # ── Real C-string test: count_digits over `_In_reads_(8) const char*`.
         #    Exercises the SAL count annotation -> 8-byte buffer allocation
         #    path plus the auto-emitted llvm.var.annotation override. ───────
-        @{ Tag = 'strings'; Runner = 'cpp'; Dir = 'e2e-tests/05-string-ops/count_digits'; File = 'count_digits_cstr_verified.cpp';  Cry = 'count_digits_spec.cry'; CryptolFn = 'count_digits_spec'; Function = 'count_digits'; Expected = 'VERIFIED'  }
-        @{ Tag = 'strings'; Runner = 'cpp'; Dir = 'e2e-tests/05-string-ops/count_digits'; File = 'count_digits_cstr_disproved.cpp'; Cry = 'count_digits_spec.cry'; CryptolFn = 'count_digits_spec'; Function = 'count_digits'; Expected = 'DISPROVED' }
+        @{ Tag = 'strings'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/count_digits'; File = 'count_digits_cstr_verified.cpp';  Cry = 'count_digits_spec.cry'; CryptolFn = 'count_digits_spec'; Function = 'count_digits'; Expected = 'VERIFIED'  }
+        @{ Tag = 'strings'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/count_digits'; File = 'count_digits_cstr_disproved.cpp'; Cry = 'count_digits_spec.cry'; CryptolFn = 'count_digits_spec'; Function = 'count_digits'; Expected = 'DISPROVED' }
         # std::string heap-mode test: hand-rolled SAW driver allocates a
         # basic_string with `_Ptr` wired to a separately-allocated content
         # buffer, asserts the Cryptol `valid_string` precondition, and
         # verifies (z3) that count_digits matches the spec for any string
         # up to MAX_LEN=32 bytes. Uses a custom runner because gen-verify
         # can't synthesise this layout yet.
-        @{ Tag = 'strings'; Runner = 'custom'; Script = 'e2e-tests/05-string-ops/count_digits/run_string_test.ps1'; ScriptArgs = @{ CppFile = 'e2e-tests/05-string-ops/count_digits/count_digits_string_verified.cpp';  ExpectedResult = 'VERIFIED'  }; Expected = 'VERIFIED'  }
-        @{ Tag = 'strings'; Runner = 'custom'; Script = 'e2e-tests/05-string-ops/count_digits/run_string_test.ps1'; ScriptArgs = @{ CppFile = 'e2e-tests/05-string-ops/count_digits/count_digits_string_disproved.cpp'; ExpectedResult = 'DISPROVED' }; Expected = 'DISPROVED' }
+        @{ Tag = 'strings'; Runner = 'custom'; Script = 'tests/e2e/cases/05-string-ops/count_digits/run_string_test.ps1'; ScriptArgs = @{ CppFile = 'tests/e2e/cases/05-string-ops/count_digits/count_digits_string_verified.cpp';  ExpectedResult = 'VERIFIED'  }; Expected = 'VERIFIED'  }
+        @{ Tag = 'strings'; Runner = 'custom'; Script = 'tests/e2e/cases/05-string-ops/count_digits/run_string_test.ps1'; ScriptArgs = @{ CppFile = 'tests/e2e/cases/05-string-ops/count_digits/count_digits_string_disproved.cpp'; ExpectedResult = 'DISPROVED' }; Expected = 'DISPROVED' }
 
         # ── C++/Rust equivalence tests (verify-equiv.ps1) ───────────────────
-        @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'e2e-tests/04-cpp-rust-equivalence/compute_fee_reordered';         Cpp = 'compute_fee.cpp'; Rust = 'compute_fee_verified.rs';  Cry = 'compute_fee_spec.cry'; CryptolFn = 'compute_fee_spec'; Function = 'compute_fee'; Expected = 'EQUIVALENT'     }
-        @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'e2e-tests/04-cpp-rust-equivalence/compute_fee_reordered';         Cpp = 'compute_fee.cpp'; Rust = 'compute_fee_disproved.rs'; Cry = 'compute_fee_spec.cry'; CryptolFn = 'compute_fee_spec'; Function = 'compute_fee'; Expected = 'NOT EQUIVALENT' }
-        @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'e2e-tests/04-cpp-rust-equivalence/sat_add_optimized';   Cpp = 'sat_add.cpp';     Rust = 'sat_add_verified.rs';  Cry = 'sat_add_spec.cry';     CryptolFn = 'sat_add_spec';     Function = 'sat_add';     Expected = 'EQUIVALENT'     }
-        @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'e2e-tests/04-cpp-rust-equivalence/sat_add_optimized';   Cpp = 'sat_add.cpp';     Rust = 'sat_add_disproved.rs'; Cry = 'sat_add_spec.cry';     CryptolFn = 'sat_add_spec';     Function = 'sat_add';     Expected = 'NOT EQUIVALENT' }
-        @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'e2e-tests/04-cpp-rust-equivalence/not_operator_trap'; Cpp = 'negate.cpp';     Rust = 'negate.rs';           Cry = 'negate_spec.cry';      CryptolFn = 'negate_spec';      Function = 'negate';      Expected = 'NOT EQUIVALENT' }
+        @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'tests/e2e/cases/04-cpp-rust-equivalence/compute_fee_reordered';         Cpp = 'compute_fee.cpp'; Rust = 'compute_fee_verified.rs';  Cry = 'compute_fee_spec.cry'; CryptolFn = 'compute_fee_spec'; Function = 'compute_fee'; Expected = 'EQUIVALENT'     }
+        @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'tests/e2e/cases/04-cpp-rust-equivalence/compute_fee_reordered';         Cpp = 'compute_fee.cpp'; Rust = 'compute_fee_disproved.rs'; Cry = 'compute_fee_spec.cry'; CryptolFn = 'compute_fee_spec'; Function = 'compute_fee'; Expected = 'NOT EQUIVALENT' }
+        @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'tests/e2e/cases/04-cpp-rust-equivalence/sat_add_optimized';   Cpp = 'sat_add.cpp';     Rust = 'sat_add_verified.rs';  Cry = 'sat_add_spec.cry';     CryptolFn = 'sat_add_spec';     Function = 'sat_add';     Expected = 'EQUIVALENT'     }
+        @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'tests/e2e/cases/04-cpp-rust-equivalence/sat_add_optimized';   Cpp = 'sat_add.cpp';     Rust = 'sat_add_disproved.rs'; Cry = 'sat_add_spec.cry';     CryptolFn = 'sat_add_spec';     Function = 'sat_add';     Expected = 'NOT EQUIVALENT' }
+        @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'tests/e2e/cases/04-cpp-rust-equivalence/not_operator_trap'; Cpp = 'negate.cpp';     Rust = 'negate.rs';           Cry = 'negate_spec.cry';      CryptolFn = 'negate_spec';      Function = 'negate';      Expected = 'NOT EQUIVALENT' }
 
         # ── Unknown concrete-impl dyn-trait case (custom runner) ────────────
-        @{ Tag = 'trait_unknown_impl'; Runner = 'custom'; Script = 'e2e-tests/03-rust-trait-dispatch/unknown_impl/run_unknown_impl.ps1'; ScriptArgs = @{ RustFile = 'e2e-tests/03-rust-trait-dispatch/unknown_impl/add_step_verified.rs';  ExpectedResult = 'VERIFIED'  }; Expected = 'VERIFIED'  }
-        @{ Tag = 'trait_unknown_impl'; Runner = 'custom'; Script = 'e2e-tests/03-rust-trait-dispatch/unknown_impl/run_unknown_impl.ps1'; ScriptArgs = @{ RustFile = 'e2e-tests/03-rust-trait-dispatch/unknown_impl/add_step_disproved.rs'; ExpectedResult = 'DISPROVED' }; Expected = 'DISPROVED' }
+        @{ Tag = 'trait_unknown_impl'; Runner = 'custom'; Script = 'tests/e2e/cases/03-rust-trait-dispatch/unknown_impl/run_unknown_impl.ps1'; ScriptArgs = @{ RustFile = 'tests/e2e/cases/03-rust-trait-dispatch/unknown_impl/add_step_verified.rs';  ExpectedResult = 'VERIFIED'  }; Expected = 'VERIFIED'  }
+        @{ Tag = 'trait_unknown_impl'; Runner = 'custom'; Script = 'tests/e2e/cases/03-rust-trait-dispatch/unknown_impl/run_unknown_impl.ps1'; ScriptArgs = @{ RustFile = 'tests/e2e/cases/03-rust-trait-dispatch/unknown_impl/add_step_disproved.rs'; ExpectedResult = 'DISPROVED' }; Expected = 'DISPROVED' }
 
         # ── Async-Rust coroutine test (custom runner) ───────────────────────
-        @{ Tag = 'async_rust'; Runner = 'custom'; Script = 'e2e-tests/06-async-rust/add_one_coroutine/run_async_test.ps1'; ScriptArgs = @{}; Expected = 'VERIFIED' }
+        @{ Tag = 'async_rust'; Runner = 'custom'; Script = 'tests/e2e/cases/06-async-rust/add_one_coroutine/run_async_test.ps1'; ScriptArgs = @{}; Expected = 'VERIFIED' }
 
         # ── Rust adversarial research cases: each demonstrates a specific
         #    verifier blind spot or successful adversarial coverage.
         #    Expected verdicts captured from baseline runs.
-        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'e2e-tests/99-research/rust_adversarial/cell_interior_mutation';  File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
-        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'e2e-tests/99-research/rust_adversarial/cross_fn_global';         File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
-        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'e2e-tests/99-research/rust_adversarial/drop_noinline';           File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
-        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'e2e-tests/99-research/rust_adversarial/drop_side_effect';        File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
-        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'e2e-tests/99-research/rust_adversarial/raw_pointer_aliasing';    File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
-        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'e2e-tests/99-research/rust_adversarial/symbol_collision';        File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
-        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'e2e-tests/99-research/rust_adversarial/unreachable_unchecked';   File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
+        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/rust_adversarial/cell_interior_mutation';  File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
+        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/rust_adversarial/cross_fn_global';         File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
+        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/rust_adversarial/drop_noinline';           File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
+        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/rust_adversarial/drop_side_effect';        File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
+        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/rust_adversarial/raw_pointer_aliasing';    File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
+        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/rust_adversarial/symbol_collision';        File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
+        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/rust_adversarial/unreachable_unchecked';   File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
         # box_allocator currently produces UNKNOWN under the default pipeline
         # (Box::new path the front-end can't model). Tracked separately; not
         # run by default to keep the suite green. To enable, add tag 'box_allocator'.
-        @{ Tag = 'box_allocator'; Runner = 'rust'; Dir = 'e2e-tests/99-research/box_allocator';        File = 'add_one.rs'; Expected = 'UNKNOWN' }
+        @{ Tag = 'box_allocator'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/box_allocator';        File = 'add_one.rs'; Expected = 'UNKNOWN' }
     )
 }

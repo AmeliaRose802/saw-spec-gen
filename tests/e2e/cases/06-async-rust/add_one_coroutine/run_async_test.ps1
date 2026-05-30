@@ -25,7 +25,7 @@
          the coroutine, this gives `add_one(x).await == x + 1`.
 
 .EXAMPLE
-    pwsh e2e-tests/06-async-rust/add_one_coroutine/run_async_test.ps1
+    pwsh tests/e2e/cases/06-async-rust/add_one_coroutine/run_async_test.ps1
 #>
 
 [CmdletBinding()]

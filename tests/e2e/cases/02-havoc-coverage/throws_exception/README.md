@@ -114,15 +114,15 @@ in-Crucible fix is sufficient.
 ```powershell
 # Control case — VERIFIED
 ./verify.ps1 `
-    -CppFile     e2e-tests\02-havoc-coverage\throws_exception\add_one_verified.cpp `
-    -CryptolSpec e2e-tests\02-havoc-coverage\throws_exception\add_one_spec.cry `
+    -CppFile     tests\e2e\cases\02-havoc-coverage\throws_exception\add_one_verified.cpp `
+    -CryptolSpec tests\e2e\cases\02-havoc-coverage\throws_exception\add_one_spec.cry `
     -CryptolFn   add_one_spec `
     -Function    add_one
 
 # Throws case — DISPROVED ( with counterexample x = 42)
 ./verify.ps1 `
-    -CppFile     e2e-tests\02-havoc-coverage\throws_exception\add_one_disproved.cpp `
-    -CryptolSpec e2e-tests\02-havoc-coverage\throws_exception\add_one_spec.cry `
+    -CppFile     tests\e2e\cases\02-havoc-coverage\throws_exception\add_one_disproved.cpp `
+    -CryptolSpec tests\e2e\cases\02-havoc-coverage\throws_exception\add_one_spec.cry `
     -CryptolFn   add_one_spec `
     -Function    add_one
 ```

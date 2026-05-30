@@ -16,8 +16,8 @@
 //
 // Build/verify:
 //   .\verify-rust.ps1 `
-//       -RustFile    e2e-tests\01-tutorial\bounded_loop\add_one_verified.rs `
-//       -CryptolSpec e2e-tests\01-tutorial\bounded_loop\add_one_spec.cry `
+//       -RustFile    tests\e2e\cases\01-tutorial\bounded_loop\add_one_verified.rs `
+//       -CryptolSpec tests\e2e\cases\01-tutorial\bounded_loop\add_one_spec.cry `
 //       -CryptolFn   add_one_spec `
 //       -Function    add_one
 //
