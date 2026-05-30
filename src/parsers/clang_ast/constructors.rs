@@ -95,11 +95,12 @@ impl<'a> Visitor for CtorVisitor<'a> {
 ///   - C1 = complete object constructor (standalone allocation)
 ///   - C2 = base object constructor (as subobject)
 ///   - C3 = allocating constructor
+///
 /// The clang AST exposes the C1 mangling, but the compiler often emits
-///     only C2 if no C1 call site exists. When the AST's C1 symbol is
-///     missing from the bitcode but C2 (or C3) is present, transparently
-///     substitute the available variant so the override still applies.
-///     Same logic applies for destructors (D0/D1/D2).
+/// only C2 if no C1 call site exists. When the AST's C1 symbol is
+/// missing from the bitcode but C2 (or C3) is present, transparently
+/// substitute the available variant so the override still applies.
+/// Same logic applies for destructors (D0/D1/D2).
 pub fn filter_ctors_by_ir_symbols(ctors: &mut Vec<ClassConstructor>, ir_funcs: &[FunctionInfo]) {
     let ir_symbols: std::collections::HashSet<&str> = ir_funcs
         .iter()
