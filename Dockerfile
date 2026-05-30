@@ -78,6 +78,16 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
 # and-braces.
 ENV PATH=/root/.saw-spec-gen/llvm/bin:/root/.saw-spec-gen/saw/bin:/usr/local/cargo/bin:${PATH}
 
+# ── llvm-exception-lower (C++ throw/catch lowering for SAW) ───────────
+# The install script downloads a prebuilt binary from GitHub Releases
+# or falls back to a cmake source build. discover-tools.ps1 probes
+# $HOME/.saw-spec-gen/exception-lower/bin/ automatically.
+COPY scripts/install-exception-lower.sh /tmp/install-exception-lower.sh
+RUN chmod +x /tmp/install-exception-lower.sh \
+ && LLVM_BIN=/root/.saw-spec-gen/llvm/bin /tmp/install-exception-lower.sh \
+ && rm -f /tmp/install-exception-lower.sh \
+ && /root/.saw-spec-gen/exception-lower/bin/exception-lower --help 2>&1 | head -1
+
 LABEL org.opencontainers.image.source="https://github.com/AmeliaRose802/saw-spec-gen" \
       org.opencontainers.image.description="saw-spec-gen CI toolchain: SAW ${SAW_VERSION}, LLVM ${LLVM_VERSION}, PowerShell ${PWSH_VERSION}, Rust ${RUST_TOOLCHAIN}" \
       org.opencontainers.image.licenses="MIT"
