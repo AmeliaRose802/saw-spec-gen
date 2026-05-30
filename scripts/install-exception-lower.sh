@@ -18,7 +18,7 @@
 #
 # Environment overrides:
 #   INSTALL_ROOT          install root           (default: ~/.saw-spec-gen)
-#   EXCEPTION_LOWER_TAG   release tag to fetch   (default: v0.3.0)
+#   EXCEPTION_LOWER_TAG   release tag to fetch   (default: v0.3.1)
 #   EXCEPTION_LOWER_REF   git ref for fallback   (default: main)
 #   LLVM_BIN              llvm bin dir for cmake (default: empty)
 #   QUIET                 1 to suppress info     (default: 0)
@@ -28,7 +28,7 @@
 set -euo pipefail
 
 INSTALL_ROOT="${INSTALL_ROOT:-${HOME}/.saw-spec-gen}"
-EXCEPTION_LOWER_TAG="${EXCEPTION_LOWER_TAG:-v0.3.0}"
+EXCEPTION_LOWER_TAG="${EXCEPTION_LOWER_TAG:-v0.3.1}"
 EXCEPTION_LOWER_REF="${EXCEPTION_LOWER_REF:-main}"
 LLVM_BIN="${LLVM_BIN:-}"
 QUIET="${QUIET:-0}"
