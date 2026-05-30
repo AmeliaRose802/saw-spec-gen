@@ -5,7 +5,7 @@
 #   1. scripts/check-line-count.sh on staged source files (always).
 #   2. cargo fmt -- --check (matches CI; skip with SKIP_FMT=1).
 #   3. cargo clippy -- -D warnings (matches CI; skip with SKIP_CLIPPY=1).
-#   4. tests/saw_demos/Run-SawDemos.ps1, the end-to-end SAW demo suite.
+#   4. tests/e2e/Run-E2ETests.ps1, the end-to-end end-to-end test suite.
 #      The runner auto-skips when SAW is not installed on the machine.
 #      Set SKIP_SAW_TESTS=1 in the environment to skip explicitly.
 #
@@ -48,15 +48,15 @@ else
     cargo clippy --quiet -- -D warnings
 fi
 
-# ── 4. SAW demo suite (skippable) ─────────────────────────────────────────
+# ── 4. end-to-end test suite (skippable) ─────────────────────────────────────────
 if [ "${SKIP_SAW_TESTS:-0}" = "1" ]; then
-    echo "pre-commit: SKIP_SAW_TESTS=1 set; skipping SAW demo suite."
+    echo "pre-commit: SKIP_SAW_TESTS=1 set; skipping end-to-end test suite."
     exit 0
 fi
 
 if ! command -v pwsh >/dev/null 2>&1; then
-    echo "pre-commit: pwsh not found; skipping SAW demo suite."
+    echo "pre-commit: pwsh not found; skipping end-to-end test suite."
     exit 0
 fi
 
-pwsh -NoLogo -NoProfile -File tests/saw_demos/Run-SawDemos.ps1
+pwsh -NoLogo -NoProfile -File tests/e2e/Run-E2ETests.ps1

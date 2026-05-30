@@ -1,0 +1,10 @@
+// Cryptol spec: count how many of the input bytes are ASCII digits.
+//
+// The C++ implementation under test is count_digits_cstr_verified.cpp
+// (verified) / count_digits_cstr_disproved.cpp (counterexample). The
+// input here is modelled as exactly 8 bytes so the proof is finite;
+// the C++ side guarantees the same window via `_In_reads_(8)`.
+
+count_digits_spec : [8][8] -> [32]
+count_digits_spec s =
+  sum [ if (b >= 0x30 /\ b <= 0x39) then 1 else 0 | b <- s ]

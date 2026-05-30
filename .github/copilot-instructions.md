@@ -66,25 +66,25 @@ git config core.hooksPath .githooks
 
 This is a one-time setup per clone.
 
-## SAW demo test suite
+## end-to-end test suite
 
-End-to-end demo regressions live under `tests/saw_demos/`:
+End-to-end test regressions live under `tests/e2e/`:
 
-- `cases.psd1` — declarative manifest (one entry per demo case, with the
+- `cases.psd1` — declarative manifest (one entry per test case, with the
   expected `SAT`/`UNSAT`/`VERIFIED`/`DISPROVED`/`EQUIVALENT`/
   `NOT EQUIVALENT` verdict).
-- `Run-SawDemos.ps1` — runner that loads the manifest, dispatches to
+- `Run-E2ETests.ps1` — runner that loads the manifest, dispatches to
   `verify.ps1` / `verify-rust.ps1` / `verify-equiv.ps1` (or any custom
-  per-demo script), captures `RESULT:` lines, and emits a TAP-style
+  per-test script), captures `RESULT:` lines, and emits a TAP-style
   summary. Returns non-zero if any case disagrees with its expected
   verdict.
 
 Run locally:
 
 ```powershell
-pwsh tests/saw_demos/Run-SawDemos.ps1               # full suite
-pwsh tests/saw_demos/Run-SawDemos.ps1 -Tag cpp_havoc
-pwsh tests/saw_demos/Run-SawDemos.ps1 -List         # dry run
+pwsh tests/e2e/Run-E2ETests.ps1               # full suite
+pwsh tests/e2e/Run-E2ETests.ps1 -Tag cpp_havoc
+pwsh tests/e2e/Run-E2ETests.ps1 -List         # dry run
 ```
 
 The pre-commit hook (above) runs the line-count check, `cargo fmt --
@@ -92,7 +92,7 @@ The pre-commit hook (above) runs the line-count check, `cargo fmt --
 -- -D warnings` (matches CI; set `SKIP_CLIPPY=1` to skip), **and** the
 SAW suite. The runner auto-skips when SAW is not installed on the machine
 (no-op exit 0). Set `SKIP_SAW_TESTS=1` in the environment to skip
-explicitly. When adding a new demo, append an entry to `cases.psd1` —
+explicitly. When adding a new test, append an entry to `cases.psd1` —
 do not write a bespoke runner script. See
-[tests/saw_demos/README.md](../tests/saw_demos/README.md) for the
+[tests/e2e/README.md](../tests/e2e/README.md) for the
 manifest schema.
