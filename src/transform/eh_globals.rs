@@ -173,6 +173,57 @@ fn balanced_brace(s: &str, open: char, close: char) -> Option<usize> {
     None
 }
 
+// ── Exception-lower globals injection ──────────────────────────
+
+/// Scan the lowered LLVM IR for exception-lower globals and add them to
+/// the target spec so SAW can allocate them. The exception-lower pass
+/// synthesises `@__exclow_error_flag`, `@__exclow_error_typeinfo`, and
+/// `@__exclow_error_value` — none of which appear in the clang AST.
+pub fn inject_exclow_globals(spec: &mut crate::constraints::SpecConstraint, ir_path: &std::path::Path) {
+    use crate::constraints::types::{GlobalVarInfo, TypeInfo};
+
+    let text = match std::fs::read_to_string(ir_path) {
+        Ok(t) => t,
+        Err(_) => return,
+    };
+
+    // Quick check: if the flag global isn't present, there's nothing to do.
+    if !text.contains("@__exclow_error_flag") {
+        return;
+    }
+
+    let exclow_globals = [
+        GlobalVarInfo {
+            name: "__exclow_error_flag".into(),
+            mangled_name: "__exclow_error_flag".into(),
+            ty: TypeInfo::Bool,
+            init_value: Some("0".into()),
+        },
+        GlobalVarInfo {
+            name: "__exclow_error_typeinfo".into(),
+            mangled_name: "__exclow_error_typeinfo".into(),
+            ty: TypeInfo::Pointer(Box::new(TypeInfo::UnsignedInt(8))),
+            init_value: None,
+        },
+        GlobalVarInfo {
+            name: "__exclow_error_value".into(),
+            mangled_name: "__exclow_error_value".into(),
+            ty: TypeInfo::Pointer(Box::new(TypeInfo::UnsignedInt(8))),
+            init_value: None,
+        },
+    ];
+
+    for g in exclow_globals {
+        if !spec
+            .referenced_globals
+            .iter()
+            .any(|existing| existing.mangled_name == g.mangled_name)
+        {
+            spec.referenced_globals.push(g);
+        }
+    }
+}
+
 // ── Tests ──────────────────────────────────────────────────────
 
 #[cfg(test)]

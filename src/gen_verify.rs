@@ -99,7 +99,7 @@ pub fn run(
     // If the LLVM IR contains exception-lower globals (@__exclow_error_*),
     // inject them into the target spec so that SAW allocates them.
     if let Some(ir_path) = llvm_ir_path {
-        inject_exclow_globals(&mut target_spec, ir_path);
+        crate::transform::eh_globals::inject_exclow_globals(&mut target_spec, ir_path);
     }
 
     let all_globals = clang_ast::extract_all_globals(&parsed_ast)?;
@@ -431,6 +431,31 @@ pub fn run(
         resolve_spec_types_quiet(spec, &ir_struct_sizes);
     }
 
+    // Bitcode-driven extern override scan. The AST pipeline above only
+    // sees declarations the path filter kept; anything filtered as a
+    // system header (e.g. `printf` in MSVC's `<cstdio>`) is invisible
+    // even when the TU actually calls it, and SAW then aborts on
+    // `internal: error: in printf`. A second pass on the LLVM IR text
+    // covers declare-only externs and variadic functions whose body
+    // uses `llvm.va_*` intrinsics Crucible-LLVM can't simulate.
+    // AST-derived overrides take precedence — we pass their symbols
+    // as `already_covered` so the bitcode scan doesn't double-emit.
+    // See `src/emit/saw_emit/bitcode_overrides.rs` for the contract.
+    let already_covered: Vec<String> = external_calls_owned
+        .iter()
+        .filter_map(|s| {
+            s.mangled_name
+                .clone()
+                .or_else(|| Some(s.function_name.clone()))
+        })
+        .collect();
+    let bitcode_overrides = saw_emit::scan_and_emit_bitcode_overrides(
+        llvm_ir_path,
+        &target_mangled,
+        &already_covered,
+        &all_globals,
+    );
+
     saw_emit::emit_verification_script(
         bitcode,
         cryptol_spec,
@@ -446,6 +471,7 @@ pub fn run(
         &all_globals,
         &ctors,
         &stubs_status,
+        &bitcode_overrides,
         output,
     )?;
 
@@ -473,51 +499,4 @@ pub fn run(
     Ok(())
 }
 
-/// Scan the lowered LLVM IR for exception-lower globals and add them to
-/// the target spec so SAW can allocate them. The exception-lower pass
-/// synthesises `@__exclow_error_flag`, `@__exclow_error_typeinfo`, and
-/// `@__exclow_error_value` — none of which appear in the clang AST.
-fn inject_exclow_globals(spec: &mut constraints::SpecConstraint, ir_path: &Path) {
-    use crate::constraints::types::{GlobalVarInfo, TypeInfo};
 
-    let text = match std::fs::read_to_string(ir_path) {
-        Ok(t) => t,
-        Err(_) => return,
-    };
-
-    // Quick check: if the flag global isn't present, there's nothing to do.
-    if !text.contains("@__exclow_error_flag") {
-        return;
-    }
-
-    let exclow_globals = [
-        GlobalVarInfo {
-            name: "__exclow_error_flag".into(),
-            mangled_name: "__exclow_error_flag".into(),
-            ty: TypeInfo::Bool,
-            init_value: Some("0".into()),
-        },
-        GlobalVarInfo {
-            name: "__exclow_error_typeinfo".into(),
-            mangled_name: "__exclow_error_typeinfo".into(),
-            ty: TypeInfo::Pointer(Box::new(TypeInfo::UnsignedInt(8))),
-            init_value: None,
-        },
-        GlobalVarInfo {
-            name: "__exclow_error_value".into(),
-            mangled_name: "__exclow_error_value".into(),
-            ty: TypeInfo::Pointer(Box::new(TypeInfo::UnsignedInt(8))),
-            init_value: None,
-        },
-    ];
-
-    for g in exclow_globals {
-        if !spec
-            .referenced_globals
-            .iter()
-            .any(|existing| existing.mangled_name == g.mangled_name)
-        {
-            spec.referenced_globals.push(g);
-        }
-    }
-}
