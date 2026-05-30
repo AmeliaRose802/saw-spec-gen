@@ -79,13 +79,21 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
 ENV PATH=/root/.saw-spec-gen/llvm/bin:/root/.saw-spec-gen/saw/bin:/root/.saw-spec-gen/exception-lower/bin:/usr/local/cargo/bin:${PATH}
 
 # ── llvm-exception-lower (C++ throw/catch lowering for SAW) ───────────
-# Build from source inside the container so the binary links against
-# the container's glibc (2.35 on Ubuntu 22.04). The prebuilt release
-# binary targets glibc ≥ 2.38 which is too new for this base image.
-COPY scripts/install-exception-lower.sh /tmp/install-exception-lower.sh
-RUN chmod +x /tmp/install-exception-lower.sh \
- && NO_DOWNLOAD=1 LLVM_BIN=/root/.saw-spec-gen/llvm/bin /tmp/install-exception-lower.sh \
- && rm -f /tmp/install-exception-lower.sh \
+# The LLVM 20 tarball's static libraries are incompatible with the
+# Ubuntu 22.04 host linker, so we install LLVM-18 dev from apt.llvm.org
+# to build exception-lower, then remove llvm-18-dev to keep the image
+# slim. The resulting binary only needs glibc (no LLVM shared libs).
+RUN wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - \
+ && echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main" >> /etc/apt/sources.list \
+ && apt-get update && apt-get install -y --no-install-recommends llvm-18-dev \
+ && git clone --depth=1 --branch=v0.3.1 https://github.com/AmeliaRose802/llvm-exception-lower.git /tmp/el-src \
+ && mkdir /tmp/el-build && cd /tmp/el-build \
+ && cmake /tmp/el-src -DCMAKE_BUILD_TYPE=Release -DLLVM_DIR=/usr/lib/llvm-18/lib/cmake/llvm \
+ && cmake --build . --config Release -j$(nproc) \
+ && mkdir -p /root/.saw-spec-gen/exception-lower/bin \
+ && cp -f /tmp/el-build/exception-lower /root/.saw-spec-gen/exception-lower/bin/ \
+ && rm -rf /tmp/el-src /tmp/el-build \
+ && apt-get purge -y llvm-18-dev && apt-get autoremove -y && rm -rf /var/lib/apt/lists/* \
  && /root/.saw-spec-gen/exception-lower/bin/exception-lower --help 2>&1 | head -1
 
 LABEL org.opencontainers.image.source="https://github.com/AmeliaRose802/saw-spec-gen" \
