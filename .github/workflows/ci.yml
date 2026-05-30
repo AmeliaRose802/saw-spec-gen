@@ -5,7 +5,7 @@ on:
     branches: [ master, main ]
   pull_request:
     branches: [ master, main ]
-  # Allow re-running the (slow) SAW demo suite on demand without pushing.
+  # Allow re-running the (slow) end-to-end test suite on demand without pushing.
   workflow_dispatch:
 
 env:
@@ -77,13 +77,13 @@ jobs:
     - name: Enforce 500 non-whitespace line limit
       run: bash scripts/check-line-count.sh
 
-  saw-demos-linux:
+  e2e-tests-linux:
     # Runs inside a pre-baked image (built by publish-ci-image.yml) that
     # already contains SAW 1.5, LLVM 20.1.6, PowerShell 7, and Rust
     # stable at the exact paths discover-tools.ps1 probes. No install
     # step, no ~1.2 GB tarball download — just `cargo build` and run.
-    # Non-blocking while the demo suite stabilises.
-    name: 'SAW demo suite (Linux, experimental)'
+    # Non-blocking while the end-to-end test suite stabilises.
+    name: 'end-to-end test suite (Linux, experimental)'
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/ameliarose802/saw-spec-gen-ci:latest
@@ -104,32 +104,32 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           target
-        key: linux-sawdemos-cargo-${{ hashFiles('**/Cargo.lock') }}
+        key: linux-e2etests-cargo-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          linux-sawdemos-cargo-
+          linux-e2etests-cargo-
 
     - name: Build saw-spec-gen
       run: cargo build --release
 
-    - name: Run SAW demo suite
+    - name: Run end-to-end test suite
       # discover-tools.ps1 auto-detects /root/.saw-spec-gen/{saw,llvm}/bin
       # via the standard search paths — no env.ps1 or PATH munging needed.
-      run: pwsh -NoLogo -NoProfile -File tests/saw_demos/Run-SawDemos.ps1
+      run: pwsh -NoLogo -NoProfile -File tests/e2e/Run-E2ETests.ps1
 
     - name: Upload failing-case logs
       if: failure()
       uses: actions/upload-artifact@v4
       with:
-        name: saw-demos-fail-logs-Linux
-        path: tests/saw_demos/last-fail-*.log
+        name: e2e-tests-fail-logs-Linux
+        path: tests/e2e/last-fail-*.log
         if-no-files-found: ignore
 
-  saw-demos-windows:
+  e2e-tests-windows:
     # No container path on Windows: hosted windows-latest runners don't
     # support the `container:` job key, and Windows base images are
     # multi-GB pulls that wipe out any cold-start savings. Stick with
     # the cached tarball install. Non-blocking while it stabilises.
-    name: 'SAW demo suite (Windows, experimental)'
+    name: 'end-to-end test suite (Windows, experimental)'
     runs-on: windows-latest
     continue-on-error: true
     timeout-minutes: 90
@@ -146,12 +146,12 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           target
-        key: ${{ runner.os }}-sawdemos-cargo-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-e2etests-cargo-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-sawdemos-cargo-
+          ${{ runner.os }}-e2etests-cargo-
 
     # Split restore/save so the (slow, ~1.2 GB) tool install is cached
-    # even when the demo step itself fails — otherwise actions/cache@v4
+    # even when the end-to-end test step itself fails — otherwise actions/cache@v4
     # would skip the save on failure and every red run would re-download.
     # Cache key embeds the pinned versions from the installer; bumping
     # the script invalidates the cache automatically.
@@ -178,17 +178,17 @@ jobs:
         path: ~/.saw-spec-gen
         key: ${{ steps.restore-tools.outputs.cache-primary-key }}
 
-    - name: Run SAW demo suite
+    - name: Run end-to-end test suite
       shell: pwsh
       # discover-tools.ps1 auto-sources ~/.saw-spec-gen/env.ps1 inside
       # the runner, so clang, llvm-as, saw, z3, and rustc are all picked
       # up without any extra PATH setup here.
-      run: pwsh -NoLogo -NoProfile -File tests/saw_demos/Run-SawDemos.ps1
+      run: pwsh -NoLogo -NoProfile -File tests/e2e/Run-E2ETests.ps1
 
     - name: Upload failing-case logs
       if: failure()
       uses: actions/upload-artifact@v4
       with:
-        name: saw-demos-fail-logs-Windows
-        path: tests/saw_demos/last-fail-*.log
+        name: e2e-tests-fail-logs-Windows
+        path: tests/e2e/last-fail-*.log
         if-no-files-found: ignore

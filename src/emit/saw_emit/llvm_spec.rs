@@ -90,7 +90,7 @@ pub fn emit_single_experimental_spec(
 /// Write the `operator new` spec to `operator_new_auto_spec.saw`.
 ///
 /// Allocates a 256-byte buffer — generous enough to cover every
-/// reasonable C++ object size in the bundled demos. Smaller buffers
+/// reasonable C++ object size in the bundled end-to-end tests. Smaller buffers
 /// failed override matching for classes with non-trivial data members.
 pub fn emit_operator_new_spec(mangled_name: &str, output_dir: &Path) -> Result<()> {
     fs::create_dir_all(output_dir)?;

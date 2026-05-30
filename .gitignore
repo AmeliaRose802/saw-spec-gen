@@ -8,25 +8,25 @@ Cargo.lock
 *.bc
 *.ll
 **/*_ast.json
-demos/specs/
+e2e-tests/specs/
 
 # Generated tool outputs (saw-spec-gen produces these per-demo)
 **/out_*/
-demos/rust_specs/
-demos/rust_demo_specs/
+e2e-tests/rust_specs/
+e2e-tests/rust_demo_specs/
 
 # Loose test artifacts
 _test_ast.json
-demos/_test.saw
-demos/test_load.saw
-demos/test_load2.saw
-demos/token_service_out
-demos/token_service_out.mir
-demos/token_service_out.linked-mir.json
-demos/token_service.mir.json
+e2e-tests/_test.saw
+e2e-tests/test_load.saw
+e2e-tests/test_load2.saw
+e2e-tests/token_service_out
+e2e-tests/token_service_out.mir
+e2e-tests/token_service_out.linked-mir.json
+e2e-tests/token_service.mir.json
 
 # SAW demo runner failure logs
-tests/saw_demos/last-fail-*.log
+tests/e2e/last-fail-*.log
 
 # Beads / Dolt files (added by bd init)
 .dolt/

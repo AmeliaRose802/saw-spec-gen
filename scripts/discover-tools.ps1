@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Cross-platform discovery of the tools saw-spec-gen needs to build,
-    verify and run demos: clang/LLVM, SAW, SMT solvers, rustc, and the
+    verify and run end-to-end tests: clang/LLVM, SAW, SMT solvers, rustc, and the
     saw-spec-gen binary itself.
 
 .DESCRIPTION

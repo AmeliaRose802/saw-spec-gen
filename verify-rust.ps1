@@ -34,8 +34,8 @@
 
 .EXAMPLE
     .\verify-rust.ps1 `
-        -RustFile    demos\02-havoc-coverage\nothing_sketchy\add_one_verified.rs `
-        -CryptolSpec demos\02-havoc-coverage\nothing_sketchy\add_one_spec.cry `
+        -RustFile    e2e-tests\02-havoc-coverage\nothing_sketchy\add_one_verified.rs `
+        -CryptolSpec e2e-tests\02-havoc-coverage\nothing_sketchy\add_one_spec.cry `
         -CryptolFn   add_one_spec `
         -Function    add_one
 #>
@@ -64,7 +64,7 @@ $OutputDir = Resolve-Path $OutputDir
 
 # ── Tool discovery ────────────────────────────────────────────────────────────
 # All tool discovery (rustc, llvm-dis, saw, z3) goes through the shared
-# helper so verify.ps1, verify-rust.ps1 and the demo scripts agree on
+# helper so verify.ps1, verify-rust.ps1 and the end-to-end test scripts agree on
 # search order and cross-platform behaviour. Env vars or
 # ~/.saw-spec-gen/env.ps1 override the defaults; run scripts/init.ps1
 # (Windows) or scripts/init.sh (Linux/macOS) to populate that file.

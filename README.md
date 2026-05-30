@@ -47,23 +47,23 @@ pwsh scripts/init.ps1            # or:  bash scripts/init.sh
 
 # Verify a C++ function against a Cryptol spec.
 ./verify.ps1 `
-    -CppFile     demos/01-tutorial/bounded_loop/add_one_verified.cpp `
-    -CryptolSpec demos/01-tutorial/bounded_loop/add_one_spec.cry `
+    -CppFile     e2e-tests/01-tutorial/bounded_loop/add_one_verified.cpp `
+    -CryptolSpec e2e-tests/01-tutorial/bounded_loop/add_one_spec.cry `
     -CryptolFn   add_one_spec `
     -Function    add_one
 
 # Same for Rust.
 ./verify-rust.ps1 `
-    -RustFile    demos/01-tutorial/bounded_loop/add_one_verified.rs `
-    -CryptolSpec demos/01-tutorial/bounded_loop/add_one_spec.cry `
+    -RustFile    e2e-tests/01-tutorial/bounded_loop/add_one_verified.rs `
+    -CryptolSpec e2e-tests/01-tutorial/bounded_loop/add_one_spec.cry `
     -CryptolFn   add_one_spec `
     -Function    add_one
 
 # Prove both implementations match the same spec (and so each other).
 ./verify-equiv.ps1 `
-    -CppFile     demos/02-havoc-coverage/nothing_sketchy/add_one_verified.cpp `
-    -RustFile    demos/02-havoc-coverage/nothing_sketchy/add_one_verified.rs `
-    -CryptolSpec demos/02-havoc-coverage/nothing_sketchy/add_one_spec.cry `
+    -CppFile     e2e-tests/02-havoc-coverage/nothing_sketchy/add_one_verified.cpp `
+    -RustFile    e2e-tests/02-havoc-coverage/nothing_sketchy/add_one_verified.rs `
+    -CryptolSpec e2e-tests/02-havoc-coverage/nothing_sketchy/add_one_spec.cry `
     -CryptolFn   add_one_spec `
     -Function    add_one
 ```
@@ -221,7 +221,7 @@ per-method `*_havoc_spec.saw` for every virtual method, ready to
 
 ## Examples
 
-Working end-to-end demos live in [demos/](demos/), grouped by role:
+End-to-end tests live in [e2e-tests/](e2e-tests/), grouped by role:
 
 | Directory | What it shows |
 |---|---|
@@ -262,22 +262,22 @@ emitter doesn't know which language the input came from.
 # Rust crate tests.
 cargo test --release
 
-# Full end-to-end SAW demo regressions (auto-skips if SAW not installed).
-pwsh tests/saw_demos/Run-SawDemos.ps1
+# Full end-to-end SAW test regressions (auto-skips if SAW not installed).
+pwsh tests/e2e/Run-E2ETests.ps1
 
 # Filter by tag.
-pwsh tests/saw_demos/Run-SawDemos.ps1 -Tag cpp_havoc,bounded_loop
+pwsh tests/e2e/Run-E2ETests.ps1 -Tag cpp_havoc,bounded_loop
 
 # Dry-run.
-pwsh tests/saw_demos/Run-SawDemos.ps1 -List
+pwsh tests/e2e/Run-E2ETests.ps1 -List
 ```
 
-Add new demos by appending entries to
-[tests/saw_demos/cases.psd1](tests/saw_demos/cases.psd1) — don't write
+Add new cases by appending entries to
+[tests/e2e/cases.psd1](tests/e2e/cases.psd1) — don't write
 bespoke runner scripts.
 
 The pre-commit hook (`git config core.hooksPath .githooks`) runs the
-line-count check and the demo suite. Skip the SAW portion with
+line-count check and the end-to-end test suite. Skip the SAW portion with
 `SKIP_SAW_TESTS=1` for a fast amend.
 
 ## Project rules

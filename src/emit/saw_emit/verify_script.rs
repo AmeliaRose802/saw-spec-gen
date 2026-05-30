@@ -83,7 +83,7 @@ pub fn emit_verification_script(
     let mut override_names: Vec<String> = Vec::new();
 
     // `__attribute__((annotate("..."))` on a parameter (used by the SAL
-    // shim under demos/) compiles into a `call @llvm.var.annotation` in
+    // shim under e2e-tests/) compiles into a `call @llvm.var.annotation` in
     // every callsite's prelude. SAW can't simulate that intrinsic and
     // bails out with "No implementation or override found for pointer".
     // Inject a no-op assume-spec override whenever the target function
