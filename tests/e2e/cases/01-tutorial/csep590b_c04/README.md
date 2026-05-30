@@ -76,7 +76,7 @@ the loops:
 
 All ten cases (5 problems × {disproved, verified} for Part A;
 5 problems × 1 reference for Part B; both C++ and Rust ports)
-are registered in [`tests/e2e/cases.psd1`](../../tests/e2e/cases.psd1)
+are registered in [`tests/e2e/cases.psd1`](../../../cases.psd1)
 under the tag `csep590b_c04`:
 
 ```powershell

@@ -40,14 +40,14 @@ layout, so the override uses the base's name; otherwise it uses the
 derived class's own name.
 
 Files touched:
-- [`src/clang_ast.rs`](../../../src/clang_ast.rs): collect per-class
-  field lists, default initializers, inheritance, and `mutable` flags;
-  expose `layout_type_name` and `layout_fields` on `ClassConstructor`.
-- [`src/saw_emit.rs`](../../../src/saw_emit.rs): emit a struct-typed
-  allocation + `llvm_struct_value` initializer for ctors with data
-  members; keep the legacy 8-byte path for empty interface classes.
-  Also bumped `operator_new`'s auto-spec from 8 to 256 bytes so that
-  ctor overrides for larger classes can match.
+- `src/parsers/clang_ast/` — collect per-class field lists, default
+  initializers, inheritance, and `mutable` flags; expose
+  `layout_type_name` and `layout_fields` on `ClassConstructor`.
+- `src/emit/saw_emit/` — emit a struct-typed allocation +
+  `llvm_struct_value` initializer for ctors with data members; keep
+  the legacy 8-byte path for empty interface classes. Also bumped
+  `operator_new`'s auto-spec from 8 to 256 bytes so that ctor
+  overrides for larger classes can match.
 
 ## Hole #2 — fixed: `mutable` keyword soundly downgrades `const this`
 

@@ -28,6 +28,12 @@ file by hand.
   match the same Cryptol spec (and therefore each other). Reports
   `EQUIVALENT` / `NOT EQUIVALENT` and shows the counterexample side-by-side
   when they disagree.
+- **`verify-all.ps1`** — batch driver. Consumes a JSON manifest of
+  Cryptol function names (e.g. from `pretty-specs --emit-function-list`),
+  discovers matching `<name>.cpp` / `<name>.rs` files in the provided
+  directories, dispatches `verify.ps1` / `verify-rust.ps1` per
+  function, and writes one `result.json` per run for
+  `collect-results` to roll up.
 - **`saw-spec-gen`** — the Rust CLI underneath. Reads
   clang `-ast-dump=json` / mir-json / `.ll` and emits adversarial SAW
   override specs that model external functions as **as-pessimistic-as-the-type-system-allows**:
@@ -175,7 +181,10 @@ saw-spec-gen <SUBCOMMAND>
                         (used internally to keep AST size under control)
   patch-llvm-ir         Patch a .ll file so SAW 1.5 / Crucible can load it
                         (strips MSVC EH metadata, rewrites poison → undef)
-  coverage              Report spec coverage for a verified codebase
+  collect-results       Aggregate per-run `result.json` files into a single
+                        `proof_manifest.json` for downstream tooling
+  dump-types            Serialize per-function parameter / return types and
+                        struct layouts to a `types.json` document
 ```
 
 `gen-verify` is the one the verify scripts use. Example:
@@ -280,16 +289,6 @@ The pre-commit hook (`git config core.hooksPath .githooks`) runs the
 line-count check and the end-to-end test suite. Skip the SAW portion with
 `SKIP_SAW_TESTS=1` for a fast amend.
 
-## Project rules
-
-See [.github/copilot-instructions.md](.github/copilot-instructions.md):
-
-- **500 non-whitespace lines per source file**, enforced by
-  `scripts/check-line-count.sh` (and the `line-count` CI job). Split
-  files along clear seams (parser vs emitter, per-target backends,
-  …) rather than appending past the limit.
-- Don't add new entries to `.linecount-allow`. Shrink files in it
-  when you touch them.
 
 ## License
 
