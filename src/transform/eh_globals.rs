@@ -179,7 +179,10 @@ fn balanced_brace(s: &str, open: char, close: char) -> Option<usize> {
 /// the target spec so SAW can allocate them. The exception-lower pass
 /// synthesises `@__exclow_error_flag`, `@__exclow_error_typeinfo`, and
 /// `@__exclow_error_value` — none of which appear in the clang AST.
-pub fn inject_exclow_globals(spec: &mut crate::constraints::SpecConstraint, ir_path: &std::path::Path) {
+pub fn inject_exclow_globals(
+    spec: &mut crate::constraints::SpecConstraint,
+    ir_path: &std::path::Path,
+) {
     use crate::constraints::types::{GlobalVarInfo, TypeInfo};
 
     let text = match std::fs::read_to_string(ir_path) {

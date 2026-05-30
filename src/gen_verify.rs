@@ -498,5 +498,3 @@ pub fn run(
     eprintln!("Run with: saw {}/verify.saw", output.display());
     Ok(())
 }
-
-
