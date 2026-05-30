@@ -310,7 +310,7 @@ mod tests {
             .iter()
             .map(|c| c.name.as_str())
             .collect();
-        assert!(names.iter().any(|n| *n == "operator new"));
-        assert!(names.iter().any(|n| *n == "operator delete"));
+        assert!(names.contains(&"operator new"));
+        assert!(names.contains(&"operator delete"));
     }
 }

@@ -379,7 +379,7 @@ mod tests {
         );
         let mut fb = AliasFallbacks::default();
         add_ir_deref_fallbacks(&mut fb, &[ast], &[ir]);
-        assert!(fb.bytes.get("X").is_none());
+        assert!(!fb.bytes.contains_key("X"));
     }
 
     #[test]

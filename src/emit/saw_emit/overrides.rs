@@ -499,7 +499,7 @@ mod tests {
             size_bytes: None,
             fields: vec![],
         }));
-        assert_eq!(container_layout_for(&ty, &known).is_none(), true);
+        assert!(container_layout_for(&ty, &known).is_none());
     }
 
     #[test]

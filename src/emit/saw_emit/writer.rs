@@ -114,7 +114,7 @@ mod tests {
     #[test]
     fn writer_supports_writeln_macro() {
         let mut w = SpecWriter::new();
-        writeln!(w, "hello {}", "world").unwrap();
+        writeln!(w, "hello world").unwrap();
         assert_eq!(w.as_str(), "hello world\n");
     }
 
