@@ -83,17 +83,22 @@ ENV PATH=/root/.saw-spec-gen/llvm/bin:/root/.saw-spec-gen/saw/bin:/root/.saw-spe
 # Ubuntu 22.04 host linker, so we install LLVM-18 dev from apt.llvm.org
 # to build exception-lower, then remove llvm-18-dev to keep the image
 # slim. The resulting binary only needs glibc (no LLVM shared libs).
-RUN wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - \
- && echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main" >> /etc/apt/sources.list \
+RUN curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
+      -o /etc/apt/trusted.gpg.d/llvm-snapshot.asc \
+ && echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main" \
+      >> /etc/apt/sources.list \
  && apt-get update && apt-get install -y --no-install-recommends llvm-18-dev \
- && git clone --depth=1 --branch=v0.3.1 https://github.com/AmeliaRose802/llvm-exception-lower.git /tmp/el-src \
+ && git clone --depth=1 --branch=v0.3.1 \
+      https://github.com/AmeliaRose802/llvm-exception-lower.git /tmp/el-src \
  && mkdir /tmp/el-build && cd /tmp/el-build \
- && cmake /tmp/el-src -DCMAKE_BUILD_TYPE=Release -DLLVM_DIR=/usr/lib/llvm-18/lib/cmake/llvm \
+ && cmake /tmp/el-src -DCMAKE_BUILD_TYPE=Release \
+      -DLLVM_DIR=/usr/lib/llvm-18/lib/cmake/llvm \
  && cmake --build . --config Release -j$(nproc) \
  && mkdir -p /root/.saw-spec-gen/exception-lower/bin \
  && cp -f /tmp/el-build/exception-lower /root/.saw-spec-gen/exception-lower/bin/ \
  && rm -rf /tmp/el-src /tmp/el-build \
- && apt-get purge -y llvm-18-dev && apt-get autoremove -y && rm -rf /var/lib/apt/lists/* \
+ && apt-get purge -y llvm-18-dev && apt-get autoremove -y \
+ && rm -rf /var/lib/apt/lists/* \
  && /root/.saw-spec-gen/exception-lower/bin/exception-lower --help 2>&1 | head -1
 
 LABEL org.opencontainers.image.source="https://github.com/AmeliaRose802/saw-spec-gen" \
