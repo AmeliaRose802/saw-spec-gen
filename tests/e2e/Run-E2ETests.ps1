@@ -87,6 +87,7 @@ $defaultTags = @(
     'rust_adversarial'
     'string_ops'
     'strings'
+    'int_ops'
 )
 if ($All) {
     $selected = $cases
