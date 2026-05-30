@@ -293,7 +293,7 @@ mod tests {
         assert_eq!(fb.enum_bits.get("SessionState").copied(), Some(32));
         // Enums must NOT be recorded in the bytes map — the rewriter
         // emits `llvm_int N` for them, not `llvm_array N (llvm_int 8)`.
-        assert!(fb.bytes.get("SessionState").is_none());
+        assert!(!fb.bytes.contains_key("SessionState"));
     }
 
     #[test]
@@ -312,7 +312,7 @@ mod tests {
         };
         let fb = collect_type_sizes(&[f]);
         assert_eq!(fb.enum_bits.get("LatchResult").copied(), Some(32));
-        assert!(fb.bytes.get("LatchResult").is_none());
+        assert!(!fb.bytes.contains_key("LatchResult"));
     }
 
     #[test]

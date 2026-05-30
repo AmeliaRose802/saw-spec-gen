@@ -122,6 +122,29 @@
         @{ Tag = 'csep590b_c04'; Runner = 'cpp';  Dir = 'tests/e2e/cases/01-tutorial/csep590b_c04/p5_isqrt';        File = 'isqrt_verified.cpp';         Expected = 'VERIFIED';  Cry = 'isqrt_spec.cry';        CryptolFn = 'isqrt_spec';        Function = 'isqrt'        }
         @{ Tag = 'csep590b_c04'; Runner = 'rust'; Dir = 'tests/e2e/cases/01-tutorial/csep590b_c04/p5_isqrt';        File = 'isqrt_verified.rs';          Expected = 'VERIFIED';  Cry = 'isqrt_spec.cry';        CryptolFn = 'isqrt_spec';        Function = 'isqrt'        }
 
+        # ── Integer-operation coverage tests (06-int-ops). ──────────────────
+        # Each topic fills a specific gap left by the earlier suites:
+        #   min3_i32         multi-argument + signed comparison
+        #   is_power_of_two  predicate-style 0/1 return + bit trick
+        #   byte_swap_u32    logical shifts + bitwise OR with masks
+        #   popcount_u8      u8 input width + small static-bounded loop
+        @{ Tag = 'int_ops'; Runner = 'cpp';  Dir = 'tests/e2e/cases/06-int-ops/min3_i32';        File = 'min3_i32_verified.cpp';        Expected = 'VERIFIED';  Cry = 'min3_i32_spec.cry';        CryptolFn = 'min3_i32_spec';        Function = 'min3_i32'        }
+        @{ Tag = 'int_ops'; Runner = 'cpp';  Dir = 'tests/e2e/cases/06-int-ops/min3_i32';        File = 'min3_i32_disproved.cpp';       Expected = 'DISPROVED'; Cry = 'min3_i32_spec.cry';        CryptolFn = 'min3_i32_spec';        Function = 'min3_i32'        }
+        @{ Tag = 'int_ops'; Runner = 'rust'; Dir = 'tests/e2e/cases/06-int-ops/min3_i32';        File = 'min3_i32_verified.rs';         Expected = 'VERIFIED';  Cry = 'min3_i32_spec.cry';        CryptolFn = 'min3_i32_spec';        Function = 'min3_i32'        }
+        @{ Tag = 'int_ops'; Runner = 'rust'; Dir = 'tests/e2e/cases/06-int-ops/min3_i32';        File = 'min3_i32_disproved.rs';        Expected = 'DISPROVED'; Cry = 'min3_i32_spec.cry';        CryptolFn = 'min3_i32_spec';        Function = 'min3_i32'        }
+        @{ Tag = 'int_ops'; Runner = 'cpp';  Dir = 'tests/e2e/cases/06-int-ops/is_power_of_two'; File = 'is_power_of_two_verified.cpp'; Expected = 'VERIFIED';  Cry = 'is_power_of_two_spec.cry'; CryptolFn = 'is_power_of_two_spec'; Function = 'is_power_of_two' }
+        @{ Tag = 'int_ops'; Runner = 'cpp';  Dir = 'tests/e2e/cases/06-int-ops/is_power_of_two'; File = 'is_power_of_two_disproved.cpp';Expected = 'DISPROVED'; Cry = 'is_power_of_two_spec.cry'; CryptolFn = 'is_power_of_two_spec'; Function = 'is_power_of_two' }
+        @{ Tag = 'int_ops'; Runner = 'rust'; Dir = 'tests/e2e/cases/06-int-ops/is_power_of_two'; File = 'is_power_of_two_verified.rs';  Expected = 'VERIFIED';  Cry = 'is_power_of_two_spec.cry'; CryptolFn = 'is_power_of_two_spec'; Function = 'is_power_of_two' }
+        @{ Tag = 'int_ops'; Runner = 'rust'; Dir = 'tests/e2e/cases/06-int-ops/is_power_of_two'; File = 'is_power_of_two_disproved.rs'; Expected = 'DISPROVED'; Cry = 'is_power_of_two_spec.cry'; CryptolFn = 'is_power_of_two_spec'; Function = 'is_power_of_two' }
+        @{ Tag = 'int_ops'; Runner = 'cpp';  Dir = 'tests/e2e/cases/06-int-ops/byte_swap_u32';   File = 'byte_swap_u32_verified.cpp';   Expected = 'VERIFIED';  Cry = 'byte_swap_u32_spec.cry';   CryptolFn = 'byte_swap_u32_spec';   Function = 'byte_swap_u32'   }
+        @{ Tag = 'int_ops'; Runner = 'cpp';  Dir = 'tests/e2e/cases/06-int-ops/byte_swap_u32';   File = 'byte_swap_u32_disproved.cpp';  Expected = 'DISPROVED'; Cry = 'byte_swap_u32_spec.cry';   CryptolFn = 'byte_swap_u32_spec';   Function = 'byte_swap_u32'   }
+        @{ Tag = 'int_ops'; Runner = 'rust'; Dir = 'tests/e2e/cases/06-int-ops/byte_swap_u32';   File = 'byte_swap_u32_verified.rs';    Expected = 'VERIFIED';  Cry = 'byte_swap_u32_spec.cry';   CryptolFn = 'byte_swap_u32_spec';   Function = 'byte_swap_u32'   }
+        @{ Tag = 'int_ops'; Runner = 'rust'; Dir = 'tests/e2e/cases/06-int-ops/byte_swap_u32';   File = 'byte_swap_u32_disproved.rs';   Expected = 'DISPROVED'; Cry = 'byte_swap_u32_spec.cry';   CryptolFn = 'byte_swap_u32_spec';   Function = 'byte_swap_u32'   }
+        @{ Tag = 'int_ops'; Runner = 'cpp';  Dir = 'tests/e2e/cases/06-int-ops/popcount_u8';     File = 'popcount_u8_verified.cpp';     Expected = 'VERIFIED';  Cry = 'popcount_u8_spec.cry';     CryptolFn = 'popcount_u8_spec';     Function = 'popcount_u8'     }
+        @{ Tag = 'int_ops'; Runner = 'cpp';  Dir = 'tests/e2e/cases/06-int-ops/popcount_u8';     File = 'popcount_u8_disproved.cpp';    Expected = 'DISPROVED'; Cry = 'popcount_u8_spec.cry';     CryptolFn = 'popcount_u8_spec';     Function = 'popcount_u8'     }
+        @{ Tag = 'int_ops'; Runner = 'rust'; Dir = 'tests/e2e/cases/06-int-ops/popcount_u8';     File = 'popcount_u8_verified.rs';      Expected = 'VERIFIED';  Cry = 'popcount_u8_spec.cry';     CryptolFn = 'popcount_u8_spec';     Function = 'popcount_u8'     }
+        @{ Tag = 'int_ops'; Runner = 'rust'; Dir = 'tests/e2e/cases/06-int-ops/popcount_u8';     File = 'popcount_u8_disproved.rs';     Expected = 'DISPROVED'; Cry = 'popcount_u8_spec.cry';     CryptolFn = 'popcount_u8_spec';     Function = 'popcount_u8'     }
+
         # ── String operations (SWAR null-byte detection: real libc strlen
         #    bit-trick over a 64-bit word treated as 8 packed bytes). ───────
         @{ Tag = 'string_ops'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/has_null_byte'; File = 'has_null_byte_verified.cpp';  Cry = 'has_null_byte_spec.cry'; CryptolFn = 'has_null_byte_spec'; Function = 'has_null_byte'; Expected = 'VERIFIED'  }

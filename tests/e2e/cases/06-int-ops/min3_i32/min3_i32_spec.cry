@@ -1,0 +1,11 @@
+// Cryptol spec: signed minimum of three 32-bit integers.
+//
+// Exercises (a) multi-argument lowering and (b) signed comparison —
+// neither was covered by the single-argument `add_one` / `sum_first_n`
+// tests in tags 02-havoc-coverage and 01-tutorial/bounded_loop.
+
+min3_i32_spec : [32] -> [32] -> [32] -> [32]
+min3_i32_spec a b c =
+  if m <$ c then m else c
+  where
+    m = if a <$ b then a else b

@@ -1,0 +1,14 @@
+// Cryptol spec: 32-bit byte reversal (big-endian <-> little-endian swap).
+//
+// Split the 32-bit word into four bytes and reverse their order. This
+// is the canonical reference implementation; the C++ / Rust under
+// test use the equivalent shift+mask formula.
+//
+// Exercises shifts (logical), bitwise OR, and constant masks — none of
+// which the existing 02-havoc-coverage / 04-cpp-rust-equivalence suites
+// touch directly (they cover arithmetic and SWAR-mask tricks instead).
+
+byte_swap_u32_spec : [32] -> [32]
+byte_swap_u32_spec x = b0 # b1 # b2 # b3
+  where
+    [b3, b2, b1, b0] = split`{4, 8} x
