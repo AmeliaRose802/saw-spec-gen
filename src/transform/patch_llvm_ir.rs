@@ -55,10 +55,7 @@ pub struct PatchStats {
 
 /// Read `input`, apply all passes, and write the result to `output`.
 /// `input` and `output` may point to the same file.
-pub fn patch_llvm_ir_file(
-    input: &Path,
-    output: &Path,
-) -> anyhow::Result<PatchStats> {
+pub fn patch_llvm_ir_file(input: &Path, output: &Path) -> anyhow::Result<PatchStats> {
     let text = fs::read_to_string(input)?;
     let (patched, stats) = patch_llvm_ir(&text);
     fs::write(output, patched)?;
@@ -435,8 +432,14 @@ mod tests {
         let (out, n) = expand_uadd_sat_intrinsics(input);
         assert_eq!(n, 1);
         assert!(out.contains("%__sat_sum_3 = add i32 %0, %1"), "got: {out}");
-        assert!(out.contains("%__sat_ov_3 = icmp ult i32 %__sat_sum_3, %0"), "got: {out}");
-        assert!(out.contains("%3 = select i1 %__sat_ov_3, i32 -1, i32 %__sat_sum_3"), "got: {out}");
+        assert!(
+            out.contains("%__sat_ov_3 = icmp ult i32 %__sat_sum_3, %0"),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("%3 = select i1 %__sat_ov_3, i32 -1, i32 %__sat_sum_3"),
+            "got: {out}"
+        );
     }
 
     #[test]
@@ -445,7 +448,10 @@ mod tests {
         let (out, n) = expand_uadd_sat_intrinsics(input);
         assert_eq!(n, 1);
         assert!(out.contains("add i64 %a, %b"), "got: {out}");
-        assert!(out.contains("select i1 %__sat_ov_r, i64 -1, i64 %__sat_sum_r"), "got: {out}");
+        assert!(
+            out.contains("select i1 %__sat_ov_r, i64 -1, i64 %__sat_sum_r"),
+            "got: {out}"
+        );
     }
 
     #[test]
