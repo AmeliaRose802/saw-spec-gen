@@ -55,7 +55,7 @@
 [CmdletBinding()]
 param(
     [string]$InstallRoot,
-    [string]$ReleaseTag = 'v0.2.0',
+    [string]$ReleaseTag = 'v0.3.0',
     [string]$Ref = 'main',
     [string]$LlvmBin,
     [switch]$Quiet,
