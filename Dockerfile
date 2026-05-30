@@ -34,7 +34,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates curl wget tar gzip xz-utils \
-      git pkg-config build-essential libssl-dev \
+      git pkg-config build-essential cmake libssl-dev \
       zlib1g libtinfo5 libncurses5 \
       libicu70 libssl3 \
  && rm -rf /var/lib/apt/lists/*
@@ -79,12 +79,12 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
 ENV PATH=/root/.saw-spec-gen/llvm/bin:/root/.saw-spec-gen/saw/bin:/root/.saw-spec-gen/exception-lower/bin:/usr/local/cargo/bin:${PATH}
 
 # ── llvm-exception-lower (C++ throw/catch lowering for SAW) ───────────
-# The install script downloads a prebuilt binary from GitHub Releases
-# or falls back to a cmake source build. discover-tools.ps1 probes
-# $HOME/.saw-spec-gen/exception-lower/bin/ automatically.
+# Build from source inside the container so the binary links against
+# the container's glibc (2.35 on Ubuntu 22.04). The prebuilt release
+# binary targets glibc ≥ 2.38 which is too new for this base image.
 COPY scripts/install-exception-lower.sh /tmp/install-exception-lower.sh
 RUN chmod +x /tmp/install-exception-lower.sh \
- && LLVM_BIN=/root/.saw-spec-gen/llvm/bin /tmp/install-exception-lower.sh \
+ && NO_DOWNLOAD=1 LLVM_BIN=/root/.saw-spec-gen/llvm/bin /tmp/install-exception-lower.sh \
  && rm -f /tmp/install-exception-lower.sh \
  && /root/.saw-spec-gen/exception-lower/bin/exception-lower --help 2>&1 | head -1
 
