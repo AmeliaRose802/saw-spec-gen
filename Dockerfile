@@ -76,7 +76,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
 # Tools on PATH for any shell (bash, pwsh, ...). discover-tools.ps1 also
 # probes $HOME/.saw-spec-gen/{llvm,saw}/bin explicitly so this is belt-
 # and-braces.
-ENV PATH=/root/.saw-spec-gen/llvm/bin:/root/.saw-spec-gen/saw/bin:/usr/local/cargo/bin:${PATH}
+ENV PATH=/root/.saw-spec-gen/llvm/bin:/root/.saw-spec-gen/saw/bin:/root/.saw-spec-gen/exception-lower/bin:/usr/local/cargo/bin:${PATH}
 
 # ── llvm-exception-lower (C++ throw/catch lowering for SAW) ───────────
 # The install script downloads a prebuilt binary from GitHub Releases
