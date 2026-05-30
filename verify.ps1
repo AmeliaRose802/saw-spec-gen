@@ -79,17 +79,10 @@ $OutputDir = Resolve-Path $OutputDir
 . (Join-Path $ScriptRoot 'scripts/discover-tools.ps1')
 
 # saw-spec-gen is built from this repo, so build it on demand before the
-# rest of discovery runs (Find-SawSpecGenTools looks for the binary at
-# target/release/saw-spec-gen$ExeExt).
-$exeExt  = if ($IsWindows -or ($null -eq $IsWindows -and $env:OS -eq 'Windows_NT')) { '.exe' } else { '' }
-$specGen = Join-Path $ScriptRoot "target/release/saw-spec-gen$exeExt"
-if (-not (Test-Path $specGen)) {
-    Write-Host "[*] Building saw-spec-gen..." -ForegroundColor Cyan
-    Push-Location $ScriptRoot
-    cargo build --release 2>&1 | Write-Host
-    Pop-Location
-    if (-not (Test-Path $specGen)) { Write-Error "Failed to build saw-spec-gen"; exit 1 }
-}
+# rest of discovery runs. Build-SawSpecGen rebuilds when the binary is
+# missing OR stale (any Rust source newer than the binary), so a checkout
+# or rebase can't leave us running an out-of-date CLI.
+$specGen = Build-SawSpecGen -RepoRoot $ScriptRoot
 
 $tools = Find-SawSpecGenTools -RepoRoot $ScriptRoot
 Assert-SawSpecGenTools -Tools $tools -Require @('Clang', 'LlvmAs', 'Saw')
@@ -129,11 +122,24 @@ if ($LASTEXITCODE -ne 0) {
 # unconditionally: strip-msvc-eh, poison-to-undef, strip-nsw-nuw, etc.
 if ($llFile) {
     $patchedLl = $llFile  # in-place rewrite
-    & $specGen patch-llvm-ir --input $llFile --output $patchedLl 2>&1 | Write-Host
-    if ($LASTEXITCODE -ne 0) { Write-Error "patch-llvm-ir failed"; exit 1 }
+    Write-Host "  patch-llvm-ir: $specGen patch-llvm-ir --input $llFile --output $patchedLl" -ForegroundColor DarkGray
+    $patchOut = & $specGen patch-llvm-ir --input $llFile --output $patchedLl 2>&1
+    $patchExit = $LASTEXITCODE
+    if ($patchOut) { $patchOut | ForEach-Object { Write-Host "    | $_" } }
+    if ($patchExit -ne 0) {
+        Write-Error ("patch-llvm-ir failed (exit=$patchExit) for $llFile`n" +
+            "specGen=$specGen`n--- captured output ---`n" + (($patchOut | Out-String).Trim()))
+        exit 1
+    }
     # Re-assemble the .bc so SAW sees the patched module.
-    & $llvmAs $patchedLl -o $bcFile 2>&1
-    if ($LASTEXITCODE -ne 0) { Write-Error "llvm-as (post-patch) failed"; exit 1 }
+    $asmOut = & $llvmAs $patchedLl -o $bcFile 2>&1
+    $asmExit = $LASTEXITCODE
+    if ($asmOut) { $asmOut | ForEach-Object { Write-Host "    | $_" } }
+    if ($asmExit -ne 0) {
+        Write-Error ("llvm-as (post-patch) failed (exit=$asmExit) for $patchedLl`n" +
+            "llvmAs=$llvmAs`n--- captured output ---`n" + (($asmOut | Out-String).Trim()))
+        exit 1
+    }
 }
 
 # ── Step 2: Dump clang AST → JSON ─────────────────────────────────────────────
