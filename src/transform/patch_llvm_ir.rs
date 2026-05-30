@@ -44,52 +44,39 @@
 use std::fs;
 use std::path::Path;
 
-/// Configuration for [`patch_llvm_ir`]. Each flag turns on one
-/// independent pass; passes commute and may be enabled together.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct PatchOptions {
-    /// Replace MSVC EH metadata globals with `external constant`.
-    pub strip_msvc_eh: bool,
-    /// Replace `poison` literals with `undef`.
-    pub poison_to_undef: bool,
-}
-
-/// Per-pass counters reported back to the caller. Used by the CLI
-/// to log e.g. "Stripped 3 MSVC EH globals; replaced 7 poison
-/// literals".
+/// Per-pass counters reported back to the caller.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct PatchStats {
     pub eh_globals_stripped: usize,
     pub poison_replaced: usize,
+    pub nsw_nuw_stripped: usize,
+    pub sat_intrinsics_expanded: usize,
 }
 
-/// Read `input`, apply the configured passes, and write the result
-/// to `output`. `input` and `output` may point to the same file.
+/// Read `input`, apply all passes, and write the result to `output`.
+/// `input` and `output` may point to the same file.
 pub fn patch_llvm_ir_file(
     input: &Path,
     output: &Path,
-    opts: PatchOptions,
 ) -> anyhow::Result<PatchStats> {
     let text = fs::read_to_string(input)?;
-    let (patched, stats) = patch_llvm_ir(&text, opts);
+    let (patched, stats) = patch_llvm_ir(&text);
     fs::write(output, patched)?;
     Ok(stats)
 }
 
-/// In-memory variant exposed for unit tests. Returns `(patched, stats)`.
-pub fn patch_llvm_ir(text: &str, opts: PatchOptions) -> (String, PatchStats) {
+/// In-memory variant exposed for unit tests. Applies every pass
+/// unconditionally — each is a no-op when its pattern is absent.
+pub fn patch_llvm_ir(text: &str) -> (String, PatchStats) {
     let mut stats = PatchStats::default();
-    let mut out = text.to_string();
-    if opts.strip_msvc_eh {
-        let (s, n) = strip_msvc_eh_globals(&out);
-        out = s;
-        stats.eh_globals_stripped = n;
-    }
-    if opts.poison_to_undef {
-        let (s, n) = replace_poison_with_undef(&out);
-        out = s;
-        stats.poison_replaced = n;
-    }
+    let (out, n) = strip_msvc_eh_globals(text);
+    stats.eh_globals_stripped = n;
+    let (out, n) = replace_poison_with_undef(&out);
+    stats.poison_replaced = n;
+    let (out, n) = strip_nsw_nuw_flags(&out);
+    stats.nsw_nuw_stripped = n;
+    let (out, n) = expand_uadd_sat_intrinsics(&out);
+    stats.sat_intrinsics_expanded = n;
     (out, stats)
 }
 
@@ -246,6 +233,136 @@ fn is_word_boundary_after(bytes: &[u8], i: usize) -> bool {
     !matches!(c, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'"')
 }
 
+/// Pass 3: strip `nsw` and `nuw` instruction flags from arithmetic
+/// and cast instructions. `opt -O1` adds these flags to communicate
+/// "the compiler proved no overflow here", but SAW / Crucible
+/// treats them strictly — an `add nsw` whose operands *could*
+/// overflow (in the solver's unconstrained view of that instruction
+/// in isolation) produces poison. This causes false DISPROVED
+/// results for code that is logically correct.
+///
+/// We match ` nsw` and ` nuw` as whole words on instruction lines
+/// (lines starting with optional whitespace then `%` or a keyword
+/// like `store`, `ret`, etc.) and remove them. Comment lines and
+/// metadata are left untouched.
+fn strip_nsw_nuw_flags(text: &str) -> (String, usize) {
+    let mut count = 0;
+    let mut buf = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        // Only process instruction lines (start with % or a
+        // known opcode).  Skip comments, metadata, globals, and
+        // attribute groups.
+        let is_instruction = trimmed.starts_with('%')
+            || trimmed.starts_with("ret ")
+            || trimmed.starts_with("store ")
+            || trimmed.starts_with("br ");
+        if is_instruction || trimmed.contains(" = ") {
+            let mut patched = line.to_string();
+            // Handle both orderings: "nsw nuw", "nuw nsw", lone
+            // "nsw", lone "nuw".  Loop until no more replacements.
+            loop {
+                let before = patched.len();
+                patched = patched.replace(" nsw nuw ", " ");
+                patched = patched.replace(" nuw nsw ", " ");
+                patched = patched.replace(" nsw ", " ");
+                patched = patched.replace(" nuw ", " ");
+                if patched.len() == before {
+                    break;
+                }
+                count += 1;
+            }
+            buf.push_str(&patched);
+        } else {
+            buf.push_str(line);
+        }
+    }
+    (buf, count)
+}
+
+/// Pass 4: expand `@llvm.uadd.sat.iN` intrinsic calls into basic
+/// instructions that SAW / Crucible can handle.
+///
+/// `clang -O1` on Linux (Itanium ABI) recognizes the saturating-add
+/// pattern and lowers it to a single `@llvm.uadd.sat.iN` call.
+/// SAW doesn't support this intrinsic, so we expand it back:
+///
+///     %r = call iN @llvm.uadd.sat.iN(iN %a, iN %b)
+///   →
+///     %__sat_sum_r = add iN %a, %b
+///     %__sat_ov_r  = icmp ult iN %__sat_sum_r, %a
+///     %r           = select i1 %__sat_ov_r, iN -1, iN %__sat_sum_r
+fn expand_uadd_sat_intrinsics(text: &str) -> (String, usize) {
+    let mut count = 0;
+    let mut buf = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        if let Some(expansion) = try_expand_uadd_sat(line) {
+            buf.push_str(&expansion);
+            count += 1;
+        } else {
+            buf.push_str(line);
+        }
+    }
+    (buf, count)
+}
+
+/// Try to expand a single `@llvm.uadd.sat.iN` call line. Returns
+/// `None` if the line is not a matching call.
+fn try_expand_uadd_sat(line: &str) -> Option<String> {
+    let trimmed = line.trim_start();
+    if !trimmed.contains("@llvm.uadd.sat.i") {
+        return None;
+    }
+    let eq_pos = trimmed.find(" = ")?;
+    let dest = trimmed[..eq_pos].trim();
+    if !dest.starts_with('%') {
+        return None;
+    }
+    // Extract type from the intrinsic name: @llvm.uadd.sat.i<N>
+    let marker = "@llvm.uadd.sat.";
+    let type_start = trimmed.find(marker)? + marker.len();
+    let paren = trimmed[type_start..].find('(')?;
+    let ty = &trimmed[type_start..type_start + paren]; // e.g. "i32"
+    if !ty.starts_with('i') || ty[1..].parse::<u32>().is_err() {
+        return None;
+    }
+    // Parse operands from parentheses
+    let args_start = type_start + paren + 1;
+    let args_end = trimmed[args_start..].find(')')?;
+    let args_str = &trimmed[args_start..args_start + args_end];
+    let parts: Vec<&str> = args_str.splitn(2, ',').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    let op_a = extract_llvm_operand(parts[0].trim(), ty)?;
+    let op_b = extract_llvm_operand(parts[1].trim(), ty)?;
+    let suffix = dest.trim_start_matches('%');
+    let lead = &line[..line.len() - line.trim_start().len()];
+    let nl = if line.ends_with('\n') { "\n" } else { "" };
+    Some(format!(
+        "{lead}%__sat_sum_{suffix} = add {ty} {op_a}, {op_b}{nl}\
+         {lead}%__sat_ov_{suffix} = icmp ult {ty} %__sat_sum_{suffix}, {op_a}{nl}\
+         {lead}{dest} = select i1 %__sat_ov_{suffix}, {ty} -1, {ty} %__sat_sum_{suffix}{nl}"
+    ))
+}
+
+/// Extract the value operand from e.g. `"i32 noundef %0"`, skipping
+/// the type and optional attributes. Returns `None` if the type
+/// prefix doesn't match `expected_ty`.
+fn extract_llvm_operand<'a>(s: &'a str, expected_ty: &str) -> Option<&'a str> {
+    let rest = s.strip_prefix(expected_ty)?.trim_start();
+    // Skip optional attributes like `noundef`
+    let rest = if let Some(r) = rest.strip_prefix("noundef") {
+        r.trim_start()
+    } else {
+        rest
+    };
+    if rest.is_empty() {
+        return None;
+    }
+    Some(rest)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,6 +425,33 @@ mod tests {
         // touched.
         let input = "%poison_pill = alloca i32\n@poisonous = global i32 0\n";
         let (out, n) = replace_poison_with_undef(input);
+        assert_eq!(n, 0);
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn expands_uadd_sat_i32() {
+        let input = "  %3 = tail call i32 @llvm.uadd.sat.i32(i32 noundef %0, i32 noundef %1)\n";
+        let (out, n) = expand_uadd_sat_intrinsics(input);
+        assert_eq!(n, 1);
+        assert!(out.contains("%__sat_sum_3 = add i32 %0, %1"), "got: {out}");
+        assert!(out.contains("%__sat_ov_3 = icmp ult i32 %__sat_sum_3, %0"), "got: {out}");
+        assert!(out.contains("%3 = select i1 %__sat_ov_3, i32 -1, i32 %__sat_sum_3"), "got: {out}");
+    }
+
+    #[test]
+    fn expands_uadd_sat_no_noundef() {
+        let input = "  %r = call i64 @llvm.uadd.sat.i64(i64 %a, i64 %b)\n";
+        let (out, n) = expand_uadd_sat_intrinsics(input);
+        assert_eq!(n, 1);
+        assert!(out.contains("add i64 %a, %b"), "got: {out}");
+        assert!(out.contains("select i1 %__sat_ov_r, i64 -1, i64 %__sat_sum_r"), "got: {out}");
+    }
+
+    #[test]
+    fn leaves_non_sat_intrinsics_alone() {
+        let input = "  %1 = call i32 @llvm.abs.i32(i32 %0, i1 false)\n";
+        let (out, n) = expand_uadd_sat_intrinsics(input);
         assert_eq!(n, 0);
         assert_eq!(out, input);
     }

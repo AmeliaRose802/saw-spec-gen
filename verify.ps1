@@ -132,52 +132,32 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "  → $llFile" -ForegroundColor Green
 }
 
-# ── Step 1.5: Patch IR for SAW/Crucible quirks ────────────────────────────────
-# Two textual passes run on the .ll, then we re-assemble the .bc:
-#   * --strip-msvc-eh : replace MSVC C++ exception-handling metadata
-#       globals (`_TI*`, `_CTA*`, `_CT??_R0*` in `section ".xdata"`)
-#       with `external constant` declarations. Their initialisers use
-#       `ptrtoint(@__ImageBase)` differences, which Crucible rejects
-#       at module-load time ("Illegal operation applied to pointer
-#       argument"). The metadata is only ever read by the OS unwinder
-#       so dropping the initialiser is sound for SAW's purposes.
-#   * --poison-to-undef : replace `poison` literals with `undef`.
-#       Crucible's llvmExtensionEval panics when it materialises a
-#       partial-aggregate constant containing `poison` (which clang
-#       emits in `insertvalue` chains); `undef` is handled cleanly.
-# Both passes are no-ops when the IR doesn't trigger them, so it's
-# safe to run unconditionally for every C++ verify job.
-if ($llFile) {
-    $patchedLl = $llFile  # in-place rewrite
-    # --strip-msvc-eh is only meaningful for the MSVC ABI; Itanium
-    # (Linux/macOS) uses landingpad which Crucible handles natively,
-    # and there are no `_TI*`/`_CTA*` xdata globals to strip.
-    $patchArgs = @('patch-llvm-ir', '--input', $llFile, '--output', $patchedLl, '--poison-to-undef')
+# ── Step 1.5: Patch the -O1 bitcode for SAW/Crucible quirks ───────────────────
+# Disassemble the -O1 .bc, run textual patches, reassemble.  This
+# preserves clang's -O1 optimisation choices (which SAW handles well)
+# instead of clobbering the .bc with -O0 IR and re-optimising through
+# `opt -O1` (which can introduce LLVM intrinsics SAW doesn't support,
+# e.g. llvm.uadd.sat.i32, and adds nsw/nuw flags that cause false
+# DISPROVED verdicts).
+#
+# Patches applied:
+#   --poison-to-undef : replace `poison` literals with `undef`.
+#   --strip-nsw-nuw   : remove nsw/nuw flags that cause SAW to see poison.
+#   --strip-msvc-eh   : (MSVC only) drop exception-handling xdata globals.
+$llvmDis = Join-Path (Split-Path $llvmAs -Parent) 'llvm-dis'
+if (Test-Path $llvmDis) {
+    $patchedLl = Join-Path $OutputDir "${baseName}_patched.ll"
+    & $llvmDis $bcFile -o $patchedLl 2>&1
+    if ($LASTEXITCODE -ne 0) { Write-Error "llvm-dis failed"; exit 1 }
+
+    $patchArgs = @('patch-llvm-ir', '--input', $patchedLl, '--output', $patchedLl,
+                   '--poison-to-undef', '--strip-nsw-nuw')
     if ($isMsvc) { $patchArgs += '--strip-msvc-eh' }
     & $specGen @patchArgs 2>&1 | Write-Host
     if ($LASTEXITCODE -ne 0) { Write-Error "patch-llvm-ir failed"; exit 1 }
-    # Re-assemble the .bc so SAW sees the patched module.
+
     & $llvmAs $patchedLl -o $bcFile 2>&1
     if ($LASTEXITCODE -ne 0) { Write-Error "llvm-as (post-patch) failed"; exit 1 }
-    # Re-optimise the patched bitcode.  On the Itanium ABI the
-    # -O0 IR keeps each `c = new Derived()` branch entirely separate,
-    # and the indirect call `c->m()` lowers to a load through a phi
-    # of two distinct heap allocations — which Crucible cannot resolve
-    # to a concrete function handle.  Running `opt -O1` here folds
-    # the call into a `load` from the (phi-merged) vtable address, so
-    # both branches resolve to the same stub override.  Pure-bytecode
-    # so safe regardless of source language / target ABI.
-    $optTool = Join-Path (Split-Path $llvmAs -Parent) 'opt'
-    if (Test-Path $optTool) {
-        # Strip clang's per-function `optnone` (added under -O0) so the
-        # -O1 pipeline below can actually transform the bodies.  We keep
-        # `noinline`: removing it lets `opt` inline every `linkonce_odr`
-        # C++ method, after which DCE prunes the original definition —
-        # and saw-spec-gen's auto-generated overrides then fail to bind
-        # because the symbol no longer exists.
-        & $optTool -O1 --force-remove-attribute=optnone $bcFile -o $bcFile 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { Write-Error "opt -O1 failed"; exit 1 }
-    }
 }
 
 # ── Step 2: Dump clang AST → JSON ─────────────────────────────────────────────

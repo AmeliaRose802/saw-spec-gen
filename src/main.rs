@@ -295,6 +295,14 @@ enum Commands {
         /// Replace `poison` literals with `undef`.
         #[arg(long)]
         poison_to_undef: bool,
+
+        /// Strip `nsw` / `nuw` instruction flags.
+        #[arg(long)]
+        strip_nsw_nuw: bool,
+
+        /// Expand saturating-arithmetic intrinsics.
+        #[arg(long)]
+        expand_sat_intrinsics: bool,
     },
 }
 
@@ -361,6 +369,8 @@ fn main() -> Result<()> {
             output,
             strip_msvc_eh,
             poison_to_undef,
-        } => commands::patch_llvm_ir_cmd(input, output, strip_msvc_eh, poison_to_undef),
+            strip_nsw_nuw,
+            expand_sat_intrinsics,
+        } => commands::patch_llvm_ir_cmd(input, output, strip_msvc_eh, poison_to_undef, strip_nsw_nuw, expand_sat_intrinsics),
     }
 }
