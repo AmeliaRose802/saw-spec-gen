@@ -1,11 +1,6 @@
 /*
 DEMO: count_digits over a fixed-length `const char*` buffer.
 
-This is the simpler, "C-style string" baseline. The companion file
-count_digits_string_verified.cpp wraps the same operation in `std::string&`
-and (currently) cannot be verified through gen-verify -- see
-README.md for why.
-
 The SAL annotation `_In_reads_(8)` tells the spec generator that
 exactly 8 bytes behind `s` are readable. Without it, gen-verify
 falls back to a single-byte allocation and SAW rejects every

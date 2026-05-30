@@ -43,10 +43,8 @@ $env:SKIP_SAW_TESTS = '1'
 | `rust_havoc`         | `tests/e2e/cases/02-havoc-coverage/**/*.rs` + `tests/e2e/cases/03-rust-trait-dispatch/{static,dynamic,external}/*.rs` — Rust havoc and statically-resolvable trait dispatch. |
 | `bounded_loop`       | `tests/e2e/cases/01-tutorial/bounded_loop/**` — bit-level ripple-carry and bounded data-dependent loops.  |
 | `rust_equiv`         | `tests/e2e/cases/04-cpp-rust-equivalence/**` — C++/Rust equivalence via shared Cryptol spec.              |
-| `trait_unknown_impl` | `tests/e2e/cases/03-rust-trait-dispatch/unknown_impl` — opaque `&dyn Trait` impl, vtable stubs.           |
 | `string_ops`         | `tests/e2e/cases/05-string-ops/has_null_byte/**` — SWAR null-byte detection (C++).                        |
-| `strings`            | `tests/e2e/cases/05-string-ops/count_digits/**` — C-string + `std::string` `count_digits` (C++).          |
-| `async_rust`         | `tests/e2e/cases/06-async-rust/add_one_coroutine` — `async fn` coroutine lowering, proves resume == spec. |
+| `strings`            | `tests/e2e/cases/05-string-ops/count_digits/**` — C-string `count_digits` over `_In_reads_(8) const char*` (C++).          |
 | `rust_adversarial`   | `tests/e2e/cases/99-research/rust_adversarial/**` — research cases for known verifier blind spots.  |
 | `box_allocator`      | `tests/e2e/cases/99-research/box_allocator` — excluded by default; produces `UNKNOWN` under the current pipeline. |
 

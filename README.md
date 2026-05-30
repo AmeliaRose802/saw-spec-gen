@@ -228,11 +228,10 @@ End-to-end tests live in [tests/e2e/cases/](tests/e2e/cases/), grouped by role:
 | `01-tutorial/bounded_loop/` | The hello-world: prove `add_one`/`sum_first_n` in C++ and Rust against the same Cryptol spec |
 | `01-tutorial/csep590b_c04/` | Course-problem suite (clamp_sub, safe_mul, count_groups, make_change, isqrt) — buggy + fixed variants in both languages |
 | `02-havoc-coverage/` | One folder per hazard scenario (`pointer_aliasing`, `class_member_clobbered`, `throws_exception`, `ctor_stub_false_verdicts`, …); each holds the C++ and Rust `_verified`/`_disproved` pair plus a shared Cryptol spec, so you can diff languages on the same hazard |
-| `03-rust-trait-dispatch/` | Rust-only: `static_dispatch`, `dynamic_dispatch`, `external_crate`, `unknown_impl` — trait virtual calls and their override modelling |
+| `03-rust-trait-dispatch/` | Rust-only: `static_dispatch`, `dynamic_dispatch`, `external_crate` — trait virtual calls and their override modelling |
 | `04-cpp-rust-equivalence/` | True cross-language equivalence cases driven by `verify-equiv.ps1` (`compute_fee_reordered`, `sat_add_optimized`, `not_operator_trap`) |
 | `05-string-ops/has_null_byte/` | SWAR null-byte detection (real libc `strlen` bit-trick over a packed 64-bit word) |
-| `05-string-ops/count_digits/` | C-string + `std::string` variants, both verifying and counterexample-producing |
-| `06-async-rust/` | Verify a Rust `async fn` by targeting its coroutine `resume` symbol |
+| `05-string-ops/count_digits/` | C-string `count_digits` over `_In_reads_(8) const char*` — verifying and counterexample variants |
 | `99-research/rust_adversarial/` | "Sneaky" Rust patterns (interior mutability, raw aliasing, drop side effects, `unreachable_unchecked`, …) — every disproved case shows the harness catching what unit tests would miss |
 | `99-research/box_allocator/` | Known-`UNKNOWN` case (`Box::new` path the front-end can't model yet) |
 

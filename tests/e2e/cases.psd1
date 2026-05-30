@@ -128,14 +128,6 @@
         #    path plus the auto-emitted llvm.var.annotation override. ───────
         @{ Tag = 'strings'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/count_digits'; File = 'count_digits_cstr_verified.cpp';  Cry = 'count_digits_spec.cry'; CryptolFn = 'count_digits_spec'; Function = 'count_digits'; Expected = 'VERIFIED'  }
         @{ Tag = 'strings'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/count_digits'; File = 'count_digits_cstr_disproved.cpp'; Cry = 'count_digits_spec.cry'; CryptolFn = 'count_digits_spec'; Function = 'count_digits'; Expected = 'DISPROVED' }
-        # std::string heap-mode test: hand-rolled SAW driver allocates a
-        # basic_string with `_Ptr` wired to a separately-allocated content
-        # buffer, asserts the Cryptol `valid_string` precondition, and
-        # verifies (z3) that count_digits matches the spec for any string
-        # up to MAX_LEN=32 bytes. Uses a custom runner because gen-verify
-        # can't synthesise this layout yet.
-        @{ Tag = 'strings'; Runner = 'custom'; Script = 'tests/e2e/cases/05-string-ops/count_digits/run_string_test.ps1'; ScriptArgs = @{ CppFile = 'tests/e2e/cases/05-string-ops/count_digits/count_digits_string_verified.cpp';  ExpectedResult = 'VERIFIED'  }; Expected = 'VERIFIED'  }
-        @{ Tag = 'strings'; Runner = 'custom'; Script = 'tests/e2e/cases/05-string-ops/count_digits/run_string_test.ps1'; ScriptArgs = @{ CppFile = 'tests/e2e/cases/05-string-ops/count_digits/count_digits_string_disproved.cpp'; ExpectedResult = 'DISPROVED' }; Expected = 'DISPROVED' }
 
         # ── C++/Rust equivalence tests (verify-equiv.ps1) ───────────────────
         @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'tests/e2e/cases/04-cpp-rust-equivalence/compute_fee_reordered';         Cpp = 'compute_fee.cpp'; Rust = 'compute_fee_verified.rs';  Cry = 'compute_fee_spec.cry'; CryptolFn = 'compute_fee_spec'; Function = 'compute_fee'; Expected = 'EQUIVALENT'     }
@@ -144,12 +136,16 @@
         @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'tests/e2e/cases/04-cpp-rust-equivalence/sat_add_optimized';   Cpp = 'sat_add.cpp';     Rust = 'sat_add_disproved.rs'; Cry = 'sat_add_spec.cry';     CryptolFn = 'sat_add_spec';     Function = 'sat_add';     Expected = 'NOT EQUIVALENT' }
         @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'tests/e2e/cases/04-cpp-rust-equivalence/not_operator_trap'; Cpp = 'negate.cpp';     Rust = 'negate.rs';           Cry = 'negate_spec.cry';      CryptolFn = 'negate_spec';      Function = 'negate';      Expected = 'NOT EQUIVALENT' }
 
-        # ── Unknown concrete-impl dyn-trait case (custom runner) ────────────
-        @{ Tag = 'trait_unknown_impl'; Runner = 'custom'; Script = 'tests/e2e/cases/03-rust-trait-dispatch/unknown_impl/run_unknown_impl.ps1'; ScriptArgs = @{ RustFile = 'tests/e2e/cases/03-rust-trait-dispatch/unknown_impl/add_step_verified.rs';  ExpectedResult = 'VERIFIED'  }; Expected = 'VERIFIED'  }
-        @{ Tag = 'trait_unknown_impl'; Runner = 'custom'; Script = 'tests/e2e/cases/03-rust-trait-dispatch/unknown_impl/run_unknown_impl.ps1'; ScriptArgs = @{ RustFile = 'tests/e2e/cases/03-rust-trait-dispatch/unknown_impl/add_step_disproved.rs'; ExpectedResult = 'DISPROVED' }; Expected = 'DISPROVED' }
+        # ── Unknown concrete-impl dyn-trait case — removed pending real
+        #    tool support. See bd issue saw-spec-gen-uki: restore once
+        #    verify-rust.ps1 can derive a TraitSchema + fat-pointer
+        #    driver directly from the Rust source (no hand-rolled SAW
+        #    script, no duplicated trait_schema.json).
 
-        # ── Async-Rust coroutine test (custom runner) ───────────────────────
-        @{ Tag = 'async_rust'; Runner = 'custom'; Script = 'tests/e2e/cases/06-async-rust/add_one_coroutine/run_async_test.ps1'; ScriptArgs = @{}; Expected = 'VERIFIED' }
+        # ── Async-Rust coroutine test — removed pending real tool support.
+        #    See bd issue saw-spec-gen-tfg: restore once verify-rust.ps1
+        #    learns to detect coroutine lowering and resolve the resume
+        #    symbol natively (no per-test bespoke .ps1 driver).
 
         # ── Rust adversarial research cases: each demonstrates a specific
         #    verifier blind spot or successful adversarial coverage.
