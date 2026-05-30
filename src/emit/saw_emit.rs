@@ -36,6 +36,7 @@ mod stubs;
 mod types;
 mod verify_script;
 mod verify_script_steps;
+mod vtable_ir;
 mod writer;
 
 // Re-export the public surface that the rest of the crate depends on.

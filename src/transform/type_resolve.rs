@@ -165,6 +165,23 @@ pub fn resolve_spec_aliases(
     }
 }
 
+/// Silently resolve `llvm_alias` references in a spec's params and
+/// return type. Unlike [`resolve_spec_aliases`], this does not log
+/// warnings — used for bulk override-spec resolution in `gen_verify`.
+pub fn resolve_spec_types_quiet(
+    spec: &mut crate::constraints::SpecConstraint,
+    ir_sizes: &HashMap<String, usize>,
+) {
+    for p in &mut spec.params {
+        if let Some(r) = resolve_saw_type(&p.saw_type, ir_sizes, p.dereferenceable_size) {
+            p.saw_type = r;
+        }
+    }
+    if let Some(r) = resolve_saw_type(&spec.return_constraint.saw_type, ir_sizes, None) {
+        spec.return_constraint.saw_type = r;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

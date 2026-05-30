@@ -71,6 +71,43 @@ function Find-FirstExisting([string[]]$paths) {
     return $null
 }
 
+# Build (or rebuild) the saw-spec-gen CLI from $RepoRoot.
+#
+# When cargo is available we ALWAYS run `cargo build --release` and let
+# cargo's content-based fingerprinting decide whether a rebuild is needed
+# (it is a fast no-op when nothing changed). This is the only reliable way
+# to avoid running a stale binary: a plain "skip if the file exists" check
+# silently keeps an out-of-date build after a checkout / rebase, and in CI
+# the `target/` cache can restore a binary whose mtime is *newer* than the
+# freshly checked-out source — defeating any mtime heuristic. Stale builds
+# surface as spurious EXCEPTIONs in the end-to-end suite (e.g. an outdated
+# `patch-llvm-ir` subcommand). The Linux e2e job already builds this way;
+# this helper brings the Windows / init.ps1 paths in line.
+#
+# If cargo is NOT on PATH (a consumer running a prebuilt binary) we fall
+# back to using whatever binary already exists.
+function Build-SawSpecGen {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$RepoRoot)
+
+    $exeExt  = if ($IsWindows -or ($null -eq $IsWindows -and $env:OS -eq 'Windows_NT')) { '.exe' } else { '' }
+    $specGen = Join-Path $RepoRoot ("target/release/saw-spec-gen" + $exeExt)
+
+    $cargo = Get-Command 'cargo' -ErrorAction SilentlyContinue
+    if ($cargo) {
+        Write-Host "[*] Building saw-spec-gen (cargo build --release)..." -ForegroundColor Cyan
+        Push-Location $RepoRoot
+        try { cargo build --release 2>&1 | Write-Host } finally { Pop-Location }
+        if ($LASTEXITCODE -ne 0) { Write-Error "cargo build --release failed"; exit 1 }
+    }
+
+    if (-not (Test-Path -LiteralPath $specGen)) {
+        Write-Error "saw-spec-gen binary not found at $specGen (and cargo is unavailable to build it)"
+        exit 1
+    }
+    return (Resolve-Path -LiteralPath $specGen).Path
+}
+
 function Find-OnPath([string]$name) {
     $cmd = Get-Command $name -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }

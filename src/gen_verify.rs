@@ -9,7 +9,7 @@
 
 use crate::alias_fallbacks::{apply_cli_overrides, dump_fallback_diagnostics};
 use crate::spec_rewrite::{apply_alias_rewrites, collect_type_sizes};
-use crate::type_resolve::resolve_saw_type;
+use crate::type_resolve::resolve_spec_types_quiet;
 use crate::{alias_fallbacks_ir, clang_ast, constraints, llvm_ir, saw_emit};
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
@@ -50,6 +50,15 @@ pub fn run(
     // MSVC-clang fully qualifies struct symbols, so without the IR we can't
     // match short C++ names against `%\"struct.Foo::Bar::Baz\"`.
     let (ir_struct_sizes, ir_funcs) = llvm_ir::load_optional(llvm_ir_path)?;
+
+    // Sniff the bitcode's `target triple = "..."` line so vtable stub
+    // generation can pick the correct ABI layout. Without this, an
+    // Itanium-compiled binary (Linux / macOS) would get MSVC-shaped
+    // stubs that never line up with the compiler's `_ZTV<C> + 16`
+    // pointer arithmetic in virtual constructors, and every dispatch
+    // would fall through to the unmodified real method body — defeating
+    // havoc-based verification.
+    let target_triple = llvm_ir_path.and_then(llvm_ir::read_target_triple);
 
     // Find the target function (FunctionInfo with call graph)
     let target_fn = all_functions
@@ -305,6 +314,7 @@ pub fn run(
             &classes_with_vdtor,
             output,
             Some(cryptol_fn),
+            target_triple.as_deref(),
         )?;
         eprintln!(
             "Generated {} havoc specs + {} constructor overrides",
@@ -455,25 +465,13 @@ pub fn run(
     // externals), not just the target.  Without this the override files
     // contain `llvm_alias "ShortName"` references that SAW can't load
     // against the bitcode's mangled struct table.
-    let resolve_spec_inplace = |spec: &mut constraints::SpecConstraint| {
-        for p in &mut spec.params {
-            if let Some(r) = resolve_saw_type(&p.saw_type, &ir_struct_sizes, p.dereferenceable_size)
-            {
-                p.saw_type = r;
-            }
-        }
-        if let Some(r) = resolve_saw_type(&spec.return_constraint.saw_type, &ir_struct_sizes, None)
-        {
-            spec.return_constraint.saw_type = r;
-        }
-    };
     for spec in &mut sub_callee_specs {
-        resolve_spec_inplace(spec);
+        resolve_spec_types_quiet(spec, &ir_struct_sizes);
     }
     let mut external_calls_owned: Vec<constraints::SpecConstraint> =
         external_calls.iter().map(|s| (*s).clone()).collect();
     for spec in &mut external_calls_owned {
-        resolve_spec_inplace(spec);
+        resolve_spec_types_quiet(spec, &ir_struct_sizes);
     }
 
     saw_emit::emit_verification_script(

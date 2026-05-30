@@ -33,6 +33,6 @@ mod type_parser;
 #[allow(unused_imports)]
 pub use function_sig::extract_functions;
 #[allow(unused_imports)]
-pub use load::{load_optional, parse_llvm_ir, MAX_IR_FILE_SIZE};
+pub use load::{load_optional, parse_llvm_ir, read_target_triple, MAX_IR_FILE_SIZE};
 #[allow(unused_imports)]
 pub use struct_types::struct_sizes;
