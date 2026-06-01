@@ -136,3 +136,240 @@ fn emit_postcondition_uses_points_to_for_sret_return() {
         "sret must NOT use llvm_return (LLVM function returns void); got:\n{out}"
     );
 }
+
+/// sret prestate threading: when the Cryptol model has one extra trailing
+/// `[N][8]` param, `emit_equiv_spec_body` must emit a `preBytes` fresh
+/// variable with an `llvm_points_to` pre-condition on the sret buffer,
+/// and the postcondition must include `preBytes` in the Cryptol call.
+#[test]
+fn emit_sret_prestate_threads_prebytes_into_cryptol_call() {
+    let target_spec = SpecConstraint {
+        function_name: "getStatus".into(),
+        mangled_name: Some("?getStatus@@YA?AUEnrollmentStatus@@_N0_NQBUUuid@@@Z".into()),
+        params: vec![
+            ParamConstraint {
+                name: "fE".into(),
+                saw_type: "llvm_int 1".into(),
+                alloc_type: AllocType::FreshVar,
+                preconditions: vec![],
+                unchanged_after: false,
+                dereferenceable_size: None,
+            },
+            ParamConstraint {
+                name: "hK".into(),
+                saw_type: "llvm_int 1".into(),
+                alloc_type: AllocType::FreshVar,
+                preconditions: vec![],
+                unchanged_after: false,
+                dereferenceable_size: None,
+            },
+            ParamConstraint {
+                name: "kA".into(),
+                saw_type: "llvm_int 1".into(),
+                alloc_type: AllocType::FreshVar,
+                preconditions: vec![],
+                unchanged_after: false,
+                dereferenceable_size: None,
+            },
+            ParamConstraint {
+                name: "keyId".into(),
+                saw_type: "llvm_array 16 (llvm_int 8)".into(),
+                alloc_type: AllocType::AllocReadonly,
+                preconditions: vec![],
+                unchanged_after: false,
+                dereferenceable_size: None,
+            },
+        ],
+        return_constraint: ReturnConstraint {
+            saw_type: "llvm_array 20 (llvm_int 8)".into(),
+            value_constraints: vec![],
+            is_sret: true,
+            returns_pointer: false,
+        },
+        referenced_globals: vec![],
+        has_body: true,
+        is_virtual: false,
+        can_throw: false,
+        postconditions: vec![],
+    };
+    let target_fn = FunctionInfo {
+        name: "getStatus".into(),
+        mangled_name: Some("?getStatus@@YA?AUEnrollmentStatus@@_N0_NQBUUuid@@@Z".into()),
+        return_type: TypeInfo::Struct {
+            name: "EnrollmentStatus".into(),
+            size_bytes: Some(20),
+            fields: vec![],
+        },
+        params: vec![
+            ParamInfo {
+                name: "fE".into(),
+                ty: TypeInfo::Bool,
+                mutability: Mutability::Readonly,
+                nullable: Nullability::NonNull,
+                annotations: vec![],
+            },
+            ParamInfo {
+                name: "hK".into(),
+                ty: TypeInfo::Bool,
+                mutability: Mutability::Readonly,
+                nullable: Nullability::NonNull,
+                annotations: vec![],
+            },
+            ParamInfo {
+                name: "kA".into(),
+                ty: TypeInfo::Bool,
+                mutability: Mutability::Readonly,
+                nullable: Nullability::NonNull,
+                annotations: vec![],
+            },
+            ParamInfo {
+                name: "keyId".into(),
+                ty: TypeInfo::Pointer(Box::new(TypeInfo::ByteArray(16))),
+                mutability: Mutability::Readonly,
+                nullable: Nullability::NonNull,
+                annotations: vec![],
+            },
+        ],
+        called_functions: vec![],
+        has_body: true,
+        is_virtual: false,
+        is_system: false,
+        can_throw: false,
+        annotations: vec![],
+        referenced_globals: vec![],
+    };
+    let interface_classes = HashSet::new();
+    let interface_of = |_: &TypeInfo| -> Option<String> { None };
+
+    let mut out = String::new();
+    let (cryptol_args, execute_args) = emit_equiv_spec_body(
+        &mut out,
+        1,
+        "getStatus",
+        "getStatus_cpp",
+        &target_spec,
+        &target_fn,
+        &interface_classes,
+        &interface_of,
+        &[],
+        Some(17), // prestate: 17 bytes
+    );
+
+    // The preBytes fresh var should be emitted
+    assert!(
+        out.contains("preBytes <- llvm_fresh_var \"preBytes\" (llvm_array 17 (llvm_int 8))"),
+        "expected preBytes fresh var; got:\n{out}"
+    );
+    // The pre-condition binding into the sret buffer
+    assert!(
+        out.contains("llvm_points_to result_ptr (llvm_term preBytes)"),
+        "expected preBytes pre-condition on sret buffer; got:\n{out}"
+    );
+    // preBytes should be in cryptol_args
+    assert!(
+        cryptol_args.contains(&"preBytes".to_string()),
+        "expected preBytes in cryptol_args; got: {cryptol_args:?}"
+    );
+    // result_ptr should be in execute_args
+    assert!(
+        execute_args.contains(&"result_ptr".to_string()),
+        "expected result_ptr in execute_args; got: {execute_args:?}"
+    );
+
+    // Now emit the postcondition and verify preBytes appears in the
+    // Cryptol call
+    emit_postcondition_and_close(
+        &mut out,
+        "getStatus_cpp",
+        &cryptol_args,
+        &execute_args,
+        &[],
+        &TypeInfo::Struct {
+            name: "EnrollmentStatus".into(),
+            size_bytes: Some(20),
+            fields: vec![],
+        },
+        true,
+    );
+
+    assert!(
+        out.contains("getStatus_cpp (fE ! 0) (hK ! 0) (kA ! 0) keyId preBytes"),
+        "expected preBytes threaded into Cryptol call; got:\n{out}"
+    );
+}
+
+/// Without sret prestate (None), the emitter should NOT produce preBytes.
+#[test]
+fn emit_sret_no_prestate_omits_prebytes() {
+    let target_spec = SpecConstraint {
+        function_name: "getStatus".into(),
+        mangled_name: Some("?getStatus@@YA?AUEnrollmentStatus@@_N@Z".into()),
+        params: vec![ParamConstraint {
+            name: "fE".into(),
+            saw_type: "llvm_int 1".into(),
+            alloc_type: AllocType::FreshVar,
+            preconditions: vec![],
+            unchanged_after: false,
+            dereferenceable_size: None,
+        }],
+        return_constraint: ReturnConstraint {
+            saw_type: "llvm_array 20 (llvm_int 8)".into(),
+            value_constraints: vec![],
+            is_sret: true,
+            returns_pointer: false,
+        },
+        referenced_globals: vec![],
+        has_body: true,
+        is_virtual: false,
+        can_throw: false,
+        postconditions: vec![],
+    };
+    let target_fn = FunctionInfo {
+        name: "getStatus".into(),
+        mangled_name: Some("?getStatus@@YA?AUEnrollmentStatus@@_N@Z".into()),
+        return_type: TypeInfo::Struct {
+            name: "EnrollmentStatus".into(),
+            size_bytes: Some(20),
+            fields: vec![],
+        },
+        params: vec![ParamInfo {
+            name: "fE".into(),
+            ty: TypeInfo::Bool,
+            mutability: Mutability::Readonly,
+            nullable: Nullability::NonNull,
+            annotations: vec![],
+        }],
+        called_functions: vec![],
+        has_body: true,
+        is_virtual: false,
+        is_system: false,
+        can_throw: false,
+        annotations: vec![],
+        referenced_globals: vec![],
+    };
+    let interface_classes = HashSet::new();
+    let interface_of = |_: &TypeInfo| -> Option<String> { None };
+
+    let mut out = String::new();
+    let (cryptol_args, _) = emit_equiv_spec_body(
+        &mut out,
+        1,
+        "getStatus",
+        "getStatus_cpp",
+        &target_spec,
+        &target_fn,
+        &interface_classes,
+        &interface_of,
+        &[],
+        None, // no prestate
+    );
+
+    assert!(
+        !out.contains("preBytes"),
+        "should NOT emit preBytes without prestate; got:\n{out}"
+    );
+    assert!(
+        !cryptol_args.contains(&"preBytes".to_string()),
+        "preBytes should NOT be in cryptol_args; got: {cryptol_args:?}"
+    );
+}

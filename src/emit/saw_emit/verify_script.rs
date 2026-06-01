@@ -14,6 +14,7 @@ use super::verify_script_steps::{
 };
 use crate::clang_ast::{ClassConstructor, InterfaceMethod};
 use crate::constraints::*;
+use crate::cryptol_sig;
 use anyhow::{Context, Result};
 use std::collections::HashSet;
 use std::fs;
@@ -137,6 +138,15 @@ pub fn emit_verification_script(
         out.push_str(&format!("import \"{}\";\n\n", cryptol_rel));
     }
 
+    // Detect sret prestate threading: if the Cryptol function has one
+    // extra trailing [N][8] parameter compared to the C++ user-arg
+    // count, the model expects the sret buffer's pre-call bytes.
+    let sret_prestate_len = if target_spec.return_constraint.is_sret {
+        detect_sret_prestate(cryptol_spec_path, cryptol_fn, target_spec, target_fn)
+    } else {
+        None
+    };
+
     step += 1;
     let (cryptol_args, execute_args) = emit_equiv_spec_body(
         &mut out,
@@ -148,6 +158,7 @@ pub fn emit_verification_script(
         &interface_classes,
         &interface_of,
         all_globals,
+        sret_prestate_len,
     );
 
     emit_postcondition_and_close(
@@ -217,5 +228,59 @@ fn emit_header(
     ));
     if needs_experimental {
         out.push_str("enable_experimental;\n\n");
+    }
+}
+
+/// Detect sret prestate threading by comparing the Cryptol function's
+/// arity to the C++ user-arg count. Returns `Some(N)` when the
+/// Cryptol function has exactly one extra trailing `[N][8]` parameter
+/// (the pre-call sret buffer bytes).
+fn detect_sret_prestate(
+    cryptol_spec_path: &Path,
+    cryptol_fn: &str,
+    target_spec: &SpecConstraint,
+    target_fn: &FunctionInfo,
+) -> Option<usize> {
+    let sig = cryptol_sig::parse_signature(cryptol_spec_path, cryptol_fn)?;
+
+    // Count user-visible C++ args that become Cryptol parameters.
+    // Interface/container params don't produce Cryptol args, so
+    // approximate with spec params count (same as what
+    // emit_equiv_spec_body pushes to `cryptol_args`).
+    let cpp_user_arg_count = target_spec.params.len();
+
+    match cryptol_sig::detect_prestate(&sig, cpp_user_arg_count) {
+        Ok(prestate) => {
+            if let Some(n) = prestate {
+                eprintln!(
+                    "  sret prestate threading: Cryptol `{cryptol_fn}` has trailing \
+                     [{}][8] parameter for pre-call buffer bytes",
+                    n,
+                );
+            }
+            prestate
+        }
+        Err(e) => {
+            // Arity mismatch — emit a diagnostic warning but don't
+            // abort.  The old non-prestate path will emit, and SAW
+            // will report the partial-application error if prestate
+            // was truly needed.
+            let has_this = target_fn
+                .params
+                .first()
+                .map(|p| p.name == "this")
+                .unwrap_or(false);
+            let label = if has_this {
+                "instance method"
+            } else {
+                "free function"
+            };
+            eprintln!(
+                "warning: sret arity mismatch for {label} `{}`:\n  {e}\n  \
+                 Workaround: hand-write verify.saw or adjust the Cryptol spec.",
+                target_fn.name,
+            );
+            None
+        }
     }
 }

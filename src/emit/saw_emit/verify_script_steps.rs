@@ -196,6 +196,7 @@ pub(super) fn emit_equiv_spec_body(
     interface_classes: &HashSet<String>,
     interface_of: &dyn Fn(&TypeInfo) -> Option<String>,
     all_globals: &[GlobalVarInfo],
+    sret_prestate_len: Option<usize>,
 ) -> (Vec<String>, Vec<String>) {
     out.push_str(&format!(
         "// Step {step}: Equivalence spec — C++ {function_name} == Cryptol {cryptol_fn}\n",
@@ -297,6 +298,21 @@ pub(super) fn emit_equiv_spec_body(
             0
         };
         execute_args.insert(insert_idx, "result_ptr".to_string());
+
+        // sret prestate threading: when the Cryptol model has an extra
+        // trailing [N][8] parameter, it expects the pre-call bytes of
+        // the sret buffer so the post-state can refer to them (e.g.
+        // for std::optional where the payload is left uninitialised on
+        // the nullopt path).
+        if let Some(pre_len) = sret_prestate_len {
+            out.push_str(&format!(
+                "    preBytes <- llvm_fresh_var \"preBytes\" \
+                 (llvm_array {} (llvm_int 8));\n",
+                pre_len,
+            ));
+            out.push_str("    llvm_points_to result_ptr (llvm_term preBytes);\n");
+            cryptol_args.push("preBytes".to_string());
+        }
     }
 
     out.push('\n');
