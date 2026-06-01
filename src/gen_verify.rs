@@ -102,7 +102,27 @@ pub fn run(
         crate::transform::eh_globals::inject_exclow_globals(&mut target_spec, ir_path);
     }
 
-    let all_globals = clang_ast::extract_all_globals(&parsed_ast)?;
+    let mut all_globals = clang_ast::extract_all_globals(&parsed_ast)?;
+
+    // Augment with mutable globals discovered in the LLVM IR that the
+    // clang AST parser missed (function-local statics, compiler-
+    // generated globals, etc.).  Without this, SAW aborts with
+    // "Global symbol not allocated" when symbolically executing a body
+    // that touches an IR-only global.
+    if let Some(ir_path) = llvm_ir_path {
+        if let Ok(ir_text) = std::fs::read_to_string(ir_path) {
+            let extra =
+                crate::transform::ir_globals::discover_ir_only_globals(&ir_text, &all_globals);
+            if !extra.is_empty() {
+                eprintln!(
+                    "  discovered {} IR-only mutable global(s) not in clang AST",
+                    extra.len(),
+                );
+                all_globals.extend(extra);
+            }
+        }
+    }
+
     let all_specs = constraints::derive_constraints(&all_functions)?;
 
     // Warn about interfaces referenced by fields but missing from the merged
@@ -258,13 +278,7 @@ pub fn run(
                 continue;
             }
 
-            let is_system = fn_info.map(|f| f.is_system).unwrap_or(false);
-            saw_emit::emit_single_experimental_spec(
-                spec,
-                &all_globals,
-                is_system,
-                &experimental_dir,
-            )?;
+            saw_emit::emit_single_experimental_spec(spec, &all_globals, &experimental_dir)?;
         }
         eprintln!("Generated {} external function specs", external_calls.len());
     }
@@ -410,21 +424,29 @@ pub fn run(
         saw_emit::AssembledStubs::NoStubs
     };
 
-    // Concrete in-module sub-callees (non-virtual, non-system, with a body)
-    // are NOT overridden. SAW executes their real bodies during symbolic
-    // execution — this is essential for features like exception-lower, where
-    // the callee sets an error flag in the caller's stack frame via an alloca
-    // pointer. A havoc override would mask that side-channel.
+    // In-module sub-callees with a body are NOT havoc-overridden — SAW
+    // executes their real bodies during symbolic execution. The two
+    // discrimination layers we keep:
     //
-    // Only vtable dispatches (handled via vtable stubs), constructors
-    // (interface overrides), and external/system functions get overrides.
+    //   * `external_calls` (built earlier via callgraph::external_callees)
+    //     filters to `!has_body`, so genuinely undefined callees — printf,
+    //     libc, externs from other TUs — still get an adversarial spec.
+    //   * vtable dispatches and constructors are handled by the vtable
+    //     stub / interface-override layers; nothing to do here.
+    //
+    // What this loop used to do — havoc *every* body-having in-module
+    // callee — is wrong for callees defined inline in headers (e.g. a
+    // helper in `my_header.hpp` that gets inlined into the TU still ends
+    // up with `has_body == true`). Havoc'ing it produced spurious
+    // DISPROVED counterexamples for code that just called a trivial
+    // helper. Empty list = no compositional havoc step emitted.
     let sub_callee_specs: Vec<constraints::SpecConstraint> = Vec::new();
 
     // Apply the same `llvm_alias` resolution / dereferenceable fallback to
-    // every spec that will be emitted as an override (externals), not just
-    // the target.  Without this the override files contain
-    // `llvm_alias "ShortName"` references that SAW can't load against the
-    // bitcode's mangled struct table.
+    // every spec that will be emitted as an override (externals only now —
+    // sub-callees are empty above).  Without this the override files
+    // contain `llvm_alias "ShortName"` references that SAW can't load
+    // against the bitcode's mangled struct table.
     let mut external_calls_owned: Vec<constraints::SpecConstraint> =
         external_calls.iter().map(|s| (*s).clone()).collect();
     for spec in &mut external_calls_owned {

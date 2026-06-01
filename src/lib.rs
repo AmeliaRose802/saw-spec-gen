@@ -10,6 +10,7 @@ pub mod commands;
 pub mod constraints;
 pub mod dump_types;
 pub mod gen_verify;
+pub mod gen_verify_rust;
 pub mod mangle;
 
 // Grouped subsystems. Each is a folder under `src/` with its own

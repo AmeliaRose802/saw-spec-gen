@@ -32,10 +32,12 @@
 //! disassembled `.ll` so callers don't need an LLVM library
 //! linked. The expected wrapper flow is
 //!
+//! ```text
 //!     clang -S -emit-llvm  ...      # producing in.ll
 //!     saw-spec-gen patch-llvm-ir --input in.ll --output out.ll \
 //!         --strip-msvc-eh --poison-to-undef
 //!     llvm-as out.ll -o module.bc
+//! ```
 //!
 //! All edits are line-scoped: each function below walks `text` line
 //! by line so multi-line regex pitfalls (greedy `[^\}]*` running
@@ -185,11 +187,13 @@ fn strip_nsw_nuw_flags(text: &str) -> (String, usize) {
 /// pattern and lowers it to a single `@llvm.uadd.sat.iN` call.
 /// SAW doesn't support this intrinsic, so we expand it back:
 ///
+/// ```text
 ///     %r = call iN @llvm.uadd.sat.iN(iN %a, iN %b)
 ///   →
 ///     %__sat_sum_r = add iN %a, %b
 ///     %__sat_ov_r  = icmp ult iN %__sat_sum_r, %a
 ///     %r           = select i1 %__sat_ov_r, iN -1, iN %__sat_sum_r
+/// ```
 fn expand_uadd_sat_intrinsics(text: &str) -> (String, usize) {
     let mut count = 0;
     let mut buf = String::with_capacity(text.len());

@@ -113,10 +113,17 @@ pub enum Nullability {
 /// Annotations from the source language.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Annotation {
-    /// SAL: _In_reads_(n)
+    /// SAL: `_In_reads_(n)` with a decimal literal element count.
     InReads(usize),
-    /// SAL: _Out_writes_(n)
+    /// SAL: `_Out_writes_(n)` with a decimal literal element count.
     OutWrites(usize),
+    /// SAL: `_In_reads_(<paramName>)` — element count is conveyed by a
+    /// sibling parameter named here. The actual buffer length is
+    /// dynamic, so the emitter has to pick a symbolic upper bound and
+    /// add a SAW precondition `<paramName> <= MAX`.
+    InReadsParam(String),
+    /// SAL: `_Out_writes_(<paramName>)` — see [`Annotation::InReadsParam`].
+    OutWritesParam(String),
     /// SAL: _Inout_ — read on entry, may be modified
     Inout,
     /// SAL: _Pre_valid_ — pointer is valid on entry

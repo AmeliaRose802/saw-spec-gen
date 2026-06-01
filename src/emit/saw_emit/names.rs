@@ -117,4 +117,38 @@ mod tests {
         let s = make_spec("plain", None);
         assert_eq!(spec_safe_id(&s), "plain");
     }
+
+    /// Two C++ overloads share the same friendly name but have distinct
+    /// mangled symbols. `spec_safe_id` must produce DIFFERENT identifiers
+    /// for each — otherwise their generated `.saw` files would collide and
+    /// one overload's spec would silently overwrite the other on disk.
+    #[test]
+    fn spec_safe_id_distinguishes_overloads_by_mangled_name() {
+        // C++ source equivalent:
+        //   int    add(int, int);     // mangles to "_Z3addii"
+        //   double add(double, double); // mangles to "_Z3adddd"
+        let int_overload = make_spec("add", Some("_Z3addii"));
+        let dbl_overload = make_spec("add", Some("_Z3adddd"));
+        let int_id = spec_safe_id(&int_overload);
+        let dbl_id = spec_safe_id(&dbl_overload);
+        assert_ne!(
+            int_id, dbl_id,
+            "overloads with same friendly name must get distinct spec ids"
+        );
+        // Neither should collapse to the bare friendly name (which would be
+        // the collision-prone fallback path).
+        assert_ne!(int_id, "add");
+        assert_ne!(dbl_id, "add");
+    }
+
+    /// Same method name on two different classes (`Foo::compute` vs
+    /// `Bar::compute`) must also produce distinct ids. This is the same
+    /// invariant as classic overloading, just driven by class scope rather
+    /// than parameter list.
+    #[test]
+    fn spec_safe_id_distinguishes_same_method_on_different_classes() {
+        let foo = make_spec("compute", Some("_ZNK3Foo7computeEv"));
+        let bar = make_spec("compute", Some("_ZNK3Bar7computeEv"));
+        assert_ne!(spec_safe_id(&foo), spec_safe_id(&bar));
+    }
 }

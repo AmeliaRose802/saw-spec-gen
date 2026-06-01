@@ -1,0 +1,8 @@
+// Cryptol spec: clamp negative i8 values to zero.
+//
+// Exercises signed-less-than at 8 bits (`<$`) on a width no earlier
+// spec touched. The literal `0` takes its width from the spec's
+// declared type ([8]).
+
+clamp_neg_i8_spec : [8] -> [8]
+clamp_neg_i8_spec x = if x <$ 0 then 0 else x

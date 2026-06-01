@@ -101,10 +101,12 @@ fn rewrite_msvc_eh_global(line: &str) -> Option<String> {
 ///
 /// On Linux/Itanium, `throw Foo{}` emits a typeinfo global like:
 ///
+/// ```text
 ///     @_ZTI3Foo = linkonce_odr constant { ptr, ptr }
 ///         { ptr getelementptr inbounds (ptr,
 ///             ptr @_ZTVN10__cxxabiv117__class_type_infoE, i64 2),
 ///           ptr @_ZTS3Foo }, comdat, align 8
+/// ```
 ///
 /// The `getelementptr` into the external vtable declaration cannot
 /// be evaluated by SAW's constant folder — it aborts with

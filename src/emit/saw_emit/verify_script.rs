@@ -156,6 +156,8 @@ pub fn emit_verification_script(
         &cryptol_args,
         &execute_args,
         sub_callee_specs,
+        &target_fn.return_type,
+        target_spec.return_constraint.is_sret,
     );
 
     step += 1;
@@ -174,7 +176,6 @@ pub fn emit_verification_script(
     let script_path = output_dir.join("verify.saw");
     fs::write(&script_path, &out)
         .with_context(|| format!("Failed to write {}", script_path.display()))?;
-    let _ = all_globals; // silence the lint; consumed indirectly via target_spec
     Ok(())
 }
 

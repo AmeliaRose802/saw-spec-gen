@@ -1,24 +1,20 @@
 #include <cstdint>
-#include <cstdio>
-#include <cstdlib>
 
 int super_important = 7;
 
 /*
-DEMO: VERIFIED because SAW executes the concrete OkLog::log() body inline.
+DEMO: VERIFIED — OkLog::log has a concrete body whose entire call-chain
+is visible in the bitcode (no opaque externs). The per-target BFS traces
+all stores reachable from add_one and confirms none of them touch
+super_important, so SAW proves add_one(x) == x + 1.
 
-The ILog interface has a non-const log() method — through vtable
-dispatch, SAW would have to assume it could clobber globals, class
-members, or pointer arguments (havoc model).
+Key detail: OkLog::log does NOT call printf or any other declare-only
+function. If it did, the opaque callee would conservatively clobber all
+externally-visible globals (including super_important) because any
+function in another TU could `extern int super_important;` and write it.
 
-This case instantiates OkLog directly and calls log() on the concrete
-type.  gen-verify does NOT generate havoc overrides for concrete
-sub-callees, so SAW symbolically executes OkLog::log() (which only
-calls printf) and proves super_important is never touched.
-
-COMPARE: add_one_disproved.cpp uses SusLog — same non-const method,
-but the concrete implementation DOES clobber global state, so SAW
-disproves it.
+COMPARE: add_one_disproved.cpp uses SusLog, whose log() directly stores
+to super_important — BFS catches that and the override clobbers it.
 */
 
 class ILog {
@@ -26,11 +22,19 @@ public:
     virtual void log(const char* message) = 0;
 };
 
+// Function-local statics compile to internal-linkage LLVM globals.
+// saw-spec-gen discovers these from the IR and emits llvm_alloc_global
+// so SAW can symbolically execute bodies that touch them.
+static int safe_counter = 0;
+
 class OkLog : public ILog {
 public:
-    // NOT const — but the implementation is safe
+    // Body is fully visible — no opaque extern calls.
+    // Stores to safe_counter (internal linkage) but never to
+    // super_important.
     void log(const char* message) override {
-        printf("OK: %s\n", message);
+        safe_counter++;
+        (void)message;
     }
 };
 
@@ -39,20 +43,19 @@ public:
     // NOT const — and the implementation IS dangerous
     void log(const char* message) override {
         super_important = -1;  // clobbers global!
-        printf("SUS: %s\n", message);
     }
 };
 
 // Spec: add_one(x) = x + 1
 uint32_t add_one(uint32_t x) {
-    // Concrete type — SAW verifies OkLog::log() directly,
-    // not the havoc model of ILog::log()
+    // Concrete type — SAW executes OkLog::log() directly.
+    // Its body stores to safe_counter (internal linkage, discovered
+    // from IR), never to super_important → branch below is dead.
     OkLog logger;
 
     logger.log("Adding one to x");
 
-    // SAW verified that OkLog::log() doesn't touch super_important,
-    // so this branch is provably dead
+    // super_important is preserved — OkLog::log doesn't touch it
     if (super_important == -1) {
         return 12;
     }

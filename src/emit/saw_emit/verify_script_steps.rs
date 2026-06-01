@@ -5,6 +5,7 @@
 //! function appends its corresponding chunk of SAWScript to the `out`
 //! buffer.
 
+use super::cryptol_bridge::{cryptol_arg_for, cryptol_return_for};
 use super::names::{sanitize_name, spec_safe_id, stub_function_name};
 use super::overrides::{container_layout_for, emit_container_this};
 use super::stubs::AssembledStubs;
@@ -14,6 +15,23 @@ use std::collections::HashSet;
 
 pub(super) fn is_operator_new(spec: &SpecConstraint) -> bool {
     spec.function_name == "operator new" || spec.mangled_name.as_deref() == Some("??2@YAPEAX_K@Z")
+}
+
+/// Emit the per-parameter `llvm_precond` clauses derived in
+/// [`crate::constraints::derive`]. Lines that look like comments are
+/// passed through verbatim; everything else gets a trailing `;`.
+fn emit_param_preconditions(out: &mut String, preconditions: &[String]) {
+    for pre in preconditions {
+        let trimmed = pre.trim_start();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.starts_with("//") {
+            out.push_str(&format!("    {pre}\n"));
+        } else {
+            out.push_str(&format!("    {pre};\n"));
+        }
+    }
 }
 
 pub(super) fn emit_load_bitcode_step(
@@ -177,7 +195,7 @@ pub(super) fn emit_equiv_spec_body(
     target_fn: &FunctionInfo,
     interface_classes: &HashSet<String>,
     interface_of: &dyn Fn(&TypeInfo) -> Option<String>,
-    _all_globals: &[GlobalVarInfo],
+    all_globals: &[GlobalVarInfo],
 ) -> (Vec<String>, Vec<String>) {
     out.push_str(&format!(
         "// Step {step}: Equivalence spec — C++ {function_name} == Cryptol {cryptol_fn}\n",
@@ -214,7 +232,13 @@ pub(super) fn emit_equiv_spec_body(
                     "    {} <- llvm_fresh_var \"{}\" ({});\n",
                     param.name, param.name, param.saw_type,
                 ));
-                cryptol_args.push(param.name.clone());
+                emit_param_preconditions(out, &param.preconditions);
+                let arg_ty = target_fn
+                    .params
+                    .get(i)
+                    .map(|p| &p.ty)
+                    .unwrap_or(&TypeInfo::Void);
+                cryptol_args.push(cryptol_arg_for(&param.name, arg_ty));
                 execute_args.push(format!("llvm_term {}", param.name));
             }
             AllocType::AllocReadonly | AllocType::AllocMutable => {
@@ -236,14 +260,48 @@ pub(super) fn emit_equiv_spec_body(
                 out.push_str(&format!(
                     "    llvm_points_to {ptr_name} (llvm_term {val_name});\n",
                 ));
-                cryptol_args.push(val_name);
+                emit_param_preconditions(out, &param.preconditions);
+                let arg_ty = target_fn
+                    .params
+                    .get(i)
+                    .map(|p| &p.ty)
+                    .unwrap_or(&TypeInfo::Void);
+                cryptol_args.push(cryptol_arg_for(&val_name, arg_ty));
                 execute_args.push(ptr_name);
             }
         }
     }
+
+    // sret: when the C++ function returns an aggregate that the MSVC
+    // x64 ABI passes via a hidden output pointer, the LLVM signature
+    // has `ptr sret(T)` in argument position 0 (free function) or 1
+    // (instance method, immediately after `this`). Without inserting
+    // that pointer here, SAW rejects the verify with
+    // "Type mismatch in argument 0 ... declared with type: ptr, but
+    // provided argument has incompatible type: iN". See
+    // `SAW_SPEC_GEN_BUG_REPORT_sret_not_detected.md`.
+    if target_spec.return_constraint.is_sret {
+        out.push_str("\n    // sret: aggregate return passed via hidden output pointer.\n");
+        out.push_str(&format!(
+            "    result_ptr <- llvm_alloc ({});\n",
+            target_spec.return_constraint.saw_type,
+        ));
+        let has_this = target_fn
+            .params
+            .first()
+            .map(|p| p.name == "this")
+            .unwrap_or(false);
+        let insert_idx = if has_this && !execute_args.is_empty() {
+            1
+        } else {
+            0
+        };
+        execute_args.insert(insert_idx, "result_ptr".to_string());
+    }
+
     out.push('\n');
 
-    for global in &target_spec.referenced_globals {
+    for global in all_globals {
         out.push_str(&format!(
             "    llvm_alloc_global \"{}\";\n",
             global.mangled_name,
@@ -271,6 +329,8 @@ pub(super) fn emit_postcondition_and_close(
     cryptol_args: &[String],
     execute_args: &[String],
     sub_callee_specs: &[SpecConstraint],
+    return_type: &TypeInfo,
+    is_sret: bool,
 ) {
     out.push_str(&format!(
         "    llvm_execute_func [{}];\n\n",
@@ -281,11 +341,44 @@ pub(super) fn emit_postcondition_and_close(
     } else {
         format!("{} {}", cryptol_fn, cryptol_args.join(" "))
     };
-    if sub_callee_specs.is_empty() {
+    let cryptol_return = cryptol_return_for(&cryptol_call, return_type);
+    let is_void_return = matches!(return_type, TypeInfo::Void);
+    if is_sret {
+        // Aggregate return via hidden sret pointer: the LLVM function
+        // returns void, so `llvm_return` would be a no-op. Bind the
+        // Cryptol value into `*result_ptr` via `llvm_points_to`.
+        // `result_ptr` was allocated and inserted into the argument
+        // list by `emit_equiv_spec_body`.
+        if sub_callee_specs.is_empty() {
+            out.push_str("    // Postcondition (sret): *result_ptr == Cryptol spec\n");
+        } else {
+            out.push_str("    // TODO: Compositional sret postcondition — fill in by hand.\n");
+            out.push_str("    // The sub-function overrides above return fresh symbolic values;\n");
+            out.push_str("    // thread them into the Cryptol call below before relying on\n");
+            out.push_str("    // this assertion. The auto-derived call uses only the target's\n");
+            out.push_str("    // own parameters and is almost certainly incomplete.\n");
+        }
+        out.push_str(&format!(
+            "    llvm_points_to result_ptr (llvm_term {{{{ {} }}}});\n",
+            cryptol_return,
+        ));
+    } else if is_void_return {
+        // Void-returning target: no `llvm_return` to emit. The harness
+        // still proves "no UB" (load module + execute), and any
+        // `_Out_` parameters require a hand-written
+        // `llvm_points_to <ptr> ...` postcondition — the auto-generator
+        // does not yet thread output-buffer values back through Cryptol
+        // (tracked separately; see tests/e2e/cases/09-type-coverage/void_out_inc).
+        out.push_str("    // Void return — no llvm_return to emit.\n");
+        out.push_str(&format!(
+            "    // (Cryptol spec `{}` is referenced for documentation only.)\n",
+            cryptol_return,
+        ));
+    } else if sub_callee_specs.is_empty() {
         out.push_str("    // Postcondition: C++ result == Cryptol spec\n");
         out.push_str(&format!(
             "    llvm_return (llvm_term {{{{ {} }}}});\n",
-            cryptol_call,
+            cryptol_return,
         ));
     } else {
         out.push_str("    // TODO: Compositional postcondition — fill in by hand.\n");
@@ -298,7 +391,7 @@ pub(super) fn emit_postcondition_and_close(
         out.push_str("    // the target's own parameters and is almost certainly incomplete.\n");
         out.push_str(&format!(
             "    llvm_return (llvm_term {{{{ {} }}}});  // <-- replace with full mapping\n",
-            cryptol_call,
+            cryptol_return,
         ));
     }
     out.push_str("};\n\n");
@@ -361,3 +454,7 @@ pub(super) fn emit_verify_step(
         "print \"=== VERIFIED: {function_name} == {cryptol_fn} ===\";\n",
     ));
 }
+
+#[cfg(test)]
+#[path = "verify_script_steps_tests.rs"]
+mod tests;

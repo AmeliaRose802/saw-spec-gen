@@ -12,9 +12,9 @@ own type info, and hand it all to SAW. You never write a `.saw` file
 by hand.
 
 ```powershell
-./verify.ps1 -CppFile add_one.cpp `
-             -CryptolSpec add_one_spec.cry `
-             -CryptolFn add_one_spec -Function add_one
+pwsh -File ./verify.ps1 -CppFile tests/e2e/cases/01-tutorial/bounded_loop/add_one_verified.cpp `
+                       -CryptolSpec tests/e2e/cases/01-tutorial/bounded_loop/add_one_spec.cry `
+                       -CryptolFn add_one_spec -Function add_one
 # → RESULT: VERIFIED by z3
 ```
 
@@ -42,16 +42,30 @@ by hand.
 All four scripts work on Windows, Linux, and macOS through a shared
 discovery layer (`scripts/discover-tools.ps1`).
 
+On Windows, use PowerShell 7 (`pwsh`), not the built-in Windows
+PowerShell 5.1. If `pwsh` is missing, install it with:
+
+```powershell
+winget install --id Microsoft.PowerShell --source winget
+```
+
+Rust 1.85 or newer is required. Older Cargo versions cannot parse some
+dependency manifests that use Rust 2024 edition metadata. Update with:
+
+```powershell
+rustup update stable
+```
+
 ## Quick start
 
 ```powershell
 git clone https://github.com/AmeliaRose802/saw-spec-gen
 cd saw-spec-gen
-pwsh scripts/init.ps1            # or: bash scripts/init.sh — downloads clang, SAW, z3
+pwsh -File scripts/init.ps1      # or: bash scripts/init.sh — downloads clang, SAW, z3
 
-./verify.ps1 -CppFile tests/e2e/cases/01-tutorial/bounded_loop/add_one_verified.cpp `
-             -CryptolSpec tests/e2e/cases/01-tutorial/bounded_loop/add_one_spec.cry `
-             -CryptolFn add_one_spec -Function add_one
+pwsh -File ./verify.ps1 -CppFile tests/e2e/cases/01-tutorial/bounded_loop/add_one_verified.cpp `
+                       -CryptolSpec tests/e2e/cases/01-tutorial/bounded_loop/add_one_spec.cry `
+                       -CryptolFn add_one_spec -Function add_one
 ```
 
 Swap `verify.ps1`+`-CppFile` for `verify-rust.ps1`+`-RustFile` for Rust,
@@ -95,6 +109,12 @@ of every overridden callee.
 
 `scripts/init.ps1` (Windows) / `scripts/init.sh` (Linux/macOS) download
 and configure every external tool under `~/.saw-spec-gen/`:
+
+Windows users must run the PowerShell scripts with PowerShell 7
+(`pwsh`). Windows PowerShell 5.1 can mis-handle native command stderr
+from tools such as Cargo and fail during setup. Rust 1.85 or newer is
+required; run `rustup update stable` if `cargo --version` reports an
+older release.
 
 1. Verify `rustc`/`cargo` are on PATH (prompts for [rustup](https://rustup.rs)).
 2. `cargo build --release` to produce the `saw-spec-gen` CLI.

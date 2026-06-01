@@ -336,7 +336,7 @@ mod tests {
 
     #[test]
     fn test_itanium_emits_ztv_override_with_leader_slots() {
-        let methods = vec![
+        let methods = [
             make_iface_method("BadProcessor", "validate", TypeInfo::Void, 100),
             make_iface_method("BadProcessor", "audit", TypeInfo::Void, 200),
         ];
@@ -373,7 +373,7 @@ mod tests {
 
     #[test]
     fn test_msvc_default_omits_ztv_override() {
-        let methods = vec![make_iface_method(
+        let methods = [make_iface_method(
             "BadProcessor",
             "validate",
             TypeInfo::Void,

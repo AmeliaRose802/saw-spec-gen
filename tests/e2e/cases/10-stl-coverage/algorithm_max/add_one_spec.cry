@@ -1,0 +1,6 @@
+// Cryptol spec shared by every STL-coverage add_one case.
+//
+// add_one(x) = x + 1 over a 32-bit unsigned word.
+
+add_one_spec : [32] -> [32]
+add_one_spec x = x + 1

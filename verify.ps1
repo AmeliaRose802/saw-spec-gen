@@ -41,9 +41,29 @@
 .PARAMETER OutputDir
     Output directory for all generated artifacts. Defaults to "out/" next to the .cpp file.
 
+.PARAMETER IncludeDirs
+    Extra `-I` include directories to add when compiling the C++ source
+    and dumping its AST. Useful when the .cpp pulls in headers from a
+    sibling `include/` tree (e.g. demo projects layered on top of
+    saw-spec-gen). Each entry is passed as `-I <dir>` to clang.
+
+.PARAMETER CxxStandard
+    C++ standard to pass to clang, e.g. `c++17`, `c++20`. Translated to
+    `-std=<CxxStandard>` and applied to every clang invocation in the
+    pipeline. Omit to use clang's default (matches historical behaviour).
+
+.PARAMETER ClangFlags
+    Additional raw flags appended verbatim after the defaults and after
+    `IncludeDirs` / `CxxStandard`, on every clang invocation. Use this
+    for `-fexceptions`, `-fno-inline`, `-D…`, etc. Later flags win on
+    most clang options, so callers can override the built-in defaults
+    when needed.
+
 .EXAMPLE
     .\verify.ps1 -CppFile tests\e2e\cases\01-tutorial\bounded_loop\add_one_verified.cpp -CryptolSpec tests\e2e\cases\01-tutorial\bounded_loop\add_one_spec.cry -CryptolFn add_one_spec -Function add_one
     .\verify.ps1 -CppFile tests\e2e\cases\01-tutorial\bounded_loop\add_one_verified.cpp -CryptolSpec tests\e2e\cases\01-tutorial\bounded_loop\add_one_spec.cry -CryptolFn add_one_spec -Function add_one -OutputDir my_output
+    .\verify.ps1 -CppFile demo\cpp\saw\verify_targets.cpp -CryptolSpec demo\spec.cry -CryptolFn authenticate -Function authenticate `
+                 -IncludeDirs demo\cpp\include -CxxStandard c++20 -ClangFlags '-fexceptions','-fno-inline'
 #>
 
 param(
@@ -51,7 +71,10 @@ param(
     [Parameter(Mandatory)][string]$CryptolSpec,
     [Parameter(Mandatory)][string]$CryptolFn,
     [Parameter(Mandatory)][string]$Function,
-    [string]$OutputDir
+    [string]$OutputDir,
+    [string[]]$IncludeDirs = @(),
+    [string]$CxxStandard,
+    [string[]]$ClangFlags = @()
 )
 
 $ErrorActionPreference = "Stop"
@@ -101,6 +124,23 @@ $isMsvc    = $llvmTarget -match 'windows-msvc'
 # turning every DISPROVED case into an EXCEPTION.
 $exeExt    = if ($IsWindows) { '.exe' } else { '' }
 
+# ── User-supplied clang flag pass-through ─────────────────────────────────────
+# Demo projects (e.g. pretty-specs) layer their own C++ on top of
+# saw-spec-gen and need extra -I dirs / -std= / -fexceptions etc. to
+# parse. Build the list once and splat it into every clang invocation
+# (steps 1, 1.5/.ll, 2/ast-dump, and the cex probe in Step 5b) so the
+# same source compiles the same way in all four spots. Resolve include
+# paths up-front so relative dirs stay correct after we cwd into
+# $OutputDir later.
+$userClangFlags = @()
+foreach ($d in $IncludeDirs) {
+    $resolved = (Resolve-Path $d -ErrorAction SilentlyContinue)
+    if (-not $resolved) { Write-Error "IncludeDirs path not found: $d"; exit 1 }
+    $userClangFlags += @('-I', $resolved.Path)
+}
+if ($CxxStandard) { $userClangFlags += "-std=$CxxStandard" }
+if ($ClangFlags)  { $userClangFlags += $ClangFlags }
+
 # ── All artifacts go under $OutputDir ──────────────────────────────────────────
 $bcFile   = Join-Path $OutputDir "$baseName.bc"
 $llFile   = Join-Path $OutputDir "$baseName.ll"
@@ -111,12 +151,12 @@ Write-Host ""
 Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
 Write-Host " Step 1: Compile $baseName.cpp → bitcode" -ForegroundColor Cyan
 Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
-& $clang -c -emit-llvm -O0 -fno-rtti -target $llvmTarget $CppFile -o $bcFile 2>&1
+& $clang -c -emit-llvm -O0 -fno-rtti -target $llvmTarget @userClangFlags $CppFile -o $bcFile 2>&1
 if ($LASTEXITCODE -ne 0) { Write-Error "clang failed"; exit 1 }
 Write-Host "  → $bcFile ($((Get-Item $bcFile).Length) bytes)" -ForegroundColor Green
 
 # Also emit IR text so gen-verify can resolve fully qualified struct names.
-& $clang -S -emit-llvm -O0 -fno-rtti -target $llvmTarget $CppFile -o $llFile 2>&1
+& $clang -S -emit-llvm -O0 -fno-rtti -target $llvmTarget @userClangFlags $CppFile -o $llFile 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  warning: failed to emit .ll (continuing without struct-size resolution)" -ForegroundColor Yellow
     $llFile = $null
@@ -168,7 +208,7 @@ Write-Host ""
 Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
 Write-Host " Step 2: Dump clang AST → JSON" -ForegroundColor Cyan
 Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
-& $clang -Xclang -ast-dump=json -fsyntax-only -target $llvmTarget $CppFile 2>$null | Out-File -Encoding utf8 $astFile
+& $clang -Xclang -ast-dump=json -fsyntax-only -target $llvmTarget @userClangFlags $CppFile 2>$null | Out-File -Encoding utf8 $astFile
 if (-not (Test-Path $astFile) -or (Get-Item $astFile).Length -eq 0) {
     Write-Error "AST dump failed"; exit 1
 }
@@ -330,9 +370,9 @@ if ($sawOutput -match "Counterexample") {
             # Show as signed if top bit set (32-bit)
             if ($rawVal -gt 2147483647 -and $rawVal -le 4294967295) {
                 $signed = [int]($rawVal - 4294967296)
-                $cexVars += "    $varName = $rawVal  ($signed as signed)"
+                $cexVars += ("    {0} = {1}  ({2} signed)" -f $varName, $rawVal, $signed)
             } else {
-                $cexVars += "    $varName = $rawVal"
+                $cexVars += ("    {0} = {1}" -f $varName, $rawVal)
             }
         }
     }
@@ -393,7 +433,7 @@ int main() {
 }
 "@ | Set-Content $testCpp -Encoding utf8
 
-        & $clang -O0 -target $llvmTarget $testCpp -o $testExe 2>$null
+        & $clang -O0 -target $llvmTarget @userClangFlags $testCpp -o $testExe 2>$null
         $actualVal = $null
         if (Test-Path $testExe) {
             $cppOut = & $testExe 2>&1 | Out-String

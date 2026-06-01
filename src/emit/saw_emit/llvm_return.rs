@@ -12,9 +12,15 @@ use crate::constraints::*;
 /// memory is havoced, const parameter memory is preserved.
 pub fn emit_adversarial_return_and_postconds(out: &mut String, spec: &SpecConstraint) {
     if spec.return_constraint.returns_pointer {
+        // Allocate AND initialize the pointee with a fresh symbolic
+        // value. Without the `llvm_points_to`, any dereference in the
+        // caller hits uninitialized memory and SAW aborts with
+        // "Error during memory load" — that defeats the purpose of an
+        // adversarial spec, since the caller can't observe a value the
+        // solver was supposed to pick freely.
         out.push_str(&format!(
-            "\n    ret_ptr <- llvm_alloc ({});\n",
-            spec.return_constraint.saw_type,
+            "\n    ret_ptr <- llvm_alloc ({ty});\n    ret_val <- llvm_fresh_var \"ret_val\" ({ty});\n    llvm_points_to ret_ptr (llvm_term ret_val);\n",
+            ty = spec.return_constraint.saw_type,
         ));
         out.push_str("    llvm_return ret_ptr;\n");
     } else if spec.return_constraint.is_sret {
@@ -75,9 +81,12 @@ pub fn emit_adversarial_return_and_postconds(out: &mut String, spec: &SpecConstr
 /// comment showing how to swap in a Cryptol postcondition.
 pub fn emit_concrete_return_and_postconds(out: &mut String, spec: &SpecConstraint) {
     if spec.return_constraint.returns_pointer {
+        // See `emit_adversarial_return_and_postconds`: initialize the
+        // pointee so the caller can dereference the returned pointer
+        // without hitting uninitialized memory.
         out.push_str(&format!(
-            "\n    ret_ptr <- llvm_alloc ({});\n",
-            spec.return_constraint.saw_type,
+            "\n    ret_ptr <- llvm_alloc ({ty});\n    ret_val <- llvm_fresh_var \"ret_val\" ({ty});\n    llvm_points_to ret_ptr (llvm_term ret_val);\n",
+            ty = spec.return_constraint.saw_type,
         ));
         out.push_str("    llvm_return ret_ptr;\n");
     } else if spec.return_constraint.is_sret {

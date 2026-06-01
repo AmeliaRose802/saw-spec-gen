@@ -45,6 +45,7 @@ mod writer;
 // `crate::gen_verify_rust`. Public so the Rust path can reuse it
 // without a circular dep on `verify_script_steps`.
 mod bitcode_overrides;
+pub mod cryptol_bridge;
 
 // Re-export the public surface that the rest of the crate depends on.
 // `allow(unused_imports)` is appropriate here because this is a binary
