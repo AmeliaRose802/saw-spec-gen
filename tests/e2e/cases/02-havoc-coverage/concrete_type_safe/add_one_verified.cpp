@@ -5,30 +5,21 @@
 int super_important = 7;
 
 /*
-DEMO: Was VERIFIED under the old (inlining) gen-verify pipeline, now DISPROVED under
-compositional gen-verify.
+DEMO: VERIFIED — OkLog::log has a concrete body in-module, so gen-verify
+skips the havoc override and SAW verifies the real implementation.
 
 The ILog interface has a non-const log() method — through vtable
 dispatch, SAW would have to assume it could clobber globals, class
 members, or pointer arguments (havoc model).
 
 This case instantiates OkLog directly and calls log() on the concrete
-type.  An optimistic verifier could inline OkLog::log() (which only
-calls printf) and prove super_important is never touched.  The old
-gen-verify did exactly that — no override for OkLog::log, SAW would
-symbolically execute it.
+type.  Because OkLog::log() has a visible body in the same translation
+unit, gen-verify does NOT emit a havoc override for it.  SAW
+symbolically executes the real implementation, proves it never touches
+super_important, and therefore the branch is dead — result: VERIFIED.
 
-gen-verify is now compositional: every function the target calls
-directly (virtual OR concrete) gets an adversarial override that
-havocs all visible globals.  That keeps verification tractable when
-sub-functions are complex (loops, indirect calls, etc.) at the cost
-of precision here — the override for OkLog::log is allowed to clobber
-super_important, so SAW finds a counterexample where add_one returns
-12 instead of x + 1.
-
-To recover precision, replace the auto-generated havoc spec for
-OkLog::log with a hand-written one that asserts the global is
-preserved.
+COMPARE: add_one_disproved.cpp uses SusLog, whose log() DOES clobber
+super_important, so that version is correctly DISPROVED.
 */
 
 class ILog {
