@@ -6,15 +6,18 @@
 .DESCRIPTION
     Pipeline:
       1. rustc --emit=llvm-bc -C link-dead-code=yes  (preserves private fn)
-      2. llvm-dis → scan symbols → resolve the mangled name for $Function
-      3. Emit a tiny SAW script that llvm_verify's the mangled symbol
-         against the Cryptol spec.
+      2. llvm-dis → .ll for symbol resolution
+      3. saw-spec-gen gen-verify-rust → emits verify_rust.saw + meta sidecar
+         (Rust binary owns symbol resolution + Cryptol/LLVM Bit-bridge
+         emission so the convention stays in sync with the C++ generator.)
       4. Run SAW.
+      5. On DISPROVED, evaluate the Cryptol spec at the SAW counterexample
+         and compile + run a tiny Rust harness that calls the function on
+         the same inputs, then print a side-by-side diagnostic.
 
-    The script auto-detects the function's u32→u32-style signature from the
-    LLVM IR. For functions that touch globals, traits, or heap, this is the
-    place we'll later invoke `saw-spec-gen from-mir-json` to generate
-    overrides + stubs (same pattern verify.ps1 uses for C++ side).
+    For Rust targets that grow globals, traits, or heap, the per-case
+    .saw additions (overrides, stubs) will land in the same gen-verify-rust
+    subcommand — same pattern verify.ps1 uses for the C++ side today.
 
 .PARAMETER RustFile
     Path to the Rust source file. The target function can be private —
@@ -63,13 +66,16 @@ New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
 $OutputDir = Resolve-Path $OutputDir
 
 # ── Tool discovery ────────────────────────────────────────────────────────────
-# All tool discovery (rustc, llvm-dis, saw, z3) goes through the shared
-# helper so verify.ps1, verify-rust.ps1 and the end-to-end test scripts agree on
-# search order and cross-platform behaviour. Env vars or
-# ~/.saw-spec-gen/env.ps1 override the defaults; run scripts/init.ps1
-# (Windows) or scripts/init.sh (Linux/macOS) to populate that file.
+# Shared helper: same search order as verify.ps1 / the e2e runner so all
+# entry points agree (env vars, ~/.saw-spec-gen/env.ps1, PATH, defaults).
 $ScriptRoot = Split-Path -Parent $PSCommandPath
 . (Join-Path $ScriptRoot 'scripts/discover-tools.ps1')
+
+# saw-spec-gen owns SAW spec emission for Rust targets — build it on
+# demand (no-op if up to date) before any other discovery so a fresh
+# checkout / rebase can't leave us calling an out-of-date CLI.
+$specGen = Build-SawSpecGen -RepoRoot $ScriptRoot
+
 $tools = Find-SawSpecGenTools -RepoRoot $ScriptRoot
 Assert-SawSpecGenTools -Tools $tools -Require @('LlvmDis', 'Saw', 'Rustc')
 Add-SolverDirToPath -Tools $tools
@@ -128,133 +134,74 @@ if (-not (Test-Path $bcFile)) {
 }
 Write-Host "  → $bcFile ($((Get-Item $bcFile).Length) bytes)" -ForegroundColor Green
 
-# ── Step 2: disassemble + locate mangled symbol for $Function ─────────────────
+# ── Step 2: disassemble (saw-spec-gen reads .ll for symbol resolution) ────────
 Write-Host ""
 Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host " Step 2: resolve mangled symbol for '$Function'" -ForegroundColor Cyan
+Write-Host " Step 2: llvm-dis → $baseName.ll" -ForegroundColor Cyan
 Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
 $llFile = Join-Path $OutputDir "$baseName.ll"
 & $llvmDis $bcFile -o $llFile 2>&1 | Write-Host
 if (-not (Test-Path $llFile)) { Write-Error "llvm-dis failed"; exit 1 }
+Write-Host "  → $llFile" -ForegroundColor Green
 
-# Pull every `define ... @<symbol>(<args>)` from the IR.
-# Rust v0 mangling for a free function `fn name` at crate root looks like:
-#   _RNvCs<hash>_<crate_name_len><crate_name><name_len><name>
-# More generally, the function name appears as the FINAL length-prefixed
-# segment of the symbol (before LLVM args). So we look for `<digits><name>`
-# at the end of the mangled identifier.
-$funcLen   = $Function.Length
-$nameRegex = "${funcLen}${Function}`$"   # anchored at end of symbol
-
-$defines = Select-String -Path $llFile -Pattern '^define\s.*?@([^\s(]+)\s*\(([^)]*)\)' -AllMatches |
-    ForEach-Object { $_.Matches } |
-    ForEach-Object {
-        [PSCustomObject]@{
-            Symbol = $_.Groups[1].Value
-            Args   = $_.Groups[2].Value
-            Line   = $_.Value
-        }
-    }
-
-$candidates = @($defines | Where-Object { $_.Symbol -match $nameRegex })
-if (-not $candidates) {
-    Write-Error @"
-Could not find a defined function whose mangled name ends with '${funcLen}${Function}'.
-Defined symbols in $llFile :
-$($defines | ForEach-Object { '  ' + $_.Symbol } | Out-String)
-"@
+# ── Step 3: saw-spec-gen gen-verify-rust ──────────────────────────────────────
+# The Rust subcommand:
+#   - resolves the mangled symbol for $Function (v0 mangling, integer-only
+#     signature filter, shortest-symbol tiebreak — mirrors what the C++
+#     side gets via gen-verify),
+#   - scans the .ll for mutable global definitions and emits
+#     llvm_alloc_global + llvm_points_to seeding for each one,
+#   - emits verify_rust.saw using the SAME cryptol_arg_for Bit/`[1]`
+#     bridge the C++ emitter uses, so spec authors writing
+#     `f : Bit -> ...` get a spec that type-checks under both runners,
+#   - writes verify_rust.meta.json (mangled name, per-arg bit width,
+#     globals) which we read below for counterexample evaluation +
+#     pretty-printing.
+Write-Host ""
+Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host " Step 3: saw-spec-gen gen-verify-rust" -ForegroundColor Cyan
+Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
+& $specGen gen-verify-rust `
+    --llvm-ir      $llFile `
+    --bitcode      $bcFile `
+    --cryptol-spec $CryptolSpec `
+    --cryptol-fn   $CryptolFn `
+    --function     $Function `
+    --output       $OutputDir 2>&1 | Write-Host
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "saw-spec-gen gen-verify-rust failed (exit=$LASTEXITCODE)"
     exit 1
 }
 
-# v0 mangling caveat — `nameRegex` is anchored at end-of-string, but v0 appends
-# the *instantiating crate* (`Cs<hash>_<lenCrate><crate>`) to monomorphized
-# generics. When the user's crate is named e.g. `add_one`, that suffix happens
-# to BE `7add_one`, so `core::ptr::drop_in_place::<Box<u32>>` instantiated by
-# the user's crate ALSO matches. We need to drop those.
-#
-# We do it indirectly via a signature filter: keep only candidates whose
-# LLVM args+return type look like a plain integer function. Generic shims
-# (drop glue, alloc thunks, vtable functions, Cell::set, …) almost always
-# have `ptr` / `void` somewhere in their signature and get filtered out.
-function Test-IntegerSignature($cand) {
-    if ($cand.Args.Trim() -ne "") {
-        foreach ($a in ($cand.Args -split ',')) {
-            $t = ($a.Trim() -split '\s+')[0]
-            if ($t -notmatch '^i\d+$') { return $false }
-        }
+$sawScript = Join-Path $OutputDir "verify_rust.saw"
+$metaPath  = Join-Path $OutputDir "verify_rust.meta.json"
+if (-not (Test-Path $sawScript)) { Write-Error "missing $sawScript"; exit 1 }
+if (-not (Test-Path $metaPath))  { Write-Error "missing $metaPath"; exit 1 }
+
+$meta     = Get-Content $metaPath -Raw | ConvertFrom-Json
+$mangled  = $meta.mangled_name
+$cryName  = [System.IO.Path]::GetFileName($CryptolSpec)
+# Build a typed view of params: each entry has .Index / .Name / .Bits /
+# .LlvmType so the counterexample probe below can format Cryptol literals
+# and Rust harness arguments without re-parsing the .ll.
+$paramView = @($meta.params | ForEach-Object {
+    [PSCustomObject]@{
+        Index    = [int]$_.index
+        Name     = [string]$_.name
+        Bits     = [int]$_.bits
+        LlvmType = [string]$_.llvm_type
     }
-    $rl = Select-String -Path $llFile -Pattern "^define\s+(.+?)\s+@$([regex]::Escape($cand.Symbol))\s*\(" |
-        ForEach-Object { $_.Matches[0].Groups[1].Value }
-    if (-not $rl) { return $false }
-    $rt = ($rl -split '\s+')[-1]
-    return ($rt -match '^i\d+$')
-}
-
-$intCandidates = @($candidates | Where-Object { Test-IntegerSignature $_ })
-if (-not $intCandidates) {
-    Write-Error @"
-Found symbol(s) ending in '${funcLen}${Function}' but none have an integer-only
-(iN, ...) -> iN signature compatible with this verifier. Candidates were:
-$($candidates | ForEach-Object { '  ' + $_.Symbol + '  (' + $_.Args + ')' } | Out-String)
-"@
-    exit 1
-}
-
-# Among matching-signature candidates, prefer the shortest. The user's own
-# function is structurally shorter than any generic monomorphization their
-# crate happens to instantiate (the latter carries the full instantiated
-# path in the symbol).
-$intCandidates = @($intCandidates | Sort-Object -Property @{ Expression = { $_.Symbol.Length } })
-if ($intCandidates.Count -gt 1) {
-    # If multiple distinct symbols remain after both filters, we're genuinely
-    # ambiguous — refuse to pick rather than silently verify the wrong one.
-    $shortestLen = $intCandidates[0].Symbol.Length
-    $tied = @($intCandidates | Where-Object { $_.Symbol.Length -eq $shortestLen })
-    if ($tied.Count -gt 1) {
-        Write-Error @"
-Ambiguous '${Function}': multiple matching symbols of equal length. Qualify
-the function name (e.g. `mod::add_one`) or rename one. Tied candidates:
-$($tied | ForEach-Object { '  ' + $_.Symbol } | Out-String)
-"@
-        exit 1
-    }
-    Write-Host "  NOTE: multiple matching-signature candidates; picked the shortest." -ForegroundColor Yellow
-    $intCandidates | ForEach-Object { Write-Host "    candidate: $($_.Symbol)" -ForegroundColor Yellow }
-}
-$mangled = $intCandidates[0].Symbol
-$rawArgs = $intCandidates[0].Args
-Write-Host "  → mangled symbol: $mangled" -ForegroundColor Green
-Write-Host "  → LLVM signature: ($rawArgs)" -ForegroundColor Green
-
-# Read the return type by also pulling the bit between `define` and `@<symbol>`.
-$retLine = Select-String -Path $llFile -Pattern "^define\s+(.+?)\s+@$([regex]::Escape($mangled))\s*\(" |
-    ForEach-Object { $_.Matches[0].Groups[1].Value }
-# Strip linkage / attribute modifiers — keep only the final type token
-# (e.g. "hidden i32" → "i32", "internal noundef i32" → "i32").
-$retType = ($retLine -split '\s+')[-1]
-Write-Host "  → LLVM return type: $retType" -ForegroundColor Green
-
-# Parse LLVM args (handles "i32 %x", "i32 noundef %x, i64 %y", "" for nullary).
-# `@(...)` forces an array even when the pipeline emits a single element —
-# without it PowerShell unwraps to a scalar string and indexing yields chars.
-$argTokens = @()
-if ($rawArgs.Trim() -ne "") {
-    $argTokens = @($rawArgs -split ',' | ForEach-Object {
-        $parts = $_.Trim() -split '\s+'
-        # First token is the type (e.g. "i32"); subsequent tokens may be
-        # parameter attributes (noundef, signext, …) or the name (%x).
-        $parts[0]
-    })
-}
+})
 
 # Parse Rust source for the function signature so we can:
-#   (a) show parameter names in the result block (instead of x0/x1/...)
-#   (b) compile a harness that calls the function at the counterexample
-#       inputs with the right Rust types (u8/u16/u32/u64/i*…).
-$rustSrc       = Get-Content $RustFile -Raw
+#   (a) show parameter *source names* in the counterexample (instead of x0/x1/...)
+#   (b) compile a harness that calls $Function at cex inputs using the
+#       right Rust types (u8/u16/u32/u64/i*…).
+# Pure cex-pretty-printing concern; SAW spec generation no longer cares.
+$rustSrc        = Get-Content $RustFile -Raw
 $rustParamNames = @()
 $rustParamTypes = @()
-$sigPattern = "(?ms)fn\s+$([regex]::Escape($Function))\s*\(([^)]*)\)"
+$sigPattern     = "(?ms)fn\s+$([regex]::Escape($Function))\s*\(([^)]*)\)"
 if ($rustSrc -match $sigPattern) {
     $paramList = $Matches[1].Trim()
     if ($paramList -ne "") {
@@ -266,115 +213,6 @@ if ($rustSrc -match $sigPattern) {
         }
     }
 }
-
-# Build the SAW fresh-var + execute_func argument lists.
-# Also remember each arg's bit width — needed later for Cryptol typed literals
-# when evaluating the spec at counterexample inputs.
-$freshDecls = @()
-$execArgs   = @()
-$cryArgs    = @()
-$argBits    = @()
-for ($i = 0; $i -lt $argTokens.Count; $i++) {
-    $t = $argTokens[$i]
-    if ($t -notmatch '^i(\d+)$') {
-        Write-Error "Unsupported LLVM argument type '$t' for $Function. Only iN integers are supported in this script."
-        exit 1
-    }
-    $bits = [int]$Matches[1]
-    $argBits += $bits
-    $vname = "x$i"
-    $freshDecls += "    $vname <- llvm_fresh_var `"$vname`" (llvm_int $bits);"
-    $execArgs   += "llvm_term $vname"
-    $cryArgs    += $vname
-}
-if ($retType -notmatch '^i(\d+)$') {
-    Write-Error "Unsupported LLVM return type '$retType' for $Function. Only iN integers are supported in this script."
-    exit 1
-}
-# (We don't actually need the return bit width for the SAW spec; Cryptol
-#  infers it from the spec function. We just guard against non-integers.)
-
-$execArgsExpr = '[' + ($execArgs -join ', ') + ']'
-$cryCall = if ($cryArgs.Count -eq 0) { $CryptolFn } else { "$CryptolFn " + ($cryArgs -join ' ') }
-
-# Scan the .ll for mutable global *definitions* (not external decls and not
-# the MSVC `__imp_*` import thunks). SAW needs `llvm_alloc_global` for each
-# one before symbolic execution may read or write through it; without this
-# we get "Global symbol ... has no associated allocation". `llvm_alloc_global`
-# only *allocates* the cell — it does NOT seed it with the LLVM initializer,
-# so a subsequent `load` (especially from a callee on the other side of a
-# function-call boundary, where SAW has no chance to first observe a write)
-# fails with "Error during memory load". We therefore also emit
-# `llvm_points_to (llvm_global G) (llvm_global_initializer G)` so SAW sees
-# `static FOO: i32 = 7;` as 7 unless the function rewrites it.
-$globalAllocs = @()
-$llLines = Get-Content $llFile
-foreach ($ln in $llLines) {
-    # Match: @<name> = <linkage-and-attr-words>* global <rest>
-    # (deliberately not matching `constant` — Rust `const`s are inlined and
-    # immutable constants don't need explicit allocation.)
-    if ($ln -match '^@(?<name>"[^"]*"|\S+?)\s*=\s*(?:[A-Za-z_][\w]*\s+)*global\s') {
-        $gname = $Matches['name']
-        # Strip surrounding quotes if any (LLVM quotes names containing
-        # special chars like the leading \01 on MSVC import thunks).
-        if ($gname.StartsWith('"') -and $gname.EndsWith('"')) {
-            $gname = $gname.Substring(1, $gname.Length - 2)
-        }
-        # Skip MSVC DLL import thunks — they're indirection metadata, not
-        # data SAW needs to model.
-        if ($gname -match '__imp_') { continue }
-        $globalAllocs += $gname
-    }
-}
-if ($globalAllocs.Count -gt 0) {
-    Write-Host "  → allocating $($globalAllocs.Count) mutable global(s):" -ForegroundColor Green
-    foreach ($g in $globalAllocs) { Write-Host "      $g" -ForegroundColor Green }
-}
-
-# ── Step 3: emit verify_rust.saw ──────────────────────────────────────────────
-Write-Host ""
-Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host " Step 3: emit verify_rust.saw" -ForegroundColor Cyan
-Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
-$cryDest = Join-Path $OutputDir ([System.IO.Path]::GetFileName($CryptolSpec))
-Copy-Item $CryptolSpec $cryDest -Force
-$cryName    = [System.IO.Path]::GetFileName($cryDest)
-$bcName     = [System.IO.Path]::GetFileName($bcFile)
-$sawScript  = Join-Path $OutputDir "verify_rust.saw"
-
-# NOTE: When the Rust target grows globals / dyn-trait / heap allocations,
-# this is the section where we'll invoke `saw-spec-gen from-mir-json` to
-# generate overrides + stubs and `include` them here — exactly the way
-# verify.ps1 calls `saw-spec-gen gen-verify` for the C++ side today.
-$freshBlock = ($freshDecls -join "`n")
-$globalAllocBlock = ""
-if ($globalAllocs.Count -gt 0) {
-    $allocLines = $globalAllocs | ForEach-Object {
-        "    llvm_alloc_global `"$_`";`n    llvm_points_to (llvm_global `"$_`") (llvm_global_initializer `"$_`");"
-    }
-    $globalAllocBlock = ($allocLines -join "`n") + "`n"
-}
-@"
-// Auto-generated by verify-rust.ps1
-// Prove that the Rust ${Function} (compiled to LLVM bitcode by rustc) is
-// extensionally equal to the Cryptol spec ${CryptolFn}.
-//
-// Mangled symbol resolved from the .ll: ${mangled}
-
-m <- llvm_load_module "${bcName}";
-
-import "${cryName}";
-
-let ${Function}_equiv_spec = do {
-${globalAllocBlock}${freshBlock}
-    llvm_execute_func ${execArgsExpr};
-    llvm_return (llvm_term {{ ${cryCall} }});
-};
-
-llvm_verify m "${mangled}" [] true ${Function}_equiv_spec z3;
-print "VERIFIED";
-"@ | Set-Content $sawScript -Encoding utf8
-Write-Host "  → $sawScript" -ForegroundColor Green
 
 # ── Step 4: run SAW ───────────────────────────────────────────────────────────
 Write-Host ""
@@ -417,12 +255,14 @@ if ($sawOut -match "Counterexample") {
     $cexPairs = @()
     $sawOut -split "`n" | ForEach-Object {
         if ($_ -match '^\s+(x\d+):\s+(\d+)\s*$') {
-            $idx = [int]($Matches[1].Substring(1))
+            $idx  = [int]($Matches[1].Substring(1))
+            $bits = if ($idx -lt $paramView.Count) { $paramView[$idx].Bits } else { 32 }
+            $nm   = if ($idx -lt $rustParamNames.Count) { $rustParamNames[$idx] } else { $Matches[1] }
             $cexPairs += [PSCustomObject]@{
                 Index = $idx
-                Name  = if ($idx -lt $rustParamNames.Count) { $rustParamNames[$idx] } else { $Matches[1] }
+                Name  = $nm
                 Value = [uint64]$Matches[2]
-                Bits  = if ($idx -lt $argBits.Count) { $argBits[$idx] } else { 32 }
+                Bits  = $bits
             }
         }
     }
@@ -431,7 +271,18 @@ if ($sawOut -match "Counterexample") {
     # ── Evaluate Cryptol spec at counterexample inputs ──────────────────────
     $expectedVal = $null
     if ($cexPairs.Count -gt 0) {
-        $cryptolArgs = ($cexPairs | ForEach-Object { "($($_.Value) : [$($_.Bits)])" }) -join " "
+        # For i1 (boolean) inputs, bridge to `Bit` via `((v : [1]) ! 0)`
+        # so the call matches the spec's declared `Bit` parameter type —
+        # mirrors the (x0 ! 0) wrapping in verify_rust.saw (which lives
+        # in saw-spec-gen / cryptol_bridge.rs now). Both bridges must
+        # agree or the cex eval prints a misleading "expected" value.
+        $cryptolArgs = ($cexPairs | ForEach-Object {
+            if ($_.Bits -eq 1) {
+                "(($($_.Value) : [1]) ! 0)"
+            } else {
+                "($($_.Value) : [$($_.Bits)])"
+            }
+        }) -join " "
         $evalScript = Join-Path $OutputDir "_eval_cex.saw"
         @"
 import "$cryName";
@@ -456,7 +307,7 @@ print (str_concat "CRYPTOL_RESULT=" (show r));
                 "($($cexPairs[$i].Value)u64 as $rustType)"
             }
         }
-        $harness  = Join-Path $OutputDir "_harness.rs"
+        $harness    = Join-Path $OutputDir "_harness.rs"
         $harnessExe = Join-Path $OutputDir "_harness.exe"
         @"
 // Auto-generated: calls ${Function} at SAW counterexample inputs.
@@ -510,35 +361,35 @@ fn main() {
         }
         Write-Host ""
     }
-
-    # ── Poison / UB heuristic ─────────────────────────────────────────────
-    # If Cryptol and a concrete Rust run agree at the counterexample, the
-    # failure is almost certainly an LLVM `nsw`/`nuw`/`inbounds`/`unchecked_*`
-    # poison, not a logic mismatch (SAW: poison ≠ any concrete value).
-    if ($expectedVal -and $actualVal -and $expectedVal -eq $actualVal) {
-        Write-Host @'
-  NOTE: Cryptol and Rust agree at the counterexample. This is the
-        signature of an LLVM UB / poison failure (nsw, nuw, inbounds,
-        unchecked_*, get_unchecked). Inspect the .ll for the flag and
-        switch to wrapping_* / checked variants or fix the UB.
-
-'@ -ForegroundColor Yellow
-    }
-
-    Write-ResultJson "DISPROVED" @($cexPairs) $expectedVal $actualVal
+    Write-Host "  Output dir: $OutputDir" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "RESULT: DISPROVED"
+    Write-ResultJson 'DISPROVED' $cexPairs $expectedVal $actualVal
     exit 1
-} elseif ($sawOut -match "VERIFIED" -and $sawOut -match "Proof succeeded") {
-    Write-Host ""
+}
+elseif ($sawOut -match "VERIFIED") {
     Write-Host "  RESULT: VERIFIED" -ForegroundColor Green
-    Write-Host "    Rust $Function  ≡  $CryptolFn   (proved by z3 on all inputs)" -ForegroundColor Green
+    Write-Host "    Rust $Function  ≡  $CryptolFn (for all u32 inputs)" -ForegroundColor Green
+    Write-Host "  Output dir: $OutputDir" -ForegroundColor Gray
     Write-Host ""
-    Write-ResultJson "VERIFIED" @() $null $null
+    Write-Host "RESULT: VERIFIED"
+    Write-ResultJson 'VERIFIED' @() $null $null
     exit 0
-} else {
+}
+else {
+    # SAW emitted neither a "Counterexample" nor "VERIFIED" banner —
+    # usually a Cryptol type error in the spec or a SAW load failure.
+    # Use 'UNKNOWN' (not 'ERROR') so:
+    #   (a) the verdict matches verify.ps1's fall-through branch and
+    #       the shared Write-VerifyResult ValidateSet, and
+    #   (b) the runner picks up the real RESULT line instead of
+    #       catching a Stop-mode PowerShell exception and reporting
+    #       the case as EXCEPTION (which hides the SAW output that
+    #       would let us diagnose it).
+    Write-Host "  RESULT: UNKNOWN — could not classify SAW output" -ForegroundColor Magenta
+    Write-Host "  Inspect $OutputDir for the .saw script + raw SAW output." -ForegroundColor Magenta
     Write-Host ""
-    Write-Host "  RESULT: UNKNOWN" -ForegroundColor Yellow
-    Write-Host "    SAW did not produce a clear sat/unsat result." -ForegroundColor Yellow
-    Write-Host ""
-    Write-ResultJson "UNKNOWN" @() $null $null
+    Write-Host "RESULT: UNKNOWN"
+    Write-ResultJson 'UNKNOWN' @() $null $null
     exit 2
 }

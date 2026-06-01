@@ -1,0 +1,6 @@
+// Cryptol spec — declared for documentation; not actually consumed by
+// the auto-generated harness because the C++ target returns void.
+// (The harness emits a comment referencing this name only.)
+
+void_noop_spec : [32] -> [32]
+void_noop_spec x = x

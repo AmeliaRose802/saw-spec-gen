@@ -1,0 +1,4 @@
+module use_helper_spec where
+
+use_helper_spec : [32] -> [32]
+use_helper_spec x = x + x

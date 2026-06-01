@@ -1,0 +1,8 @@
+// Cryptol spec: 64-bit unsigned wrapping add.
+//
+// Cryptol's `+` on `[64]` is modular at the type's width, so this
+// matches the LLVM `add i64` (no nuw) emitted by both the C++ and
+// Rust impls.
+
+add_u64_spec : [64] -> [64] -> [64]
+add_u64_spec a b = a + b

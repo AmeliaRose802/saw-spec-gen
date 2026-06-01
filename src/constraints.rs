@@ -20,10 +20,12 @@
 pub mod derive;
 pub mod saw_type;
 pub mod types;
+pub mod value_clauses;
 
 pub use derive::derive_constraints;
-pub use saw_type::type_to_saw;
+pub use saw_type::{pointee_saw_type, type_to_saw};
 pub use types::{
     AllocType, Annotation, CalledFunction, FunctionInfo, GlobalVarInfo, Mutability, Nullability,
     ParamConstraint, ParamInfo, ReturnConstraint, SpecConstraint, TypeInfo,
 };
+pub use value_clauses::value_clauses;

@@ -1,0 +1,9 @@
+// Cryptol spec: 16-bit byte swap.
+//
+// (x >> 8) | (x << 8) — note that in Cryptol `||` is bitwise OR on
+// finite sequences (the same operator the existing
+// is_power_of_two_spec uses); `\/` is the *logical* OR on Bit. The
+// 16-bit width comes from the type annotation.
+
+swap_bytes_u16_spec : [16] -> [16]
+swap_bytes_u16_spec x = (x >> 8) || (x << 8)

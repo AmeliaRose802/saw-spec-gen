@@ -73,13 +73,16 @@ pub fn build(ast: &AstNode) -> TypeContext {
     ctx
 }
 
-/// Bit width implied by an enum's `fixedUnderlyingType` `qualType` string.
-/// Returns 32 when the type isn't a recognized integer.
+/// Bit width implied by an enum's `fixedUnderlyingType` `qualType`
+/// string. Accepts both unqualified (`uint8_t`) and `std::`-qualified
+/// (`std::uint8_t`) forms. Returns 32 for any unrecognized spelling.
 pub fn enum_bits_from_underlying(qt: &str) -> u32 {
+    let qt = qt.strip_prefix("std::").unwrap_or(qt);
     match qt {
         "uint8_t" | "int8_t" | "char" | "unsigned char" | "signed char" => 8,
         "uint16_t" | "int16_t" | "short" | "unsigned short" => 16,
-        "uint64_t" | "int64_t" | "long long" | "unsigned long long" => 64,
+        "uint64_t" | "int64_t" | "long long" | "unsigned long long" | "size_t" | "ssize_t"
+        | "ptrdiff_t" | "intptr_t" | "uintptr_t" => 64,
         _ => 32,
     }
 }
@@ -391,6 +394,23 @@ mod tests {
         let ctx = build(&ast);
         assert_eq!(ctx.enums["E"].1, 8);
         assert_eq!(ctx.enums["E"].0, vec!["A", "B"]);
+    }
+
+    /// Regression for the `std::`-qualified underlying-type spelling.
+    /// Before the fix this fell through to the 32-bit default and the
+    /// generator emitted `llvm_int 32` for an IR `i8` parameter.
+    #[test]
+    fn enums_with_std_qualified_underlying_type_get_correct_width() {
+        let ast = parse(json!({
+            "kind": "TranslationUnitDecl",
+            "inner": [{
+                "kind": "EnumDecl", "name": "AuthResult",
+                "fixedUnderlyingType": {"qualType": "std::uint8_t"},
+                "inner": [{"kind": "EnumConstantDecl", "name": "Ok"}]
+            }]
+        }));
+        let ctx = build(&ast);
+        assert_eq!(ctx.enums["AuthResult"].1, 8);
     }
 
     #[test]

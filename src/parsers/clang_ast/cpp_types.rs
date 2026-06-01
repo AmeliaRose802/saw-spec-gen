@@ -49,18 +49,30 @@ pub fn parse_cpp_type(qual_type: &str, ctx: &TypeContext) -> TypeInfo {
     let is_ref = t.ends_with('&');
     let t = t.trim_end_matches('&').trim_end_matches('*').trim();
 
+    // Normalize std-qualified fixed-width and pointer-sized integer
+    // typedefs (`std::int64_t`, `std::size_t`, etc.) to their
+    // unqualified C forms so the explicit match arms below catch them
+    // instead of falling through to `resolve_named` and ending up as an
+    // unresolvable `llvm_alias`. See bug #12 in the tester report.
+    // Only rewrite when the suffix is itself a recognized integer
+    // typedef, so we don't accidentally strip `std::` from container
+    // names like `std::vector<int>`.
+    let t = match t.strip_prefix("std::") {
+        Some(rest) if is_std_integer_typedef(rest) => rest,
+        _ => t,
+    };
+
     let base = match t {
         "bool" | "_Bool" => TypeInfo::Bool,
         "int" | "int32_t" | "long" => TypeInfo::SignedInt(32),
-        "long long" | "int64_t" | "__int64" => TypeInfo::SignedInt(64),
+        "long long" | "int64_t" | "__int64" | "intptr_t" | "ptrdiff_t" => TypeInfo::SignedInt(64),
         "short" | "int16_t" => TypeInfo::SignedInt(16),
         "char" | "int8_t" | "signed char" => TypeInfo::SignedInt(8),
         "unsigned int" | "uint32_t" | "unsigned long" | "DWORD" | "ULONG" => {
             TypeInfo::UnsignedInt(32)
         }
-        "unsigned long long" | "uint64_t" | "size_t" | "__size_t" | "UINT64" | "ULONG64" => {
-            TypeInfo::UnsignedInt(64)
-        }
+        "unsigned long long" | "uint64_t" | "size_t" | "__size_t" | "UINT64" | "ULONG64"
+        | "uintptr_t" | "ssize_t" => TypeInfo::UnsignedInt(64),
         "unsigned short" | "uint16_t" | "WORD" | "USHORT" => TypeInfo::UnsignedInt(16),
         "unsigned char" | "uint8_t" | "BYTE" | "UCHAR" => TypeInfo::UnsignedInt(8),
         "void" => TypeInfo::Void,
@@ -72,6 +84,29 @@ pub fn parse_cpp_type(qual_type: &str, ctx: &TypeContext) -> TypeInfo {
     } else {
         base
     }
+}
+
+/// Return `true` for the fixed-width and pointer-sized integer typedef
+/// names that should be lowered to primitive `TypeInfo::SignedInt` /
+/// `TypeInfo::UnsignedInt` regardless of whether they appear bare or
+/// `std::`-qualified.
+fn is_std_integer_typedef(name: &str) -> bool {
+    matches!(
+        name,
+        "int8_t"
+            | "int16_t"
+            | "int32_t"
+            | "int64_t"
+            | "uint8_t"
+            | "uint16_t"
+            | "uint32_t"
+            | "uint64_t"
+            | "size_t"
+            | "ssize_t"
+            | "ptrdiff_t"
+            | "intptr_t"
+            | "uintptr_t"
+    )
 }
 
 /// Look up a non-primitive type name. Tries `ctx.enums`, then
@@ -245,6 +280,54 @@ mod tests {
         let ctx = TypeContext::empty();
         let t = parse_cpp_type("MyCustomClass", &ctx);
         assert!(matches!(t, TypeInfo::Opaque { ref name, .. } if name == "MyCustomClass"));
+    }
+
+    #[test]
+    fn std_qualified_integer_typedefs_lower_to_primitives() {
+        // Bug #12: `std::int64_t` is a primitive integer typedef, not a
+        // struct. It must not fall through to `resolve_named` (where it
+        // would become an unresolvable `llvm_alias "std::int64_t"`).
+        let ctx = TypeContext::empty();
+        assert_eq!(
+            parse_cpp_type("std::int64_t", &ctx),
+            TypeInfo::SignedInt(64)
+        );
+        assert_eq!(
+            parse_cpp_type("std::uint32_t", &ctx),
+            TypeInfo::UnsignedInt(32)
+        );
+        assert_eq!(
+            parse_cpp_type("std::size_t", &ctx),
+            TypeInfo::UnsignedInt(64)
+        );
+        assert_eq!(
+            parse_cpp_type("std::ptrdiff_t", &ctx),
+            TypeInfo::SignedInt(64)
+        );
+        // Pointer forms still wrap the primitive.
+        let t = parse_cpp_type("std::int64_t *", &ctx);
+        assert!(matches!(t, TypeInfo::Pointer(b) if *b == TypeInfo::SignedInt(64)));
+        // `const` qualifier interacts correctly.
+        assert_eq!(
+            parse_cpp_type("const std::uint64_t", &ctx),
+            TypeInfo::UnsignedInt(64)
+        );
+    }
+
+    #[test]
+    fn std_prefix_not_stripped_from_container_names() {
+        // Regression guard: stripping `std::` indiscriminately would
+        // break the STL container size lookup in
+        // `lookup_known_type_size` (e.g. `std::vector<int>` \u2192 24).
+        let ctx = TypeContext::empty();
+        let t = parse_cpp_type("std::vector<int>", &ctx);
+        match t {
+            TypeInfo::Opaque { name, size_bytes } => {
+                assert_eq!(name, "std::vector<int>");
+                assert_eq!(size_bytes, 24);
+            }
+            other => panic!("expected Opaque(std::vector<int>, 24), got {other:?}"),
+        }
     }
 
     #[test]
