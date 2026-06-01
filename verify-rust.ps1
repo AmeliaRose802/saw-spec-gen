@@ -445,11 +445,16 @@ print (str_concat "CRYPTOL_RESULT=" (show r));
     }
 
     # ── Compile + run a tiny Rust harness that calls $Function on cex ───────
-    # `include!()` exposes private fns; cex values are cast `as <RustType>`.
+    # Bool needs a real bool literal; Rust rejects `1u64 as bool`.
     $actualVal = $null
     if ($cexPairs.Count -gt 0 -and $cexPairs.Count -eq $rustParamTypes.Count) {
         $callArgs = for ($i = 0; $i -lt $cexPairs.Count; $i++) {
-            "($($cexPairs[$i].Value)u64 as $($rustParamTypes[$i]))"
+            $rustType = $rustParamTypes[$i]
+            if ($rustType -eq 'bool') {
+                if ($cexPairs[$i].Value -eq 0) { 'false' } else { 'true' }
+            } else {
+                "($($cexPairs[$i].Value)u64 as $rustType)"
+            }
         }
         $harness  = Join-Path $OutputDir "_harness.rs"
         $harnessExe = Join-Path $OutputDir "_harness.exe"
@@ -467,20 +472,21 @@ fn main() {
     println!("RUST_RESULT={}", bits);
 }
 "@ | Set-Content $harness -Encoding utf8
-        & $rustc --crate-type=bin --edition=2021 --target $llvmTarget `
+        $harnessBuild = & $rustc --crate-type=bin --edition=2021 --target $llvmTarget `
             -C opt-level=0 -C overflow-checks=off -C debug-assertions=off `
             -C panic=abort -C codegen-units=1 -C debuginfo=0 `
             -A dead_code -A unused `
-            -o $harnessExe $harness 2>&1 | Out-Null
+            -o $harnessExe $harness 2>&1 | Out-String
         if (Test-Path $harnessExe) {
             $hOut = & $harnessExe 2>&1 | Out-String
             if ($hOut -match "RUST_RESULT=(\d+)") { $actualVal = $Matches[1] }
+        } elseif ($harnessBuild.Trim()) {
+            Write-Host "  Rust counterexample harness failed to compile:" -ForegroundColor Yellow
+            Write-Host $harnessBuild.Trim() -ForegroundColor DarkYellow
         }
     }
 
     # ── Pretty-print ────────────────────────────────────────────────────────
-    # `displayArgs` is just the *values* (e.g. "0, 42") so the function calls
-    # read naturally: `add_one_spec(0)`, not `add_one_spec(x = 0)`.
     $displayArgs = ($cexPairs | ForEach-Object { "$($_.Value)" }) -join ", "
     Write-Host ""
     Write-Host "  RESULT: DISPROVED" -ForegroundColor Red
