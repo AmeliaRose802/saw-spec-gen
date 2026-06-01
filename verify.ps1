@@ -314,9 +314,9 @@ if ($sawOutput -match "Counterexample") {
             # Show as signed if top bit set (32-bit)
             if ($rawVal -gt 2147483647 -and $rawVal -le 4294967295) {
                 $signed = [int]($rawVal - 4294967296)
-                $cexVars += "    $varName = $rawVal  ($signed as signed)"
+                $cexVars += ("    {0} = {1}  ({2} signed)" -f $varName, $rawVal, $signed)
             } else {
-                $cexVars += "    $varName = $rawVal"
+                $cexVars += ("    {0} = {1}" -f $varName, $rawVal)
             }
         }
     }
