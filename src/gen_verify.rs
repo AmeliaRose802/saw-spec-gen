@@ -252,13 +252,7 @@ pub fn run(
                 continue;
             }
 
-            let is_system = fn_info.map(|f| f.is_system).unwrap_or(false);
-            saw_emit::emit_single_experimental_spec(
-                spec,
-                &all_globals,
-                is_system,
-                &experimental_dir,
-            )?;
+            saw_emit::emit_single_experimental_spec(spec, &all_globals, &experimental_dir)?;
         }
         eprintln!("Generated {} external function specs", external_calls.len());
     }

@@ -64,26 +64,20 @@ pub fn emit_saw_specs_with_globals(
 
 /// Emit a single experimental (`llvm_unspecified_globals`) spec file.
 ///
-/// When `is_system` is true (e.g. `printf` from `<cstdio>`), the spec
-/// will NOT list user-defined globals as modifiable.  System functions
-/// only affect external state (stdout, errno, etc.) that SAW doesn't
-/// model — assuming they havoc user globals leads to spurious
-/// counterexamples.
+/// Every external function conservatively havocs all mutable globals.
+/// Even "safe" system functions like `printf` can write through pointer
+/// args (e.g. `%n`), and we have no way to prove they don't touch
+/// user-defined globals.
 pub fn emit_single_experimental_spec(
     spec: &SpecConstraint,
     all_globals: &[GlobalVarInfo],
-    is_system: bool,
     output_dir: &Path,
 ) -> Result<()> {
     fs::create_dir_all(output_dir)?;
     let safe_id = spec_safe_id(spec);
     let filename = format!("{}_auto_spec.saw", safe_id);
     let filepath = output_dir.join(&filename);
-    let effective_globals: &[GlobalVarInfo] = if is_system { &[] } else { all_globals };
-    fs::write(
-        &filepath,
-        generate_unspecified_spec(spec, effective_globals),
-    )?;
+    fs::write(&filepath, generate_unspecified_spec(spec, all_globals))?;
     Ok(())
 }
 
