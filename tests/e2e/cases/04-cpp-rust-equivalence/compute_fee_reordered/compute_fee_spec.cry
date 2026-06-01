@@ -6,10 +6,13 @@
 //
 // All arithmetic is on 32-bit unsigned, wrapping on overflow.
 
-// is_subscriber is a 1-bit value (SAW models C++ bool / Rust bool as i1 → [1]).
-compute_fee_spec : [32] -> [1] -> [32]
+// is_subscriber is a Cryptol `Bit`. C++ `bool` and Rust `bool` both
+// lower to LLVM `i1`; saw-spec-gen's shared Cryptol bridge wraps the
+// call site as `(is_subscriber ! 0)` so the spec receives a `Bit` and
+// can use it directly in an `if`. See src/emit/saw_emit/cryptol_bridge.rs.
+compute_fee_spec : [32] -> Bit -> [32]
 compute_fee_spec amount_cents is_subscriber = discounted
   where
     raw        = 500 + (amount_cents * 2 / 100)
     capped     = if raw > 5000 then 5000 else raw
-    discounted = if is_subscriber != 0 then (capped * 75 / 100) else capped
+    discounted = if is_subscriber then (capped * 75 / 100) else capped

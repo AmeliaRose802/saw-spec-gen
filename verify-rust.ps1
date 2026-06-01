@@ -371,10 +371,19 @@ elseif ($sawOut -match "VERIFIED") {
     exit 0
 }
 else {
-    Write-Host "  RESULT: ERROR — could not classify SAW output" -ForegroundColor Magenta
+    # SAW emitted neither a "Counterexample" nor "VERIFIED" banner —
+    # usually a Cryptol type error in the spec or a SAW load failure.
+    # Use 'UNKNOWN' (not 'ERROR') so:
+    #   (a) the verdict matches verify.ps1's fall-through branch and
+    #       the shared Write-VerifyResult ValidateSet, and
+    #   (b) the runner picks up the real RESULT line instead of
+    #       catching a Stop-mode PowerShell exception and reporting
+    #       the case as EXCEPTION (which hides the SAW output that
+    #       would let us diagnose it).
+    Write-Host "  RESULT: UNKNOWN — could not classify SAW output" -ForegroundColor Magenta
     Write-Host "  Inspect $OutputDir for the .saw script + raw SAW output." -ForegroundColor Magenta
     Write-Host ""
-    Write-Host "RESULT: ERROR"
-    Write-ResultJson 'ERROR' @() $null $null
+    Write-Host "RESULT: UNKNOWN"
+    Write-ResultJson 'UNKNOWN' @() $null $null
     exit 2
 }
