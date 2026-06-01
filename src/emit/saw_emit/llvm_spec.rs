@@ -32,17 +32,15 @@ pub fn emit_saw_specs(
     output_dir: &Path,
     experimental: bool,
 ) -> Result<()> {
-    let all_globals: Vec<GlobalVarInfo> = if experimental {
-        let mut gs: Vec<_> = specs
-            .iter()
-            .flat_map(|s| s.referenced_globals.iter().cloned())
-            .collect();
-        gs.sort_by(|a, b| a.mangled_name.cmp(&b.mangled_name));
-        gs.dedup_by(|a, b| a.mangled_name == b.mangled_name);
-        gs
-    } else {
-        vec![]
-    };
+    // Build a deduplicated union of every spec's referenced globals so
+    // that concrete specs allocate all known globals (callees may
+    // transitively touch globals the target doesn't directly reference).
+    let mut all_globals: Vec<GlobalVarInfo> = specs
+        .iter()
+        .flat_map(|s| s.referenced_globals.iter().cloned())
+        .collect();
+    all_globals.sort_by(|a, b| a.mangled_name.cmp(&b.mangled_name));
+    all_globals.dedup_by(|a, b| a.mangled_name == b.mangled_name);
     emit_saw_specs_with_mode(
         specs,
         output_dir,
@@ -128,7 +126,7 @@ pub fn emit_saw_specs_with_mode(
             generate_unspecified_spec(spec, all_globals)
         } else {
             match mode {
-                EmitMode::Llvm => generate_saw_spec(spec),
+                EmitMode::Llvm => generate_saw_spec(spec, all_globals),
                 EmitMode::Mir => super::mir_spec::generate_mir_spec(spec),
             }
         };
@@ -162,7 +160,13 @@ pub fn emit_saw_specs_with_mode(
 }
 
 /// Generate the full LLVM SAW spec for a single function.
-pub fn generate_saw_spec(spec: &SpecConstraint) -> String {
+///
+/// `all_globals` is the full set of mutable globals in the translation
+/// unit (AST-discovered + IR-discovered). The spec allocates every
+/// global in this list, not just those the function directly references,
+/// because SAW symbolically executes callee bodies and any callee may
+/// touch globals the target doesn't directly name.
+pub fn generate_saw_spec(spec: &SpecConstraint, all_globals: &[GlobalVarInfo]) -> String {
     let mut out = String::new();
     let fn_name = &spec.function_name;
     let target_name = spec.mangled_name.as_deref().unwrap_or(&spec.function_name);
@@ -180,8 +184,8 @@ pub fn generate_saw_spec(spec: &SpecConstraint) -> String {
     for param in &spec.params {
         emit_llvm_param_setup(&mut out, param);
     }
-    if !spec.referenced_globals.is_empty() {
-        emit_llvm_globals_setup(&mut out, &spec.referenced_globals);
+    if !all_globals.is_empty() {
+        emit_llvm_globals_setup(&mut out, all_globals);
     }
 
     let mut args: Vec<String> = Vec::new();
@@ -398,7 +402,7 @@ mod tests {
             VOID_SAW_TYPE,
             false,
         );
-        let output = generate_saw_spec(&spec);
+        let output = generate_saw_spec(&spec, &spec.referenced_globals);
         assert!(output.contains("LLVMSetup ()"));
         assert!(output.contains("llvm_alloc_readonly"));
         assert!(output.contains("llvm_fresh_var"));
@@ -420,7 +424,7 @@ mod tests {
             VOID_SAW_TYPE,
             false,
         );
-        let output = generate_saw_spec(&spec);
+        let output = generate_saw_spec(&spec, &spec.referenced_globals);
         assert!(output.contains("llvm_alloc (llvm_int 64)"));
         assert!(!output.contains("llvm_alloc_readonly"));
     }
@@ -450,7 +454,7 @@ mod tests {
             "llvm_int 32",
             false,
         );
-        let output = generate_saw_spec(&spec);
+        let output = generate_saw_spec(&spec, &spec.referenced_globals);
         assert!(output.contains("a <- llvm_fresh_var \"a\" (llvm_int 32)"));
         assert!(output.contains("llvm_term a, llvm_term b"));
     }
@@ -458,7 +462,7 @@ mod tests {
     #[test]
     fn test_generate_llvm_spec_return() {
         let spec = make_spec("get_val", vec![], "llvm_int 32", false);
-        let output = generate_saw_spec(&spec);
+        let output = generate_saw_spec(&spec, &spec.referenced_globals);
         assert!(output.contains("ret <- llvm_fresh_var \"ret\" (llvm_int 32)"));
         assert!(output.contains("llvm_return (llvm_term ret)"));
         assert!(output.contains("ACTION REQUIRED"));
@@ -469,14 +473,14 @@ mod tests {
     #[test]
     fn test_generate_llvm_spec_void_return() {
         let spec = make_spec("noop", vec![], VOID_SAW_TYPE, false);
-        let output = generate_saw_spec(&spec);
+        let output = generate_saw_spec(&spec, &spec.referenced_globals);
         assert!(!output.contains("llvm_return"));
     }
 
     #[test]
     fn test_generate_llvm_spec_can_throw() {
         let spec = make_spec("risky", vec![], VOID_SAW_TYPE, true);
-        let output = generate_saw_spec(&spec);
+        let output = generate_saw_spec(&spec, &spec.referenced_globals);
         assert!(output.contains("WARNING: Function may throw"));
     }
 
@@ -518,7 +522,7 @@ mod tests {
             referenced_globals: vec![],
             postconditions: vec!["llvm_points_to data_ptr (llvm_term data_before)".into()],
         };
-        let output = generate_saw_spec(&spec);
+        let output = generate_saw_spec(&spec, &spec.referenced_globals);
         assert!(output.contains("Postconditions"));
         assert!(output.contains("data_before"));
     }

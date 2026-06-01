@@ -195,7 +195,7 @@ pub(super) fn emit_equiv_spec_body(
     target_fn: &FunctionInfo,
     interface_classes: &HashSet<String>,
     interface_of: &dyn Fn(&TypeInfo) -> Option<String>,
-    _all_globals: &[GlobalVarInfo],
+    all_globals: &[GlobalVarInfo],
 ) -> (Vec<String>, Vec<String>) {
     out.push_str(&format!(
         "// Step {step}: Equivalence spec — C++ {function_name} == Cryptol {cryptol_fn}\n",
@@ -301,7 +301,7 @@ pub(super) fn emit_equiv_spec_body(
 
     out.push('\n');
 
-    for global in &target_spec.referenced_globals {
+    for global in all_globals {
         out.push_str(&format!(
             "    llvm_alloc_global \"{}\";\n",
             global.mangled_name,

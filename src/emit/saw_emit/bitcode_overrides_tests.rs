@@ -11,12 +11,29 @@ fn target(
     variadic: bool,
     reason: BrokenReason,
 ) -> OverrideTarget {
+    target_with_writes(symbol, params, ret, variadic, reason, &[])
+}
+
+/// Same as [`target`] but lets the test specify which mutable globals
+/// the scanner would have observed this target's body writing. Used
+/// by `globals_get_adversarial_post_clobber` to assert that the
+/// emitter clobbers exactly the per-target written set rather than
+/// the module-wide mutable-global list.
+fn target_with_writes(
+    symbol: &str,
+    params: &[&str],
+    ret: &str,
+    variadic: bool,
+    reason: BrokenReason,
+    globals_written: &[&str],
+) -> OverrideTarget {
     OverrideTarget {
         symbol: symbol.to_string(),
         fixed_param_ir_types: params.iter().map(|s| s.to_string()).collect(),
         return_ir_type: ret.to_string(),
         is_variadic: variadic,
         reason,
+        globals_written: globals_written.iter().map(|s| s.to_string()).collect(),
     }
 }
 
@@ -235,18 +252,19 @@ fn int_only_params_get_no_clobber() {
 #[test]
 fn globals_get_adversarial_post_clobber() {
     use crate::constraints::{GlobalVarInfo, TypeInfo};
-    // Override of any extern must clobber every mutable global the
-    // caller passed in — the extern is unknown, so we must conservatively
-    // assume it touched all of them. Without this, a verification target
-    // that writes a global then calls the extern then reads the global
-    // would falsely VERIFY. See e2e regression at
+    // Override of a variadic body that the scanner observed storing
+    // to user globals (`g_counter`, `g_flag`) must clobber those
+    // globals in its post-state. Without this, a verification target
+    // that writes a global then calls the extern then reads the
+    // global back would falsely VERIFY. See e2e regression at
     // tests/e2e/cases/08-overrides/variadic_global_clobber/.
-    let t = target(
+    let t = target_with_writes(
         "?log_inc@@YAXPEBDZZ",
         &["ptr"],
         "void",
         true,
         BrokenReason::UsesVarargsIntrinsic,
+        &["?g_counter@@3IA", "?g_flag@@3_NA"],
     );
     let globals = vec![
         GlobalVarInfo {
@@ -316,6 +334,81 @@ fn no_globals_means_no_global_clobber_emitted() {
     assert!(
         !out.snippet.contains("llvm_global"),
         "empty globals slice must emit zero `llvm_global` references; snippet was:\n{}",
+        out.snippet
+    );
+}
+
+#[test]
+fn target_writes_no_globals_means_no_global_clobber() {
+    // Even when the module DOES have a mutable global declared, an
+    // override target whose body the scanner observed touching nothing
+    // must NOT clobber it. This is the printf-doesn't-write-user-globals
+    // case: on Windows MSVC, `printf` has a body that uses
+    // `llvm.va_start`/`llvm.va_end` and so lands in the override set,
+    // but its body chain (`_vfprintf_l` → `__stdio_common_vfprintf`)
+    // never `store`s through any user global. Conservatively havocing
+    // every module-wide mutable global here produced false DISPROVED
+    // verdicts for tests like
+    // `tests/e2e/cases/02-havoc-coverage/concrete_type_safe/
+    // add_one_verified.cpp` whose `add_one` reads `super_important`
+    // after calling printf.
+    use crate::constraints::{GlobalVarInfo, TypeInfo};
+    let t = target_with_writes(
+        "printf",
+        &["ptr"],
+        "i32",
+        true,
+        BrokenReason::UsesVarargsIntrinsic,
+        &[], // scanner saw printf write nothing
+    );
+    let globals = vec![GlobalVarInfo {
+        name: "super_important".to_string(),
+        mangled_name: "?super_important@@3HA".to_string(),
+        ty: TypeInfo::SignedInt(32),
+        init_value: Some("7".to_string()),
+    }];
+    let out = emit_overrides(&[t], &[], &globals);
+    assert!(
+        !out.snippet.contains("super_important"),
+        "printf-style override (empty globals_written) must not clobber \
+         any module-wide global; snippet was:\n{}",
+        out.snippet
+    );
+    assert!(
+        !out.snippet.contains("llvm_global"),
+        "no llvm_global reference should appear when the target writes \
+         nothing; snippet was:\n{}",
+        out.snippet
+    );
+}
+
+#[test]
+fn declare_only_extern_clobbers_globals_in_written_set() {
+    // DeclareOnly targets carry `globals_written` populated by the
+    // scanner (all externally-visible mutable globals, conservatively).
+    // The emitter must clobber exactly those globals. This pairs with
+    // `target_writes_no_globals_means_no_global_clobber` to confirm
+    // the emitter faithfully follows the scanner's written set.
+    use crate::constraints::{GlobalVarInfo, TypeInfo};
+    let t = target_with_writes(
+        "__stdio_common_vfprintf",
+        &["i64", "ptr", "ptr", "ptr", "ptr"],
+        "i32",
+        false,
+        BrokenReason::DeclareOnly,
+        &["?user_state@@3HA"], // scanner fills this for declare-only
+    );
+    let globals = vec![GlobalVarInfo {
+        name: "user_state".to_string(),
+        mangled_name: "?user_state@@3HA".to_string(),
+        ty: TypeInfo::SignedInt(32),
+        init_value: None,
+    }];
+    let out = emit_overrides(&[t], &[], &globals);
+    assert!(
+        out.snippet.contains("user_state"),
+        "declare-only extern with globals_written must havoc those globals; \
+         snippet was:\n{}",
         out.snippet
     );
 }

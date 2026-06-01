@@ -96,7 +96,27 @@ pub fn run(
         llvm_ir_path.is_some(),
     );
 
-    let all_globals = clang_ast::extract_all_globals(&parsed_ast)?;
+    let mut all_globals = clang_ast::extract_all_globals(&parsed_ast)?;
+
+    // Augment with mutable globals discovered in the LLVM IR that the
+    // clang AST parser missed (function-local statics, compiler-
+    // generated globals, etc.).  Without this, SAW aborts with
+    // "Global symbol not allocated" when symbolically executing a body
+    // that touches an IR-only global.
+    if let Some(ir_path) = llvm_ir_path {
+        if let Ok(ir_text) = std::fs::read_to_string(ir_path) {
+            let extra =
+                crate::transform::ir_globals::discover_ir_only_globals(&ir_text, &all_globals);
+            if !extra.is_empty() {
+                eprintln!(
+                    "  discovered {} IR-only mutable global(s) not in clang AST",
+                    extra.len(),
+                );
+                all_globals.extend(extra);
+            }
+        }
+    }
+
     let all_specs = constraints::derive_constraints(&all_functions)?;
 
     // Warn about interfaces referenced by fields but missing from the merged

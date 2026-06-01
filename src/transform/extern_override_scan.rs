@@ -28,7 +28,10 @@
 //! SAW. Every overrideable target is grounded in a symbol that actually
 //! appears in the bitcode, which is the only ground truth SAW will see.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
+
+use super::ir_globals::extract_store_global_target;
+pub(crate) use super::ir_globals::{scan_mutable_globals, MutableGlobals};
 
 /// A function in the bitcode that the emitter should wrap in a
 /// signature-based `llvm_unsafe_assume_spec`.
@@ -52,6 +55,27 @@ pub struct OverrideTarget {
     /// generated SAW comment so a reader can tell at a glance whether
     /// the symbol is a true extern or a varargs body.
     pub reason: BrokenReason,
+    /// Mutable globals this target may write, computed via transitive
+    /// `store ..., ptr @G` reachability from defined bodies reachable
+    /// from `symbol`, plus a conservative over-approximation for any
+    /// opaque (DeclareOnly) callees encountered in the walk.
+    ///
+    /// **Defined bodies** (UsesVarargsIntrinsic): the BFS walks every
+    /// defined callee transitively reachable in the same module and
+    /// unions the `store ..., ptr @G` targets it finds.
+    ///
+    /// **Opaque callees** (DeclareOnly, including forward-declared
+    /// functions from other project TUs): the BFS conservatively adds
+    /// every mutable global with external linkage, because the opaque
+    /// body could `extern` the symbol in its own TU and write it.
+    /// Globals with `internal` or `private` linkage are excluded
+    /// since other TUs cannot access them.
+    ///
+    /// The bitcode-override emitter uses this set to decide which
+    /// `llvm_points_to (llvm_global ...)` post-conditions to attach,
+    /// instead of conservatively clobbering every mutable global the
+    /// IR declares.
+    pub globals_written: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,6 +96,11 @@ struct IrFunc {
     is_define: bool,
     body_calls: Vec<String>,
     body_uses_va_intrinsic: bool,
+    /// Bare global symbol names (no leading `@`, no quotes) that this
+    /// function body directly stores to via `store ..., ptr @NAME`.
+    /// Indirect stores through pointer arguments or loaded pointers
+    /// are not tracked — they require alias analysis we don't have.
+    body_globals_stored: Vec<String>,
 }
 
 /// Compute the set of bitcode symbols that need overrides for a verify
@@ -84,6 +113,7 @@ struct IrFunc {
 pub fn scan(ir: &str, target_symbol: &str) -> Vec<OverrideTarget> {
     let funcs = parse_functions(ir);
     let by_name: HashMap<&str, &IrFunc> = funcs.iter().map(|f| (f.name.as_str(), f)).collect();
+    let mg = scan_mutable_globals(ir);
 
     // Reachability BFS from the target.
     let mut reachable: HashSet<String> = HashSet::new();
@@ -125,15 +155,71 @@ pub fn scan(ir: &str, target_symbol: &str) -> Vec<OverrideTarget> {
         } else {
             continue;
         };
+        let globals_written = collect_globals_written_from(&f.name, &by_name, &mg);
         out.push(OverrideTarget {
             symbol: f.name.clone(),
             fixed_param_ir_types: f.fixed_params.clone(),
             return_ir_type: f.return_ty.clone(),
             is_variadic: f.is_variadic,
             reason,
+            globals_written,
         });
     }
     out.sort_by(|a, b| a.symbol.cmp(&b.symbol));
+    out
+}
+
+/// Walk every defined body reachable from `start` (through `call`/
+/// `invoke` edges), unioning the bare global symbol names that those
+/// bodies directly `store` into. When the walk reaches a DeclareOnly
+/// callee, conservatively union **all externally-visible** mutable
+/// globals — the opaque body could be a forward-declared function
+/// from another project TU that `extern`s any such symbol and writes
+/// it. Globals with `internal`/`private` linkage are excluded since
+/// other TUs cannot reference them.
+fn collect_globals_written_from(
+    start: &str,
+    by_name: &HashMap<&str, &IrFunc>,
+    mg: &MutableGlobals,
+) -> Vec<String> {
+    let mut written: HashSet<String> = HashSet::new();
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut worklist: VecDeque<String> = VecDeque::new();
+    worklist.push_back(start.to_string());
+    while let Some(s) = worklist.pop_front() {
+        if !visited.insert(s.clone()) {
+            continue;
+        }
+        let Some(f) = by_name.get(s.as_str()) else {
+            // Not even declared in the module — skip.
+            continue;
+        };
+        if !f.is_define {
+            // LLVM intrinsics are compiler-implemented primitives,
+            // not real external functions — they cannot access user
+            // globals.
+            if s.starts_with("llvm.") {
+                continue;
+            }
+            // Opaque callee — could be a forward-declared function
+            // from another project TU that writes any externally-
+            // visible global.
+            written.extend(mg.externally_visible.iter().cloned());
+            continue;
+        }
+        for g in &f.body_globals_stored {
+            if mg.all.contains(g.as_str()) {
+                written.insert(g.clone());
+            }
+        }
+        for callee in &f.body_calls {
+            if !visited.contains(callee.as_str()) {
+                worklist.push_back(callee.clone());
+            }
+        }
+    }
+    let mut out: Vec<String> = written.into_iter().collect();
+    out.sort();
     out
 }
 
@@ -157,6 +243,7 @@ fn parse_functions(ir: &str) -> Vec<IrFunc> {
         let (name, fixed_params, return_ty, is_variadic) = parsed;
         let mut body_calls: Vec<String> = Vec::new();
         let mut body_uses_va = false;
+        let mut body_globals_stored: Vec<String> = Vec::new();
         if is_define {
             // Body spans from the opening `{` (often on the define line
             // itself) through the matching `}`.
@@ -177,6 +264,9 @@ fn parse_functions(ir: &str) -> Vec<IrFunc> {
                     }
                     body_calls.push(callee);
                 }
+                if let Some(g) = extract_store_global_target(bt) {
+                    body_globals_stored.push(g);
+                }
                 j += 1;
             }
             i = j + 1;
@@ -191,6 +281,7 @@ fn parse_functions(ir: &str) -> Vec<IrFunc> {
             is_define,
             body_calls,
             body_uses_va_intrinsic: body_uses_va,
+            body_globals_stored,
         });
     }
     out
@@ -392,51 +483,3 @@ fn extract_call_target(line: &str) -> Option<String> {
 #[cfg(test)]
 #[path = "extern_override_scan_tests.rs"]
 mod tests;
-
-/// Scan LLVM IR text for the set of **mutable** global variable symbols
-/// (i.e. those declared `global` rather than `constant`).
-///
-/// Used by the bitcode-override emitter to decide which globals to
-/// adversarially clobber in an extern override's post-state — a
-/// `constant` global cannot be written to, so we must filter it out
-/// to avoid SAW rejecting `llvm_points_to (llvm_global ...)` writes.
-///
-/// Matches lines like `@"NAME" = ... global TYPE ...` and
-/// `@NAME = ... global TYPE ...`, returning the bare symbol (no `@`,
-/// no quotes).
-pub fn scan_mutable_globals(ir: &str) -> HashSet<String> {
-    let mut out = HashSet::new();
-    for line in ir.lines() {
-        let trimmed = line.trim_start();
-        if !trimmed.starts_with('@') {
-            continue;
-        }
-        let Some(eq) = trimmed.find(" = ") else {
-            continue;
-        };
-        let lhs = &trimmed[..eq];
-        let rhs = &trimmed[eq + 3..];
-        // Find first occurrence of " global " or " constant " keyword
-        // (with surrounding spaces) before the type token. We add a
-        // leading space so a leading keyword still matches.
-        let needle = format!(" {rhs}");
-        let g_idx = needle.find(" global ");
-        let c_idx = needle.find(" constant ");
-        let is_mutable = match (g_idx, c_idx) {
-            (Some(g), Some(c)) => g < c,
-            (Some(_), None) => true,
-            _ => false,
-        };
-        if !is_mutable {
-            continue;
-        }
-        // Extract symbol name from LHS: strip leading `@` and optional
-        // surrounding double quotes.
-        let sym = lhs.trim_start_matches('@').trim();
-        let sym = sym.trim_matches('"');
-        if !sym.is_empty() {
-            out.insert(sym.to_string());
-        }
-    }
-    out
-}

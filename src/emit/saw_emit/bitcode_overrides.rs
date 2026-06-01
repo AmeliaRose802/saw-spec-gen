@@ -22,15 +22,19 @@
 //!     failed" at call sites that pass a pointer to a narrower stack
 //!     slot, and the opaque-ptr IR signature gives no way to discover
 //!     the real pointee width.
-//!   * every mutable global the IR declares (matched via
-//!     [`extern_override_scan::scan_mutable_globals`]) is also
-//!     adversarially clobbered. We can't tell at the override site
-//!     which globals the extern actually touches, so we conservatively
-//!     assume it touches all of them — without this SAW silently
-//!     preserves global state across the override and produces false
-//!     positives whenever the verification target writes a global,
-//!     calls the extern, then reads the global back (see
-//!     `tests/e2e/cases/08-overrides/variadic_global_clobber/`).
+//!   * every mutable global the IR declares **that the target's body
+//!     transitively stores to** gets adversarially clobbered. The
+//!     scanner ([`extern_override_scan::scan`]) walks the target's
+//!     visible body closure and unions direct `store ..., ptr @G`
+//!     instructions per [`OverrideTarget::globals_written`]. For
+//!     `DeclareOnly` externs the body is invisible so the set is
+//!     empty — we assume libc-style externs do not mutate user
+//!     globals (the previous behaviour of clobbering every global on
+//!     every extern produced false DISPROVED verdicts whenever any
+//!     reachable function touched `printf`, see
+//!     `tests/e2e/cases/02-havoc-coverage/concrete_type_safe/`).
+//!     The variadic-body must-havoc case is still covered, see
+//!     `tests/e2e/cases/08-overrides/variadic_global_clobber/`.
 //!
 //! Output shape per target:
 //! ```text
@@ -103,15 +107,17 @@ pub fn scan_and_emit(
     let targets = extern_override_scan::scan(&ir_text, target_symbol);
     // Restrict global-clobber to globals that the IR actually declares
     // as `global` (not `constant`) and whose width we can express as an
-    // `llvm_int N` term. We over-approximate by clobbering in EVERY
-    // extern override (we have no way to know which extern actually
-    // touches which global), which is the conservative direction —
-    // worse it can do is force the user to write a hand spec for an
-    // extern that legitimately preserves a global.
-    let mutable_syms = extern_override_scan::scan_mutable_globals(&ir_text);
+    // `llvm_int N` term. Each `OverrideTarget` carries its own
+    // `globals_written` set (computed by `extern_override_scan::scan`):
+    //   - DeclareOnly targets conservatively list all externally-visible
+    //     mutable globals (any opaque callee could write them).
+    //   - Defined bodies (UsesVarargsIntrinsic) list exactly the globals
+    //     their transitive call-chain stores to.
+    // `emit_one` filters `mutable_globals` against that set.
+    let mg = extern_override_scan::scan_mutable_globals(&ir_text);
     let mutable_globals: Vec<GlobalVarInfo> = all_globals
         .iter()
-        .filter(|g| mutable_syms.contains(g.mangled_name.as_str()))
+        .filter(|g| mg.all.contains(g.mangled_name.as_str()))
         .filter(|g| global_width_bits(&g.ty).is_some())
         .cloned()
         .collect();
@@ -181,6 +187,16 @@ fn emit_one(
     ov_name: &str,
     mutable_globals: &[GlobalVarInfo],
 ) {
+    // Filter the module-wide mutable-global list down to just the
+    // globals in this target's `globals_written` set. For DeclareOnly
+    // targets this is all externally-visible mutable globals (opaque
+    // callees could write any of them). For UsesVarargsIntrinsic
+    // targets it's the precise union of direct stores from the
+    // visible body closure.
+    let globals_to_clobber: Vec<&GlobalVarInfo> = mutable_globals
+        .iter()
+        .filter(|g| t.globals_written.iter().any(|w| w == &g.mangled_name))
+        .collect();
     let reason_tag = match t.reason {
         BrokenReason::DeclareOnly => "declare-only",
         BrokenReason::UsesVarargsIntrinsic => "body uses llvm.va_*",
@@ -267,17 +283,26 @@ fn emit_one(
     }
 
     // Adversarial post-state: clobber every mutable global the IR
-    // declares. We can't tell from the override site which globals the
-    // extern actually touches, so we conservatively assume it touches
-    // all of them. Mirrors the pre-state allocation that
-    // `emit_equiv_spec_body` does for `target_spec.referenced_globals`,
-    // and the AST-side `emit_global_havoc` pattern in `havoc.rs`. See
-    // `tests/e2e/cases/08-overrides/variadic_global_clobber/` for the
-    // regression: pre-fix that test falsely VERIFIED because the
-    // `log_inc` override silently let `g_counter = 1` survive the call,
-    // post-fix it DISPROVES on a counterexample where the override
-    // wrote some non-1 value to `g_counter`.
-    for g in mutable_globals {
+    // declares **that this target's body actually stores to** (per
+    // `OverrideTarget::globals_written`, computed in
+    // `extern_override_scan::scan`). We mirror the pre-state
+    // allocation that `emit_equiv_spec_body` does for
+    // `target_spec.referenced_globals`, and the AST-side
+    // `emit_global_havoc` pattern in `havoc.rs`.
+    //
+    // Two regressions guard this granularity:
+    //   * `tests/e2e/cases/08-overrides/variadic_global_clobber/`
+    //     covers the must-havoc direction: a `log_inc` variadic body
+    //     that writes `g_counter++` must clobber `g_counter` in the
+    //     override, otherwise the override preserves the pre-call
+    //     value and the caller falsely VERIFIES.
+    //   * `tests/e2e/cases/02-havoc-coverage/concrete_type_safe/
+    //     add_one_verified.cpp` covers the must-NOT-havoc direction:
+    //     `printf` (whose MSVC body uses `llvm.va_*` and so lands in
+    //     the override set on Windows) cannot write user globals,
+    //     so havocing `super_important` here would falsely DISPROVE
+    //     a function that only reads the global.
+    for g in globals_to_clobber {
         let Some(bits) = global_width_bits(&g.ty) else {
             continue;
         };
