@@ -13,8 +13,8 @@ This case is intentionally on the "expected DISPROVED" side of
 the suite to document the compositional havoc gap for header-only
 STL templates. When the tool learns to symbolic-execute such
 trivially-inlinable bodies (or applies a smart override for the
-known-pure subset of <algorithm>), flip the expected verdict to
-VERIFIED.
+known-pure subset of <algorithm>), rename this file back to
+add_one_verified.cpp and flip the expected verdict to VERIFIED.
 
 See tests/e2e/cases/10-stl-coverage/README.md for the full
 coverage matrix.

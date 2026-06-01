@@ -33,10 +33,10 @@ This is documented behaviour, not a bug. The suite exists to:
    re-reporting the same issue.
 2. **Catch regressions in the gap.** If a future tool change
    strengthens overrides for the math-only subset of `<algorithm>`,
-   the `*_verified.cpp` cases will flip to `VERIFIED`. The runner
+   the `*_gap_disproved.cpp` cases will flip to `VERIFIED`. The runner
    will then report the case as failing-against-expected, and the
-   author can update `Expected` to `VERIFIED` in `cases.psd1` and
-   celebrate the improvement.
+   author can rename them back to `*_verified.cpp`, update `Expected`
+   to `VERIFIED` in `cases.psd1`, and celebrate the improvement.
 3. **Exercise the C++ frontend.** Even when the proof is refuted,
    the pipeline runs: clang → AST dump → filter → spec generation
    → SAW load → solver. Any crash, hang, or wrong-shape spec along
@@ -58,8 +58,10 @@ This is documented behaviour, not a bug. The suite exists to:
 
 Each directory ships:
 
-* `add_one_verified.cpp` — code that *should* match `add_one_spec`
-  but doesn't, due to the gap above.
+* `add_one_gap_disproved.cpp` — code that *should* match `add_one_spec`
+  but doesn't, due to the gap above. (Named `_gap_disproved` rather
+  than `_verified` so the filename matches the actual expected
+  verdict per the project naming convention.)
 * `add_one_disproved.cpp` — code that genuinely returns the wrong
   value (e.g. `x + 2`) and gets disproved for the *right* reason.
 * `add_one_spec.cry` — the shared `add_one_spec x = x + 1` Cryptol
@@ -73,7 +75,7 @@ pwsh tests/e2e/Run-E2ETests.ps1 -Tag stl_coverage
 
 # Single case.
 pwsh -NoLogo -NoProfile -File verify.ps1 `
-    -CppFile tests/e2e/cases/10-stl-coverage/algorithm_max/add_one_verified.cpp `
+    -CppFile tests/e2e/cases/10-stl-coverage/algorithm_max/add_one_gap_disproved.cpp `
     -CryptolSpec tests/e2e/cases/10-stl-coverage/algorithm_max/add_one_spec.cry `
     -CryptolFn add_one_spec -Function add_one
 
@@ -124,6 +126,6 @@ A future improvement might add a "smart" override for the
 math-only subset of `<algorithm>` / `<utility>` (e.g. recognise
 `std::max<T>` as `\\ x y -> if x >= y then x else y` and emit a
 value-preserving spec instead of a pure-havoc one). When that
-lands, the `*_verified.cpp` cases will start passing — flip their
-`Expected` to `VERIFIED` in `cases.psd1` and update this README
-in the same PR.
+lands, the `*_gap_disproved.cpp` cases will start passing — rename
+them back to `*_verified.cpp`, flip their `Expected` to `VERIFIED`
+in `cases.psd1`, and update this README in the same PR.

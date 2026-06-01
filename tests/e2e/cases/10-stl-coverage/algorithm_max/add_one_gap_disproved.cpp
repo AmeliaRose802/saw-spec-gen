@@ -10,8 +10,9 @@ havoc gap for header-only STL templates.
 
 Expected RESULT: DISPROVED (compositional havoc gap). When the
 tool learns to inline trivially-pure STL templates (or ships
-smart overrides for the math-only subset of <algorithm>), flip
-this case to VERIFIED.
+smart overrides for the math-only subset of <algorithm>), rename
+this file back to add_one_verified.cpp and flip the expected
+verdict to VERIFIED.
 
 See tests/e2e/cases/10-stl-coverage/README.md.
 */

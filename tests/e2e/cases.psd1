@@ -210,21 +210,21 @@
         # improvement to celebrate, not a regression to fix). See
         # tests/e2e/cases/10-stl-coverage/README.md for the matrix +
         # rationale. The `algorithm_clamp` case requires C++17.
-        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/algorithm_max';          File = 'add_one_verified.cpp';  Expected = 'DISPROVED' }
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/algorithm_max';          File = 'add_one_gap_disproved.cpp';  Expected = 'DISPROVED' }
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/algorithm_max';          File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
-        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/algorithm_min';          File = 'add_one_verified.cpp';  Expected = 'DISPROVED' }
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/algorithm_min';          File = 'add_one_gap_disproved.cpp';  Expected = 'DISPROVED' }
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/algorithm_min';          File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
-        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/algorithm_clamp';        File = 'add_one_verified.cpp';  Expected = 'DISPROVED'; CxxStandard = 'c++17' }
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/algorithm_clamp';        File = 'add_one_gap_disproved.cpp';  Expected = 'DISPROVED'; CxxStandard = 'c++17' }
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/algorithm_clamp';        File = 'add_one_disproved.cpp'; Expected = 'DISPROVED'; CxxStandard = 'c++17' }
-        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/numeric_accumulate';     File = 'add_one_verified.cpp';  Expected = 'DISPROVED' }
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/numeric_accumulate';     File = 'add_one_gap_disproved.cpp';  Expected = 'DISPROVED' }
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/numeric_accumulate';     File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
-        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/pair_first';             File = 'add_one_verified.cpp';  Expected = 'DISPROVED' }
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/pair_first';             File = 'add_one_gap_disproved.cpp';  Expected = 'DISPROVED' }
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/pair_first';             File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
-        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/tuple_get';              File = 'add_one_verified.cpp';  Expected = 'DISPROVED' }
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/tuple_get';              File = 'add_one_gap_disproved.cpp';  Expected = 'DISPROVED' }
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/tuple_get';              File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
-        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/vector_back_havoc';      File = 'add_one_verified.cpp';  Expected = 'DISPROVED' }
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/vector_back_havoc';      File = 'add_one_gap_disproved.cpp';  Expected = 'DISPROVED' }
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/vector_back_havoc';      File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
-        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/unique_ptr_deref_havoc'; File = 'add_one_verified.cpp';  Expected = 'DISPROVED' }
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/unique_ptr_deref_havoc'; File = 'add_one_gap_disproved.cpp';  Expected = 'DISPROVED' }
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/unique_ptr_deref_havoc'; File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
 
         # ── Box allocator: currently UNKNOWN due to MIR allocator model gap

@@ -10,7 +10,8 @@ so SAW disproves the equivalence against `add_one_spec`.
 Requires C++17 for `std::clamp`. The runner forwards
 `CxxStandard = 'c++17'` from cases.psd1.
 
-Expected RESULT: DISPROVED (compositional havoc gap).
+Expected RESULT: DISPROVED (compositional havoc gap). When
+fixed, rename to add_one_verified.cpp and flip to VERIFIED.
 */
 
 #include <cstdint>

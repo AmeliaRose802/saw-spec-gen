@@ -13,7 +13,8 @@ x+1 back" as a coupled pair of state edits. The havoc lets
 
 Expected RESULT: DISPROVED (vector compositional gap). When the
 tool ships a vector model (or learns to inline single-element
-push_back + back() patterns), flip to VERIFIED.
+push_back + back() patterns), rename to add_one_verified.cpp and
+flip to VERIFIED.
 */
 
 #include <cstdint>
