@@ -80,6 +80,7 @@ if (-not $cases -or $cases.Count -eq 0) {
 # Default tag set: everything except known-UNKNOWN research cases.
 $defaultTags = @(
     'cpp_havoc'
+    'cpp_throws'
     'rust_havoc'
     'bounded_loop'
     'csep590b_c04'

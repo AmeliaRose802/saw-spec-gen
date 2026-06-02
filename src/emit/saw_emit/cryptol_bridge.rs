@@ -201,3 +201,37 @@ getStatus :
         assert_eq!(cryptol_arity_from_str(cry, "getStatus"), Some(2));
     }
 }
+
+/// Detect sret pre-state threading from Cryptol arity.
+///
+/// When the Cryptol model has one more parameter than the C++ source-level
+/// signature AND the return is sret, the extra parameter is the pre-call
+/// contents of the sret buffer (for partially-initialized aggregates like
+/// `std::optional<T>`).
+pub fn detect_sret_prestate(
+    target_spec: &mut crate::constraints::SpecConstraint,
+    cryptol_spec: &std::path::Path,
+    cryptol_fn: &str,
+) {
+    if !target_spec.return_constraint.is_sret {
+        return;
+    }
+    let Some(cry_arity) = cryptol_arity(cryptol_spec, cryptol_fn) else {
+        return;
+    };
+    let cpp_param_count = target_spec.params.len();
+    if cry_arity == cpp_param_count + 1 {
+        eprintln!(
+            "  sret pre-state detected: Cryptol {cryptol_fn} has arity {cry_arity} \
+             (C++ has {cpp_param_count} params) — threading sret buffer as trailing arg",
+        );
+        target_spec.return_constraint.sret_prestate = true;
+    } else if cry_arity > cpp_param_count + 1 {
+        eprintln!(
+            "warning: Cryptol {cryptol_fn} has arity {cry_arity} but C++ has \
+             {cpp_param_count} source-level params (+ 1 sret). The extra {} \
+             param(s) cannot be auto-threaded; hand-edit the generated spec.",
+            cry_arity - cpp_param_count,
+        );
+    }
+}

@@ -96,33 +96,13 @@ pub fn run(
         llvm_ir_path.is_some(),
     );
 
-    // Detect sret pre-state: when the Cryptol model has one more parameter
-    // than the C++ source-level signature AND the return is sret, the extra
-    // parameter is the pre-call contents of the sret buffer (used for
-    // partially-initialized aggregates like std::optional<T>).
-    if target_spec.return_constraint.is_sret {
-        if let Some(cry_arity) = saw_emit::cryptol_bridge::cryptol_arity(cryptol_spec, cryptol_fn) {
-            let cpp_param_count = target_spec.params.len();
-            if cry_arity == cpp_param_count + 1 {
-                eprintln!(
-                    "  sret pre-state detected: Cryptol {} has arity {} \
-                     (C++ has {} params) — threading sret buffer as trailing arg",
-                    cryptol_fn, cry_arity, cpp_param_count,
-                );
-                target_spec.return_constraint.sret_prestate = true;
-            } else if cry_arity > cpp_param_count + 1 {
-                eprintln!(
-                    "warning: Cryptol {} has arity {} but C++ has {} source-level params \
-                     (+ 1 sret). The extra {} param(s) cannot be auto-threaded; \
-                     hand-edit the generated spec.",
-                    cryptol_fn,
-                    cry_arity,
-                    cpp_param_count,
-                    cry_arity - cpp_param_count,
-                );
-            }
-        }
-    }
+    // Detect sret pre-state threading from Cryptol arity.
+    saw_emit::cryptol_bridge::detect_sret_prestate(&mut target_spec, cryptol_spec, cryptol_fn);
+
+    // If the LLVM IR contains exception-lower globals (@__exclow_error_*),
+    // inject them into the target spec so that SAW allocates them.
+    // (Deferred until after `all_globals` is built below — see the call
+    // to `inject_exclow_globals` further down.)
 
     let mut all_globals = clang_ast::extract_all_globals(&parsed_ast)?;
 
@@ -143,6 +123,16 @@ pub fn run(
                 all_globals.extend(extra);
             }
         }
+    }
+
+    // Inject the exception-lower bookkeeping globals (@__exclow_error_*)
+    // with the right TypeInfo and pre-state init values. Must run after
+    // the AST + IR scans so the explicit `init_value: Some("0")` for the
+    // error flag isn't shadowed by a duplicate entry from
+    // `discover_ir_only_globals` (which would have `init_value: None`
+    // because it can't parse the LLVM `false` literal).
+    if let Some(ir_path) = llvm_ir_path {
+        crate::transform::eh_globals::inject_exclow_globals(&mut all_globals, ir_path);
     }
 
     let all_specs = constraints::derive_constraints(&all_functions)?;
