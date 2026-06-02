@@ -56,20 +56,27 @@ pub struct PatchStats {
     pub poison_replaced: usize,
     pub nsw_nuw_stripped: usize,
     pub sat_intrinsics_expanded: usize,
+    pub allocas_zeroed: usize,
 }
 
 /// Read `input`, apply all passes, and write the result to `output`.
 /// `input` and `output` may point to the same file.
-pub fn patch_llvm_ir_file(input: &Path, output: &Path) -> anyhow::Result<PatchStats> {
+pub fn patch_llvm_ir_file(
+    input: &Path,
+    output: &Path,
+    init_undef_allocas: bool,
+) -> anyhow::Result<PatchStats> {
     let text = fs::read_to_string(input)?;
-    let (patched, stats) = patch_llvm_ir(&text);
+    let (patched, stats) = patch_llvm_ir(&text, init_undef_allocas);
     fs::write(output, patched)?;
     Ok(stats)
 }
 
-/// In-memory variant exposed for unit tests. Applies every pass
-/// unconditionally — each is a no-op when its pattern is absent.
-pub fn patch_llvm_ir(text: &str) -> (String, PatchStats) {
+/// In-memory variant exposed for unit tests. Applies every
+/// always-on pass unconditionally — each is a no-op when its
+/// pattern is absent. The `init_undef_allocas` pass only runs when
+/// the flag is set.
+pub fn patch_llvm_ir(text: &str, init_undef_allocas: bool) -> (String, PatchStats) {
     let mut stats = PatchStats::default();
     let (out, n) = eh_globals::strip_msvc_eh_globals(text);
     stats.eh_globals_stripped = n;
@@ -81,6 +88,13 @@ pub fn patch_llvm_ir(text: &str) -> (String, PatchStats) {
     stats.nsw_nuw_stripped = n;
     let (out, n) = expand_uadd_sat_intrinsics(&out);
     stats.sat_intrinsics_expanded = n;
+    let out = if init_undef_allocas {
+        let (o, n) = zero_undef_allocas(&out);
+        stats.allocas_zeroed = n;
+        o
+    } else {
+        out
+    };
     (out, stats)
 }
 
@@ -265,6 +279,73 @@ fn extract_llvm_operand<'a>(s: &'a str, expected_ty: &str) -> Option<&'a str> {
     Some(rest)
 }
 
+// ── Pass 5: zero-initialise uninitialized allocas ──────────────
+
+/// Pass 5 (opt-in): insert `store <ty> zeroinitializer` after every
+/// static `alloca` so Crucible never loads `undef` from an
+/// uninitialized stack slot. See the module-level docs for
+/// soundness caveats.
+fn zero_undef_allocas(text: &str) -> (String, usize) {
+    let mut count = 0;
+    let mut buf = String::with_capacity(text.len() + text.len() / 8);
+    for line in text.split_inclusive('\n') {
+        buf.push_str(line);
+        if let Some(store) = try_zero_alloca(line) {
+            buf.push_str(&store);
+            count += 1;
+        }
+    }
+    (buf, count)
+}
+
+/// If `line` is a static `alloca`, return a `store zeroinitializer`
+/// line to insert immediately after it. Returns `None` for
+/// non-alloca lines or dynamic allocas (those with a count operand).
+fn try_zero_alloca(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    // Match: %<name> = alloca <type>[, align <N>]
+    let rest = trimmed.strip_prefix('%')?;
+    let eq_pos = rest.find(" = alloca ")?;
+    let name = &rest[..eq_pos];
+    let after_alloca = &rest[eq_pos + " = alloca ".len()..];
+
+    // Split off the optional ", align N" suffix.
+    let (alloca_type, align) = if let Some(ap) = after_alloca.rfind(", align ") {
+        let align_digits = after_alloca[ap + ", align ".len()..].trim();
+        let a: u32 = align_digits.parse().ok()?;
+        (after_alloca[..ap].trim(), a)
+    } else {
+        (after_alloca.trim(), 1u32)
+    };
+
+    // Skip dynamic allocas: a comma at bracket-depth 0 inside the
+    // type portion means there is an extra count operand.
+    if has_unbracketed_comma(alloca_type) {
+        return None;
+    }
+
+    let lead = &line[..line.len() - line.trim_start().len()];
+    let nl = if line.ends_with('\n') { "\n" } else { "" };
+    Some(format!(
+        "{lead}store {alloca_type} zeroinitializer, ptr %{name}, align {align}{nl}"
+    ))
+}
+
+/// Returns `true` if `s` contains a `,` that is not nested inside
+/// `{}`, `[]`, `<>`, or `()`.
+fn has_unbracketed_comma(s: &str) -> bool {
+    let mut depth = 0i32;
+    for c in s.chars() {
+        match c {
+            '{' | '[' | '<' | '(' => depth += 1,
+            '}' | ']' | '>' | ')' => depth = (depth - 1).max(0),
+            ',' if depth == 0 => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -322,5 +403,83 @@ mod tests {
         let (out, n) = expand_uadd_sat_intrinsics(input);
         assert_eq!(n, 0);
         assert_eq!(out, input);
+    }
+
+    // ── init-undef-allocas pass ────────────────────────────
+
+    #[test]
+    fn zeros_simple_alloca() {
+        let input = "  %5 = alloca %\"struct.std::in_place_t\", align 1\n";
+        let (out, n) = zero_undef_allocas(input);
+        assert_eq!(n, 1);
+        assert!(
+            out.contains("store %\"struct.std::in_place_t\" zeroinitializer, ptr %5, align 1"),
+            "got: {out}"
+        );
+    }
+
+    #[test]
+    fn zeros_primitive_alloca() {
+        let input = "  %retval = alloca i32, align 4\n";
+        let (out, n) = zero_undef_allocas(input);
+        assert_eq!(n, 1);
+        assert!(
+            out.contains("  store i32 zeroinitializer, ptr %retval, align 4"),
+            "got: {out}"
+        );
+    }
+
+    #[test]
+    fn zeros_array_alloca() {
+        let input = "  %arr = alloca [10 x i32], align 16\n";
+        let (out, n) = zero_undef_allocas(input);
+        assert_eq!(n, 1);
+        assert!(
+            out.contains("store [10 x i32] zeroinitializer, ptr %arr, align 16"),
+            "got: {out}"
+        );
+    }
+
+    #[test]
+    fn skips_dynamic_alloca() {
+        let input = "  %p = alloca i32, i32 %n, align 4\n";
+        let (out, n) = zero_undef_allocas(input);
+        assert_eq!(n, 0);
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn skips_non_alloca_lines() {
+        let input = "  %x = add i32 %a, %b\n  store i32 0, ptr %y\n";
+        let (out, n) = zero_undef_allocas(input);
+        assert_eq!(n, 0);
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn alloca_no_align() {
+        let input = "  %x = alloca i8\n";
+        let (out, n) = zero_undef_allocas(input);
+        assert_eq!(n, 1);
+        assert!(
+            out.contains("store i8 zeroinitializer, ptr %x, align 1"),
+            "got: {out}"
+        );
+    }
+
+    #[test]
+    fn pass_disabled_by_flag() {
+        let input = "  %x = alloca i32, align 4\n";
+        let (out, stats) = patch_llvm_ir(input, false);
+        assert_eq!(stats.allocas_zeroed, 0);
+        assert!(!out.contains("zeroinitializer"));
+    }
+
+    #[test]
+    fn pass_enabled_by_flag() {
+        let input = "  %x = alloca i32, align 4\n";
+        let (out, stats) = patch_llvm_ir(input, true);
+        assert_eq!(stats.allocas_zeroed, 1);
+        assert!(out.contains("zeroinitializer"));
     }
 }

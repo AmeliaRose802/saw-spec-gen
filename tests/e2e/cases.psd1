@@ -238,6 +238,12 @@
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/unique_ptr_deref_havoc'; File = 'add_one_gap_disproved.cpp';  Expected = 'DISPROVED' }
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/unique_ptr_deref_havoc'; File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
 
+        # ── sret pre-state slice (09-type-coverage) ─────────────────────────────
+        # Returns a 16-byte struct via sret. Cryptol model has a trailing
+        # [12][8] pre-state param (body field at offset 4) — saw-spec-gen must
+        # emit take`{12}/drop`{4} slice, not the full buffer.
+        @{ Tag = 'sret_slice'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-type-coverage/sret_slice'; File = 'stamp_header_verified.cpp'; Expected = 'VERIFIED'; Cry = 'stamp_header_spec.cry'; CryptolFn = 'stamp_header_spec'; Function = 'stamp_header' }
+
         # ── Box allocator: currently UNKNOWN due to MIR allocator model gap
         # box_allocator currently produces UNKNOWN under the default pipeline
         # (Box::new path the front-end can't model). Tracked separately; not

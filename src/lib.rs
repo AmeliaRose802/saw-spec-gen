@@ -26,7 +26,7 @@ pub mod transform;
 // `crate::parsers::clang_ast::parse_ast(...)`. The folder grouping is
 // a layout-only change.
 pub use emit::{cryptol_emit, rust_trait_emit, saw_emit};
-pub use parsers::{clang_ast, llvm_ir, mir_json};
+pub use parsers::{clang_ast, cryptol_sig, llvm_ir, mir_json};
 pub use transform::{
     alias_fallbacks, alias_fallbacks_ir, patch_llvm_ir, spec_rewrite, type_resolve,
 };

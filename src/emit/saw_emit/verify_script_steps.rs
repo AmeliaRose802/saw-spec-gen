@@ -9,6 +9,7 @@ use super::cryptol_bridge::{cryptol_arg_for, cryptol_return_for};
 use super::names::{sanitize_name, spec_safe_id, stub_function_name};
 use super::overrides::{container_layout_for, emit_container_this};
 use super::stubs::AssembledStubs;
+use super::verify_script::SretPrestate;
 use crate::clang_ast::{ClassConstructor, InterfaceMethod};
 use crate::constraints::*;
 use std::collections::HashSet;
@@ -196,6 +197,7 @@ pub(super) fn emit_equiv_spec_body(
     interface_classes: &HashSet<String>,
     interface_of: &dyn Fn(&TypeInfo) -> Option<String>,
     all_globals: &[GlobalVarInfo],
+    sret_prestate: Option<&SretPrestate>,
 ) -> (Vec<String>, Vec<String>) {
     out.push_str(&format!(
         "// Step {step}: Equivalence spec — C++ {function_name} == Cryptol {cryptol_fn}\n",
@@ -286,11 +288,14 @@ pub(super) fn emit_equiv_spec_body(
             "    result_ptr <- llvm_alloc ({});\n",
             target_spec.return_constraint.saw_type,
         ));
-        if target_spec.return_constraint.sret_prestate {
+        if target_spec.return_constraint.sret_prestate && sret_prestate.is_none() {
             // The Cryptol model takes the sret buffer's pre-call contents
             // as a trailing parameter. Allocate a fresh symbolic value,
             // bind it to the buffer before llvm_execute_func, and append
             // it to the Cryptol argument list.
+            //
+            // Skipped when the caller supplies a SretPrestate struct —
+            // that path (below) supersedes this one with take/drop slicing.
             out.push_str(&format!(
                 "    result_pre <- llvm_fresh_var \"result_pre\" ({});\n",
                 target_spec.return_constraint.saw_type,
@@ -309,6 +314,41 @@ pub(super) fn emit_equiv_spec_body(
             0
         };
         execute_args.insert(insert_idx, "result_ptr".to_string());
+
+        // sret prestate threading: when the Cryptol model has an extra
+        // trailing [K][8] parameter, it expects (a slice of) the pre-call
+        // bytes of the sret buffer so the post-state can refer to them
+        // (e.g. for std::optional where the payload is left uninitialised
+        // on the nullopt path).
+        if let Some(pre) = sret_prestate {
+            // When slicing with take/drop, preBytes must be a byte array
+            // so Cryptol can treat it as [N][8]. When passing the full
+            // buffer, the original struct alias works fine.
+            let pre_saw_type = if pre.drop_bytes > 0 && pre.buf_size > 0 {
+                format!("llvm_array {} (llvm_int 8)", pre.buf_size)
+            } else {
+                target_spec.return_constraint.saw_type.clone()
+            };
+            out.push_str(&format!(
+                "    preBytes <- llvm_fresh_var \"preBytes\" ({});\n",
+                pre_saw_type,
+            ));
+            out.push_str("    llvm_points_to result_ptr (llvm_term preBytes);\n");
+            #[allow(clippy::unnecessary_map_or)]
+            if pre.drop_bytes == 0
+                && parse_array_len(&target_spec.return_constraint.saw_type)
+                    .map_or(true, |n| pre.take_bytes >= n)
+            {
+                // Full buffer — pass preBytes directly.
+                cryptol_args.push("preBytes".to_string());
+            } else {
+                // Slice — extract the field sub-range for Cryptol.
+                cryptol_args.push(format!(
+                    "(take`{{{}}} (drop`{{{}}} preBytes))",
+                    pre.take_bytes, pre.drop_bytes,
+                ));
+            }
+        }
     }
 
     out.push('\n');
@@ -465,6 +505,13 @@ pub(super) fn emit_verify_step(
     out.push_str(&format!(
         "print \"=== VERIFIED: {function_name} == {cryptol_fn} ===\";\n",
     ));
+}
+
+/// Extract `N` from `llvm_array N (llvm_int 8)`.
+fn parse_array_len(saw_type: &str) -> Option<usize> {
+    let s = saw_type.strip_prefix("llvm_array ")?;
+    let end = s.find(|c: char| !c.is_ascii_digit())?;
+    s[..end].parse().ok()
 }
 
 #[cfg(test)]

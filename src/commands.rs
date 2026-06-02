@@ -350,20 +350,30 @@ pub fn filter_ast(input: PathBuf, output: PathBuf, keep: Vec<PathBuf>) -> Result
     Ok(())
 }
 
-pub fn patch_llvm_ir_cmd(input: PathBuf, output: PathBuf) -> Result<()> {
+pub fn patch_llvm_ir_cmd(input: PathBuf, output: PathBuf, init_undef_allocas: bool) -> Result<()> {
     eprintln!(
         "Patching LLVM IR: {} -> {}",
         input.display(),
         output.display(),
     );
-    let stats = patch_llvm_ir::patch_llvm_ir_file(&input, &output)?;
+    let stats = patch_llvm_ir::patch_llvm_ir_file(&input, &output, init_undef_allocas)?;
     eprintln!(
-        "  EH globals stripped: {}, Itanium typeinfo stripped: {}, poison→undef: {}, nsw/nuw stripped: {}, sat intrinsics expanded: {}",
+        "  EH globals stripped: {}, Itanium typeinfo stripped: {}, \
+         poison→undef: {}, nsw/nuw stripped: {}, \
+         sat intrinsics expanded: {}, allocas zeroed: {}",
         stats.eh_globals_stripped,
         stats.itanium_typeinfo_stripped,
         stats.poison_replaced,
         stats.nsw_nuw_stripped,
         stats.sat_intrinsics_expanded,
+        stats.allocas_zeroed,
     );
+    if stats.allocas_zeroed > 0 {
+        eprintln!(
+            "  ⚠ init-undef-allocas narrowed symbolic behavior on {} stack slot(s).\n    \
+             Do NOT enable when proving UB-freedom or absence-of-info-leak.",
+            stats.allocas_zeroed,
+        );
+    }
     Ok(())
 }

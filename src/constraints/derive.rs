@@ -362,6 +362,41 @@ fn derive_return_constraint(ty: &TypeInfo) -> ReturnConstraint {
     }
 }
 
+/// Override the AST-derived sret classification using the LLVM IR
+/// signature.  On MSVC x64, small trivially-copyable aggregates
+/// (≤ 8 bytes) are returned in a register — the IR has a scalar
+/// return type (`iN`) and no `sret` parameter.  The AST heuristic
+/// (`TypeInfo::Struct → sret`) can't see the ABI lowering, so this
+/// function corrects it when IR data is available.
+pub fn correct_sret_from_ir(spec: &mut SpecConstraint, ir_funcs: &[FunctionInfo]) {
+    if !spec.return_constraint.is_sret || ir_funcs.is_empty() {
+        return;
+    }
+    let Some(mangled) = &spec.mangled_name else {
+        return;
+    };
+    // LLVM IR quotes names with special characters (e.g.
+    // `@"?foo@@YAUHX@@XZ"`); strip the surrounding quotes.
+    let ir_fn = ir_funcs
+        .iter()
+        .find(|f| f.name.trim_matches('"') == mangled);
+    let Some(ir_fn) = ir_fn else { return };
+
+    // After `extract_sret` in the IR parser, a genuine sret function
+    // has its return type promoted to the inner struct.  A register-
+    // return function keeps the original scalar type.  If the IR
+    // return is a scalar (not void / struct / large opaque), the
+    // aggregate fits in a register.
+    let is_register = matches!(
+        ir_fn.return_type,
+        TypeInfo::Bool | TypeInfo::SignedInt(_) | TypeInfo::UnsignedInt(_) | TypeInfo::Enum { .. }
+    );
+    if is_register {
+        spec.return_constraint.is_sret = false;
+        spec.return_constraint.saw_type = type_to_saw(&ir_fn.return_type);
+    }
+}
+
 /// Heuristic: scan the function's other parameter names for one that
 /// looks like a length companion for the given pointer parameter.
 ///

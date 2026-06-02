@@ -35,13 +35,8 @@ pub struct CrySig {
 }
 
 impl CryType {
-    /// True if this is `[N][8]` for some N — i.e. a byte-array type
-    /// used for sret prestate buffers.
-    pub fn is_byte_array(&self) -> bool {
-        matches!(self, CryType::SeqBitvector { elem_bits: 8, .. })
-    }
-
-    /// If `[N][8]`, return N.
+    /// If `[N][8]`, return N — i.e. a byte-array type used for sret
+    /// prestate buffers.
     pub fn byte_array_len(&self) -> Option<usize> {
         match self {
             CryType::SeqBitvector { len, elem_bits: 8 } => Some(*len),
@@ -67,7 +62,7 @@ pub fn detect_prestate(
     } else if cry_arity == cpp_user_arg_count + 1 {
         // Candidate for prestate: extra trailing param.
         match sig.params.last() {
-            Some(ty) if ty.is_byte_array() => Ok(ty.byte_array_len()),
+            Some(ty) if ty.byte_array_len().is_some() => Ok(ty.byte_array_len()),
             Some(ty) => Err(ArityError::TrailingTypeMismatch {
                 cry_arity,
                 cpp_arity: cpp_user_arg_count,
