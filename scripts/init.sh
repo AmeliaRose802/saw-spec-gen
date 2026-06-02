@@ -69,6 +69,8 @@ SAW_BUILD_JOBS="${SAW_BUILD_JOBS:-}"
 # auto-installs missing system C dev libraries (libgmp-dev, …) when
 # SAW_SOURCE=fork or SAW_SOURCE=upstream. Useful in CI / unattended runs.
 SKIP_SUDO_INSTALL="${SKIP_SUDO_INSTALL:-0}"
+EXCEPTION_LOWER_REF="${EXCEPTION_LOWER_REF:-main}"
+SKIP_EXCEPTION_LOWER="${SKIP_EXCEPTION_LOWER:-0}"
 FORCE="${FORCE:-0}"
 
 # Resolve repo root regardless of where the script is invoked from.
@@ -326,6 +328,28 @@ echo "  solvers: $SOLVER_DIR"
 . "${SCRIPT_DIR}/init-saw-source.sh"
 
 
+# ── Step 4.5: exception-lower pass (optional) ─────────────────────────
+step 'Step 4.5: exception-lower pass (optional)'
+EXCEPTION_LOWER=""
+if [[ "$SKIP_EXCEPTION_LOWER" == "1" ]]; then
+    echo '  skipped (SKIP_EXCEPTION_LOWER=1)'
+else
+    # Delegate to the shared installer; verify.ps1 invokes the same
+    # script on first need so the install path stays in one place.
+    install_script="${SCRIPT_DIR}/install-exception-lower.sh"
+    install_env=(INSTALL_ROOT="$INSTALL_ROOT"
+                 EXCEPTION_LOWER_REF="$EXCEPTION_LOWER_REF"
+                 LLVM_BIN="$LLVM_BIN")
+    [[ "$FORCE" == "1" ]] && install_env+=(FORCE=1)
+    if EXCEPTION_LOWER="$(env "${install_env[@]}" bash "$install_script")"; then
+        :
+    else
+        echo '  (verify.ps1 will fall back to text-only MSVC EH stripping)'
+        EXCEPTION_LOWER=""
+    fi
+fi
+
+
 # ── Step 5: PowerShell ─────────────────────────────────────────────────
 # The verify scripts (verify.ps1, verify-rust.ps1, verify-equiv.ps1) and
 # the discover-tools layer are written in PowerShell so they can share
@@ -404,6 +428,7 @@ export SAW_SPEC_GEN_SAW="$SAW_EXE"
 export SAW_SPEC_GEN_SOLVER_BIN="$SOLVER_DIR"
 export SAW_SPEC_GEN_PWSH="$PWSH_FOUND"
 export SAW_SPEC_GEN_RUSTC="$(command -v rustc)"
+${EXCEPTION_LOWER:+export SAW_SPEC_GEN_EXCEPTION_LOWER="$EXCEPTION_LOWER"}
 case ":\${PATH}:" in
     *":\${SAW_SPEC_GEN_SOLVER_BIN}:"*) ;;
     *) export PATH="\${SAW_SPEC_GEN_SOLVER_BIN}:\${PATH}" ;;
@@ -445,6 +470,7 @@ cat > "$ENV_PS1" <<EOF
 \$env:SAW_SPEC_GEN_SOLVER_BIN  = '$SOLVER_DIR'
 \$env:SAW_SPEC_GEN_PWSH        = '$PWSH_FOUND'
 \$env:SAW_SPEC_GEN_RUSTC       = '$(command -v rustc)'
+${EXCEPTION_LOWER:+\$env:SAW_SPEC_GEN_EXCEPTION_LOWER = \'$EXCEPTION_LOWER\'}
 EOF
 echo "  wrote: $ENV_PS1"
 
@@ -459,6 +485,12 @@ for tool in "$LLVM_BIN/clang" "$LLVM_BIN/llvm-as" "$SAW_EXE" "$SOLVER_DIR/z3" "$
         ok=0
     fi
 done
+# ExceptionLower is optional; report status but don't fail.
+if [[ -n "$EXCEPTION_LOWER" && -x "$EXCEPTION_LOWER" ]]; then
+    printf '  %-45s OK\n' "$EXCEPTION_LOWER"
+else
+    printf '  %-45s (try/catch demos will be unverifiable)\n' 'exception-lower skipped'
+fi
 [[ "$ok" == "1" ]] || exit 1
 
 cat <<EOF

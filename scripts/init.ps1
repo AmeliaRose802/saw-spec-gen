@@ -29,6 +29,17 @@
     Which LLVM tarball to install when clang isn't found on Windows
     (default: 20.1.6).
 
+.PARAMETER ExceptionLowerRef
+    Git ref of https://github.com/AmeliaRose802/llvm-exception-lower to
+    clone + build (default: main). The pass is optional — verify.ps1
+    falls back to text-only MSVC EH stripping when it isn't present —
+    but it is required for any demo that uses `try` / `catch`.
+
+.PARAMETER SkipExceptionLower
+    Don't try to clone or build the exception-lowering pass. Useful on
+    machines where cmake or a C++ host compiler isn't available; the
+    rest of the install still completes.
+
 .PARAMETER Force
     Re-download / rebuild even if everything is already in place.
 #>
@@ -37,6 +48,8 @@
 param(
     [string]$SawVersion = '1.5',
     [string]$LlvmVersion = '20.1.6',
+    [string]$ExceptionLowerRef = 'main',
+    [switch]$SkipExceptionLower,
     [switch]$Force
 )
 
@@ -196,7 +209,29 @@ if (-not (Test-Path -LiteralPath $sawExe)) {
 }
 Write-Host "  saw:     $sawExe" -ForegroundColor Green
 Write-Host "  solvers: $solverDir" -ForegroundColor Green
-
+# ── Step 4.5: exception-lower pass (optional) ──────────────────────────
+Write-Step 'Step 4.5: exception-lower pass (optional)'
+$exceptionLower = $null
+if ($SkipExceptionLower) {
+    Write-Host '  skipped (--SkipExceptionLower set)' -ForegroundColor Yellow
+} else {
+    # Delegate to the shared installer; verify.ps1 invokes the same
+    # script on first need so the install path stays in one place.
+    $installScript = Join-Path $ScriptRoot 'install-exception-lower.ps1'
+    $installArgs = @{
+        InstallRoot = $installRoot
+        Ref         = $ExceptionLowerRef
+        LlvmBin     = $llvmBin
+    }
+    if ($Force) { $installArgs['Force'] = $true }
+    try {
+        $exceptionLower = & $installScript @installArgs
+    } catch {
+        Write-Host "  exception-lower install failed: $_" -ForegroundColor Yellow
+        Write-Host '  (verify.ps1 will fall back to text-only MSVC EH stripping)' -ForegroundColor Yellow
+        $exceptionLower = $null
+    }
+}
 # ── Step 5: write env.ps1 ─────────────────────────────────────────────────
 Write-Step 'Step 5: write env file'
 $envFile = Join-Path $installRoot 'env.ps1'
@@ -209,6 +244,9 @@ $envContent = @"
 `$env:SAW_SPEC_GEN_SAW         = '$sawExe'
 `$env:SAW_SPEC_GEN_SOLVER_BIN  = '$solverDir'
 "@
+if ($exceptionLower) {
+    $envContent += "`n`$env:SAW_SPEC_GEN_EXCEPTION_LOWER = '$exceptionLower'`n"
+}
 Set-Content -LiteralPath $envFile -Value $envContent -Encoding utf8
 Write-Host "  wrote: $envFile" -ForegroundColor Green
 
@@ -223,6 +261,12 @@ foreach ($k in @('Clang', 'LlvmAs', 'Saw', 'SolverDir', 'SpecGen')) {
         Write-Host ("  {0,-10} MISSING" -f $k) -ForegroundColor Red
         $ok = $false
     }
+}
+# ExceptionLower is optional; report status but don't fail the install.
+if ($check['ExceptionLower']) {
+    Write-Host ("  {0,-14} OK   {1}" -f 'ExceptionLower', $check['ExceptionLower']) -ForegroundColor Green
+} else {
+    Write-Host ("  {0,-14} skipped (try/catch demos will be unverifiable)" -f 'ExceptionLower') -ForegroundColor DarkYellow
 }
 if (-not $ok) { exit 1 }
 
