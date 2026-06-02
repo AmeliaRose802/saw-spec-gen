@@ -66,6 +66,7 @@ mod tests {
                 value_constraints: vec![],
                 is_sret: false,
                 returns_pointer: false,
+                sret_prestate: false,
             },
             can_throw: false,
             is_virtual: false,

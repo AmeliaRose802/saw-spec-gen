@@ -358,6 +358,7 @@ fn derive_return_constraint(ty: &TypeInfo) -> ReturnConstraint {
         value_constraints,
         is_sret,
         returns_pointer,
+        sret_prestate: false,
     }
 }
 

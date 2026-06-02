@@ -197,4 +197,9 @@ pub struct ReturnConstraint {
     /// True when the function returns a pointer (e.g. operator new → void*).
     /// The spec should use llvm_alloc + llvm_return for the return value.
     pub returns_pointer: bool,
+    /// When true, the Cryptol model expects the full sret buffer's
+    /// pre-call contents as an additional trailing parameter. Detected
+    /// automatically when the Cryptol function's arity exceeds the
+    /// source-level parameter count by one and `is_sret` is true.
+    pub sret_prestate: bool,
 }
