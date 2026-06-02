@@ -66,6 +66,10 @@ pub fn type_to_saw(ty: &TypeInfo) -> String {
 /// single opaque byte (`llvm_int 8`) and log a warning so the
 /// generated spec still parses while flagging the gap.
 pub fn pointee_saw_type(ty: &TypeInfo) -> String {
+    // void* is a normal opaque-byte pointer — silently lower to i8.
+    if matches!(ty, TypeInfo::Void) {
+        return "llvm_int 8".into();
+    }
     let lowered = type_to_saw(ty);
     if lowered.starts_with("//") {
         eprintln!(
