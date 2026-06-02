@@ -26,6 +26,7 @@ on:
       - 'Dockerfile'
       - 'scripts/init.sh'
       - 'scripts/init-saw-source.sh'
+      - 'scripts/install-exception-lower.sh'
       - '.github/workflows/publish-ci-image.yml'
   workflow_dispatch:
 

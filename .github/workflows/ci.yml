@@ -111,6 +111,12 @@ jobs:
     - name: Build saw-spec-gen
       run: cargo build --release
 
+    # The Docker image may have an older exception-lower baked in.
+    # Force-reinstall from the latest-main release so the C++ throw/catch
+    # tests use the current build of the pass.
+    - name: Update exception-lower pass
+      run: FORCE=1 bash scripts/install-exception-lower.sh
+
     - name: Run end-to-end test suite
       # discover-tools.ps1 auto-detects /root/.saw-spec-gen/{saw,llvm}/bin
       # via the standard search paths — no env.ps1 or PATH munging needed.
@@ -160,7 +166,7 @@ jobs:
       uses: actions/cache/restore@v4
       with:
         path: ~/.saw-spec-gen
-        key: windows-saw1.5-llvm20.1.6-${{ hashFiles('scripts/init.ps1') }}
+        key: windows-saw1.5-llvm20.1.6-${{ hashFiles('scripts/init.ps1', 'scripts/install-exception-lower.ps1') }}
 
     - name: Install SAW, LLVM; build saw-spec-gen
       shell: bash
@@ -170,6 +176,13 @@ jobs:
         # action) so no skip flag is needed.
         SKIP_RUST_INSTALL: "1"
       run: pwsh -NoLogo -NoProfile -File scripts/init.ps1
+
+    # When the toolchain cache hits, the baked-in exception-lower may
+    # be stale. Force-reinstall so the tag in install-exception-lower.ps1
+    # is always honoured.
+    - name: Update exception-lower pass
+      shell: pwsh
+      run: pwsh -NoLogo -NoProfile -File scripts/install-exception-lower.ps1 -Force
 
     - name: Save SAW + LLVM toolchain cache
       if: always() && steps.restore-tools.outputs.cache-hit != 'true'

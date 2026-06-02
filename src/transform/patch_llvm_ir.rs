@@ -32,10 +32,12 @@
 //! disassembled `.ll` so callers don't need an LLVM library
 //! linked. The expected wrapper flow is
 //!
+//! ```text
 //!     clang -S -emit-llvm  ...      # producing in.ll
 //!     saw-spec-gen patch-llvm-ir --input in.ll --output out.ll \
 //!         --strip-msvc-eh --poison-to-undef
 //!     llvm-as out.ll -o module.bc
+//! ```
 //!
 //! All edits are line-scoped: each function below walks `text` line
 //! by line so multi-line regex pitfalls (greedy `[^\}]*` running
@@ -44,10 +46,13 @@
 use std::fs;
 use std::path::Path;
 
+use super::eh_globals;
+
 /// Per-pass counters reported back to the caller.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct PatchStats {
     pub eh_globals_stripped: usize,
+    pub itanium_typeinfo_stripped: usize,
     pub poison_replaced: usize,
     pub nsw_nuw_stripped: usize,
     pub sat_intrinsics_expanded: usize,
@@ -66,8 +71,10 @@ pub fn patch_llvm_ir_file(input: &Path, output: &Path) -> anyhow::Result<PatchSt
 /// unconditionally — each is a no-op when its pattern is absent.
 pub fn patch_llvm_ir(text: &str) -> (String, PatchStats) {
     let mut stats = PatchStats::default();
-    let (out, n) = strip_msvc_eh_globals(text);
+    let (out, n) = eh_globals::strip_msvc_eh_globals(text);
     stats.eh_globals_stripped = n;
+    let (out, n) = eh_globals::strip_itanium_typeinfo_globals(&out);
+    stats.itanium_typeinfo_stripped = n;
     let (out, n) = replace_poison_with_undef(&out);
     stats.poison_replaced = n;
     let (out, n) = strip_nsw_nuw_flags(&out);
@@ -75,110 +82,6 @@ pub fn patch_llvm_ir(text: &str) -> (String, PatchStats) {
     let (out, n) = expand_uadd_sat_intrinsics(&out);
     stats.sat_intrinsics_expanded = n;
     (out, stats)
-}
-
-/// Pass 1: replace MSVC EH-metadata global *definitions* with
-/// `external constant` *declarations*.
-///
-/// We identify a global as MSVC EH metadata when both:
-///
-/// 1. its name matches the MSVC scheme for throw-info / catchable-type
-///    chains (`_TI*`, `_CTA*`, `_CT??_R0*`), and
-/// 2. the line places it in `section ".xdata"` (the MSVC exception
-///    data section).
-///
-/// Requiring (2) means a stray user global called `_TIstats` (vanishingly
-/// unlikely but legal) is not affected.
-///
-/// The output declaration preserves the original LLVM type so any
-/// downstream use that takes the global's address (e.g. the
-/// `_CxxThrowException` call) still type-checks.
-fn strip_msvc_eh_globals(text: &str) -> (String, usize) {
-    let mut count = 0;
-    let mut buf = String::with_capacity(text.len());
-    for line in text.split_inclusive('\n') {
-        if is_msvc_eh_global(line) {
-            if let Some(decl) = rewrite_eh_global(line) {
-                buf.push_str(&decl);
-                count += 1;
-                continue;
-            }
-        }
-        buf.push_str(line);
-    }
-    (buf, count)
-}
-
-/// True iff `line` looks like a top-level MSVC EH-metadata global
-/// definition. The check is intentionally conservative: it requires
-/// both an EH-metadata name *and* the `section ".xdata"` clause.
-fn is_msvc_eh_global(line: &str) -> bool {
-    let trimmed = line.trim_start();
-    if !trimmed.starts_with('@') {
-        return false;
-    }
-    if !trimmed.contains("section \".xdata\"") {
-        return false;
-    }
-    eh_global_name(trimmed).is_some()
-}
-
-/// Extract the global's name (including the leading `@`) if it
-/// matches an MSVC EH-metadata scheme. Returns `None` otherwise.
-fn eh_global_name(line: &str) -> Option<&str> {
-    // Two forms: `@"_CT??_R0H@84"` (quoted, contains `??`) and
-    // `@_TI1H` / `@_CTA1H` (unquoted, ASCII identifier).
-    let rest = line.strip_prefix('@')?;
-    let (name_with_at, _) = if let Some(rest) = rest.strip_prefix('"') {
-        // Quoted name: read until the closing quote.
-        let end = rest.find('"')?;
-        let full = &line[..1 + 1 + end + 1]; // '@"' + body + '"'
-        (full, &line[full.len()..])
-    } else {
-        // Unquoted: identifier characters only.
-        let end = rest
-            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '.'))
-            .unwrap_or(rest.len());
-        let full = &line[..1 + end];
-        (full, &line[full.len()..])
-    };
-    let inner = name_with_at.trim_start_matches('@').trim_matches('"');
-    if inner.starts_with("_CT??_R0") || inner.starts_with("_TI") || inner.starts_with("_CTA") {
-        Some(name_with_at)
-    } else {
-        None
-    }
-}
-
-/// Rewrite a single EH-metadata global definition line as an
-/// `external constant <type>` declaration, preserving the LLVM
-/// type. Returns `None` if the line doesn't parse as expected
-/// (in which case the caller should leave it untouched).
-fn rewrite_eh_global(line: &str) -> Option<String> {
-    let name = eh_global_name(line.trim_start())?;
-    // The type sits between the linkage/attribute words and the
-    // `{` that starts the initializer. We do a deterministic walk:
-    //   * find " constant " (with the leading space so we don't
-    //     match a substring like `unnamed_addrconstant`),
-    //   * the type is from there up to the `{` that opens the
-    //     initializer.
-    // If the line uses `global` (non-constant) instead of
-    // `constant`, we still treat it as constant in the output --
-    // the EH metadata is read-only.
-    let const_idx = line
-        .find(" constant ")
-        .map(|i| i + " constant ".len())
-        .or_else(|| line.find(" global ").map(|i| i + " global ".len()))?;
-    let brace_idx = line[const_idx..].find('{')?;
-    let ty = line[const_idx..const_idx + brace_idx].trim();
-    if ty.is_empty() {
-        return None;
-    }
-    // Preserve any leading whitespace from the original line so
-    // diffs stay clean.
-    let lead_ws_end = line.len() - line.trim_start().len();
-    let leading = &line[..lead_ws_end];
-    Some(format!("{leading}{name} = external constant {ty}\n"))
 }
 
 /// Pass 2: replace the `poison` token with `undef`. We only match
@@ -284,11 +187,13 @@ fn strip_nsw_nuw_flags(text: &str) -> (String, usize) {
 /// pattern and lowers it to a single `@llvm.uadd.sat.iN` call.
 /// SAW doesn't support this intrinsic, so we expand it back:
 ///
+/// ```text
 ///     %r = call iN @llvm.uadd.sat.iN(iN %a, iN %b)
 ///   →
 ///     %__sat_sum_r = add iN %a, %b
 ///     %__sat_ov_r  = icmp ult iN %__sat_sum_r, %a
 ///     %r           = select i1 %__sat_ov_r, iN -1, iN %__sat_sum_r
+/// ```
 fn expand_uadd_sat_intrinsics(text: &str) -> (String, usize) {
     let mut count = 0;
     let mut buf = String::with_capacity(text.len());
@@ -363,49 +268,6 @@ fn extract_llvm_operand<'a>(s: &'a str, expected_ty: &str) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn strips_throwinfo_global() {
-        let input = "\
-@_TI1H = linkonce_odr unnamed_addr constant %eh.ThrowInfo { i32 0, i32 0, i32 0, i32 trunc (i64 sub nuw nsw (i64 ptrtoint (ptr @_CTA1H to i64), i64 ptrtoint (ptr @__ImageBase to i64)) to i32) }, section \".xdata\", comdat
-";
-        let (out, n) = strip_msvc_eh_globals(input);
-        assert_eq!(n, 1);
-        assert!(
-            out.contains("@_TI1H = external constant %eh.ThrowInfo"),
-            "got: {out}"
-        );
-        assert!(!out.contains("ptrtoint"));
-    }
-
-    #[test]
-    fn strips_quoted_catchabletype_global() {
-        let input = "@\"_CT??_R0H@84\" = linkonce_odr unnamed_addr constant %eh.CatchableType { i32 1, i32 trunc (i64 sub nuw nsw (i64 ptrtoint (ptr @\"??_R0H@8\" to i64), i64 ptrtoint (ptr @__ImageBase to i64)) to i32), i32 0, i32 -1, i32 0, i32 4, i32 0 }, section \".xdata\", comdat\n";
-        let (out, n) = strip_msvc_eh_globals(input);
-        assert_eq!(n, 1);
-        assert!(
-            out.contains("@\"_CT??_R0H@84\" = external constant %eh.CatchableType"),
-            "got: {out}"
-        );
-    }
-
-    #[test]
-    fn leaves_non_xdata_global_alone() {
-        // The RTTI TypeDescriptor (`@"??_R0H@8"`) lives in the
-        // default section -- we must NOT rewrite it.
-        let input = "@\"??_R0H@8\" = linkonce_odr global %rtti.TypeDescriptor2 { ptr @\"??_7type_info@@6B@\", ptr null, [3 x i8] c\".H\\00\" }, comdat\n";
-        let (out, n) = strip_msvc_eh_globals(input);
-        assert_eq!(n, 0);
-        assert_eq!(out, input);
-    }
-
-    #[test]
-    fn leaves_user_globals_alone() {
-        let input = "@my_global = linkonce_odr constant i32 42\n";
-        let (out, n) = strip_msvc_eh_globals(input);
-        assert_eq!(n, 0);
-        assert_eq!(out, input);
-    }
 
     #[test]
     fn replaces_poison_word() {

@@ -96,6 +96,11 @@ pub fn run(
         llvm_ir_path.is_some(),
     );
 
+    // If the LLVM IR contains exception-lower globals (@__exclow_error_*),
+    // inject them into the target spec so that SAW allocates them.
+    // (Deferred until after `all_globals` is built below — see the call
+    // to `inject_exclow_globals` further down.)
+
     let mut all_globals = clang_ast::extract_all_globals(&parsed_ast)?;
 
     // Augment with mutable globals discovered in the LLVM IR that the
@@ -115,6 +120,16 @@ pub fn run(
                 all_globals.extend(extra);
             }
         }
+    }
+
+    // Inject the exception-lower bookkeeping globals (@__exclow_error_*)
+    // with the right TypeInfo and pre-state init values. Must run after
+    // the AST + IR scans so the explicit `init_value: Some("0")` for the
+    // error flag isn't shadowed by a duplicate entry from
+    // `discover_ir_only_globals` (which would have `init_value: None`
+    // because it can't parse the LLVM `false` literal).
+    if let Some(ir_path) = llvm_ir_path {
+        crate::transform::eh_globals::inject_exclow_globals(&mut all_globals, ir_path);
     }
 
     let all_specs = constraints::derive_constraints(&all_functions)?;
