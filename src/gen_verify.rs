@@ -96,6 +96,10 @@ pub fn run(
         llvm_ir_path.is_some(),
     );
 
+    // Correct sret misclassification: small trivially-copyable structs
+    // on MSVC are returned in registers, not via sret pointer.
+    constraints::correct_sret_from_ir(&mut target_spec, &ir_funcs);
+
     // Detect sret pre-state threading from Cryptol arity.
     saw_emit::cryptol_bridge::detect_sret_prestate(&mut target_spec, cryptol_spec, cryptol_fn);
 
@@ -140,7 +144,10 @@ pub fn run(
         crate::transform::eh_globals::inject_exclow_globals(&mut all_globals, ir_path);
     }
 
-    let all_specs = constraints::derive_constraints(&all_functions)?;
+    let mut all_specs = constraints::derive_constraints(&all_functions)?;
+    for spec in &mut all_specs {
+        constraints::correct_sret_from_ir(spec, &ir_funcs);
+    }
 
     // Warn about interfaces referenced by fields but missing from the merged
     // AST.  These cause `extract_virtual_methods` to miss the interface,

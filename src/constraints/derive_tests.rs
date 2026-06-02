@@ -406,3 +406,97 @@ fn typed_pointer_param_is_unaffected_by_void_ptr_fix() {
     assert_eq!(param.alloc_type, AllocType::AllocReadonly);
     assert!(param.unchanged_after);
 }
+
+// ---- correct_sret_from_ir tests ----------------------------------------
+
+fn make_func(name: &str, mangled: &str, ret: TypeInfo) -> FunctionInfo {
+    FunctionInfo {
+        name: name.into(),
+        mangled_name: Some(mangled.into()),
+        params: vec![],
+        return_type: ret,
+        can_throw: false,
+        is_virtual: false,
+        has_body: true,
+        is_system: false,
+        called_functions: vec![],
+        referenced_globals: vec![],
+        annotations: vec![],
+    }
+}
+
+fn make_ir_func(quoted_name: &str, ret: TypeInfo) -> FunctionInfo {
+    FunctionInfo {
+        name: quoted_name.into(),
+        mangled_name: None,
+        params: vec![],
+        return_type: ret,
+        can_throw: false,
+        is_virtual: false,
+        has_body: true,
+        is_system: false,
+        called_functions: vec![],
+        referenced_globals: vec![],
+        annotations: vec![],
+    }
+}
+
+#[test]
+fn correct_sret_from_ir_overrides_small_struct_register_return() {
+    let mangled = "?enforceAccess@@YA?AUOutcome@@W4Mode@@@Z";
+    let ast_ret = TypeInfo::Struct {
+        name: "Outcome".into(),
+        size_bytes: Some(2),
+        fields: vec![],
+    };
+    let mut specs = derive_constraints(&[make_func("enforceAccess", mangled, ast_ret)]).unwrap();
+    assert!(
+        specs[0].return_constraint.is_sret,
+        "AST heuristic should set sret"
+    );
+
+    let ir_funcs = [make_ir_func(
+        &format!("\"{mangled}\""),
+        TypeInfo::SignedInt(16),
+    )];
+    super::correct_sret_from_ir(&mut specs[0], &ir_funcs);
+    assert!(
+        !specs[0].return_constraint.is_sret,
+        "IR override should clear sret"
+    );
+    assert_eq!(specs[0].return_constraint.saw_type, "llvm_int 16");
+}
+
+#[test]
+fn correct_sret_from_ir_keeps_genuine_sret() {
+    let mangled = "?getLargeResult@@YA?AUBig@@XZ";
+    let struct_ty = TypeInfo::Struct {
+        name: "Big".into(),
+        size_bytes: Some(128),
+        fields: vec![],
+    };
+    let mut specs =
+        derive_constraints(&[make_func("getLargeResult", mangled, struct_ty.clone())]).unwrap();
+    assert!(specs[0].return_constraint.is_sret);
+
+    let ir_funcs = [make_ir_func(&format!("\"{mangled}\""), struct_ty)];
+    super::correct_sret_from_ir(&mut specs[0], &ir_funcs);
+    assert!(
+        specs[0].return_constraint.is_sret,
+        "genuine sret should remain"
+    );
+}
+
+#[test]
+fn correct_sret_from_ir_no_match_leaves_unchanged() {
+    let ast_ret = TypeInfo::Struct {
+        name: "S".into(),
+        size_bytes: Some(4),
+        fields: vec![],
+    };
+    let mut specs = derive_constraints(&[make_func("f", "?f@@YAHXZ", ast_ret)]).unwrap();
+    assert!(specs[0].return_constraint.is_sret);
+
+    super::correct_sret_from_ir(&mut specs[0], &[]);
+    assert!(specs[0].return_constraint.is_sret, "no IR → no change");
+}

@@ -333,6 +333,14 @@ enum Commands {
         /// Output `.ll` file. May be the same path as `--input`.
         #[arg(long)]
         output: PathBuf,
+
+        /// Insert `store zeroinitializer` after every static `alloca`
+        /// so that Crucible never sees an undef load from an
+        /// uninitialized stack slot. **Opt-in** because it narrows
+        /// the set of possible behaviours on those slots (undef → 0);
+        /// do NOT enable when proving UB-freedom or absence-of-info-leak.
+        #[arg(long, default_value_t = false)]
+        init_undef_allocas: bool,
     },
 
     /// Aggregate per-run `result.json` files into a single
@@ -475,7 +483,11 @@ fn main() -> Result<()> {
             output,
             keep,
         } => commands::filter_ast(input, output, keep),
-        Commands::PatchLlvmIr { input, output } => commands::patch_llvm_ir_cmd(input, output),
+        Commands::PatchLlvmIr {
+            input,
+            output,
+            init_undef_allocas,
+        } => commands::patch_llvm_ir_cmd(input, output, init_undef_allocas),
         Commands::CollectResults {
             root,
             output,
