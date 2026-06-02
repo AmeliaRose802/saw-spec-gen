@@ -1,0 +1,15 @@
+// Cryptol spec: Hamming weight (popcount) over an 8-bit unsigned int.
+//
+// Sum the 8 individual bits, returning the count widened to [32] to
+// match the implementation's `uint32_t` / `u32` return type.
+//
+// Exercises an 8-bit input parameter (a width never seen by the
+// suite before) plus a small bounded loop on the impl side.
+
+popcount_u8_spec : [8] -> [32]
+popcount_u8_spec x = sum [ zext bit | bit <- xs ]
+  where
+    xs : [8][1]
+    xs = split`{8, 1} x
+    zext : [1] -> [32]
+    zext b = (zero : [31]) # b

@@ -1,0 +1,194 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+  # Allow re-running the (slow) end-to-end test suite on demand without pushing.
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo registry and build
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Build
+      run: cargo build --verbose
+
+    - name: Run unit tests
+      run: cargo test --lib --verbose
+
+    - name: Run integration tests
+      run: cargo test --test integration_test --verbose
+
+    - name: Check no warnings
+      run: cargo build 2>&1
+      env:
+        RUSTFLAGS: "-D warnings"
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy
+    - name: Clippy
+      run: cargo clippy -- -D warnings
+
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt
+    - name: Check formatting
+      run: cargo fmt -- --check
+
+  line-count:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Enforce 500 non-whitespace line limit
+      run: bash scripts/check-line-count.sh
+
+  e2e-tests-linux:
+    # Runs inside a pre-baked image (built by publish-ci-image.yml) that
+    # already contains SAW 1.5, LLVM 20.1.6, PowerShell 7, and Rust
+    # stable at the exact paths discover-tools.ps1 probes. No install
+    # step, no ~1.2 GB tarball download — just `cargo build` and run.
+    # Non-blocking while the end-to-end test suite stabilises.
+    name: 'end-to-end test suite (Linux, experimental)'
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/ameliarose802/saw-spec-gen-ci:latest
+      # GITHUB_TOKEN works for both public and private GHCR packages,
+      # so we don't have to flip visibility before this job goes green.
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    continue-on-error: true
+    timeout-minutes: 90
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Cache cargo registry and target (saw-spec-gen build)
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: linux-e2etests-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          linux-e2etests-cargo-
+
+    - name: Build saw-spec-gen
+      run: cargo build --release
+
+    - name: Run end-to-end test suite
+      # discover-tools.ps1 auto-detects /root/.saw-spec-gen/{saw,llvm}/bin
+      # via the standard search paths — no env.ps1 or PATH munging needed.
+      run: pwsh -NoLogo -NoProfile -File tests/e2e/Run-E2ETests.ps1
+
+    - name: Upload failing-case logs
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: e2e-tests-fail-logs-Linux
+        path: tests/e2e/last-fail-*.log
+        if-no-files-found: ignore
+
+  e2e-tests-windows:
+    # No container path on Windows: hosted windows-latest runners don't
+    # support the `container:` job key, and Windows base images are
+    # multi-GB pulls that wipe out any cold-start savings. Stick with
+    # the cached tarball install. Non-blocking while it stabilises.
+    name: 'end-to-end test suite (Windows, experimental)'
+    runs-on: windows-latest
+    continue-on-error: true
+    timeout-minutes: 90
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo registry and target (saw-spec-gen build)
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-e2etests-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-e2etests-cargo-
+
+    # Split restore/save so the (slow, ~1.2 GB) tool install is cached
+    # even when the end-to-end test step itself fails — otherwise actions/cache@v4
+    # would skip the save on failure and every red run would re-download.
+    # Cache key embeds the pinned versions from the installer; bumping
+    # the script invalidates the cache automatically.
+    - name: Restore SAW + LLVM toolchain cache
+      id: restore-tools
+      uses: actions/cache/restore@v4
+      with:
+        path: ~/.saw-spec-gen
+        key: windows-saw1.5-llvm20.1.6-${{ hashFiles('scripts/init.ps1') }}
+
+    - name: Install SAW, LLVM; build saw-spec-gen
+      shell: bash
+      env:
+        # Rust is already installed by dtolnay/rust-toolchain. init.ps1
+        # only verifies rustc on PATH (which it is, via the dtolnay
+        # action) so no skip flag is needed.
+        SKIP_RUST_INSTALL: "1"
+      run: pwsh -NoLogo -NoProfile -File scripts/init.ps1
+
+    - name: Save SAW + LLVM toolchain cache
+      if: always() && steps.restore-tools.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ~/.saw-spec-gen
+        key: ${{ steps.restore-tools.outputs.cache-primary-key }}
+
+    - name: Run end-to-end test suite
+      shell: pwsh
+      # discover-tools.ps1 auto-sources ~/.saw-spec-gen/env.ps1 inside
+      # the runner, so clang, llvm-as, saw, z3, and rustc are all picked
+      # up without any extra PATH setup here.
+      run: pwsh -NoLogo -NoProfile -File tests/e2e/Run-E2ETests.ps1
+
+    - name: Upload failing-case logs
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: e2e-tests-fail-logs-Windows
+        path: tests/e2e/last-fail-*.log
+        if-no-files-found: ignore

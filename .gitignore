@@ -3,3 +3,35 @@ Cargo.lock
 *.sw?
 .idea/
 .vscode/
+
+# Build artifacts
+*.bc
+*.ll
+**/*_ast.json
+tests/e2e/cases/specs/
+
+# Generated tool outputs (saw-spec-gen produces these per-demo)
+**/out_*/
+tests/e2e/cases/rust_specs/
+tests/e2e/cases/rust_demo_specs/
+
+# saw-spec-gen `dump-types` artifact at repo root (per-run, not source).
+/types.json
+
+# Loose test artifacts
+_test_ast.json
+tests/e2e/cases/_test.saw
+tests/e2e/cases/test_load.saw
+tests/e2e/cases/test_load2.saw
+tests/e2e/cases/token_service_out
+tests/e2e/cases/token_service_out.mir
+tests/e2e/cases/token_service_out.linked-mir.json
+tests/e2e/cases/token_service.mir.json
+
+# SAW demo runner failure logs
+tests/e2e/last-fail-*.log
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key

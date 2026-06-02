@@ -1,0 +1,12 @@
+// Cryptol spec: the closed-form Gauss formula for the sum 1+2+...+n.
+//
+// The C++ implementation uses a data-dependent loop (n iterations).
+// SAW must prove the bit-level repeated-addition circuit equals this
+// arithmetic identity for every n in [0, 10].  For n > 10 the C++
+// returns a sentinel 0, which we match here.
+
+sum_first_n_spec : [32] -> [32]
+sum_first_n_spec n =
+  if n > 10
+    then 0
+    else (n * (n + 1)) / 2

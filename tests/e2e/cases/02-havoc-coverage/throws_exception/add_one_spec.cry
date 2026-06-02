@@ -1,0 +1,6 @@
+// Cryptol spec: pure mathematical "x + 1" — no notion of exceptions,
+// no notion of "did not return", no notion of side effects. The spec
+// is a total function on the 2^32 inputs.
+
+add_one_spec : [32] -> [32]
+add_one_spec x = x + 1

@@ -1,0 +1,20 @@
+// Cryptol spec for has_null_byte: treat a 64-bit word as 8 packed
+// bytes ("a fixed-length string") and answer the question
+//
+//     "does this string contain a NUL terminator?"
+//
+// The reference semantics are a plain disjunction over the 8 bytes.
+// `split w : [8][8]` splits the 64-bit word into an 8-element vector
+// of 8-bit bytes (most-significant byte first, but byte ordering is
+// irrelevant here because the predicate is symmetric over positions).
+// `any` then runs `b == zero` over each byte and ORs the results.
+//
+// The C++ implementation uses the classic Mycroft branchless bit-trick
+// instead of an 8-way comparison, which is what makes the equivalence
+// proof interesting.
+
+has_null_byte_spec : [64] -> [32]
+has_null_byte_spec w =
+  if any (\b -> b == zero) (split w : [8][8])
+    then 1
+    else 0

@@ -1,0 +1,7 @@
+// Cryptol spec: `add_one` should compute x + 1 over 32-bit words.
+// The C++ implementation builds the result bit-by-bit in a 32-iteration
+// loop; SAW must prove the unrolled bit-level circuit is equivalent to
+// this single arithmetic operation.
+
+add_one_spec : [32] -> [32]
+add_one_spec x = x + 1

@@ -1,0 +1,28 @@
+// Cryptol spec: signed safe-multiplication on 32-bit ints.
+//
+// If a * b is representable as a signed 32-bit int, return it;
+// otherwise return 0 (the sentinel used by the problem statement).
+//
+// The spec sign-extends both operands to [64], multiplies in the
+// wider type (where no overflow occurs), and checks whether the
+// product falls in the signed [32] range [-2^31, 2^31 - 1].
+//
+// `sext64` is built manually with concatenation + a sign-bit test so
+// the spec stays inside Cryptol's basic operators (no prelude
+// extension primitive required).
+//
+// Reference: Problem 2 of CSEP590B 26sp Coding Assignment 4.
+
+sext64 : [32] -> [64]
+sext64 x = high # x
+  where
+    high = if x @ 0 then (-1 : [32]) else (0 : [32])
+
+safe_mul_spec : [32] -> [32] -> [32]
+safe_mul_spec a b =
+  if overflow then 0 else drop`{32} c
+  where
+    c        = sext64 a * sext64 b
+    int_max  = 0x000000007fffffff : [64]
+    int_min  = 0xffffffff80000000 : [64]
+    overflow = (c >$ int_max) \/ (c <$ int_min)

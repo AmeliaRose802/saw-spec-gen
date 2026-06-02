@@ -1,0 +1,18 @@
+// Spec arguments mirror what the auto-generated SAW harness passes:
+//   w_bytes : [8][8]  — the *contents* of the Widget the typed `const
+//                       Widget*` parameter points at (NOT its address).
+//   q       : [64]    — the *address bits* of the `const void*`
+//                       parameter (bug-#15 lowering).
+//
+// The implementation computes `ptrtoint(w_ptr) == q`. Neither the
+// numeric address of `w_ptr` nor any function of `w_bytes` is exposed
+// to the Cryptol spec, so the spec cannot decide the comparison.
+// Whatever constant we return, the SMT solver finds a counterexample
+// (q can be picked to equal — or differ from — the symbolic address).
+//
+// Expected verdict: DISPROVED. This pins the lowering's architectural
+// limitation; flipping the spec to `_ _ -> 1` would *also* be
+// DISPROVED.
+
+widget_addr_eq_spec : [8][8] -> [64] -> [32]
+widget_addr_eq_spec _w _q = 0

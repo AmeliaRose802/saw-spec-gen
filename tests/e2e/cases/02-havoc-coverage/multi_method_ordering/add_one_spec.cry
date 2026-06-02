@@ -1,0 +1,10 @@
+// Cryptol spec: add_one should always return x + 1
+//
+// The C++ wrapper returns `x + 1 + p->bias_` after one virtual call.
+// If the virtual call preserves bias_ (const method's havoc spec),
+// then bias_ stays 0 and the C++ result equals add_one_spec.
+// If the virtual call havocs bias_ (non-const method's spec),
+// the result can be anything and SAW reports a counterexample.
+
+add_one_spec : [32] -> [32]
+add_one_spec x = x + 1

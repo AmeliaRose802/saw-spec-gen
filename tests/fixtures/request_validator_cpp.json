@@ -1,0 +1,168 @@
+{
+    "kind": "TranslationUnitDecl",
+    "inner": [
+        {
+            "kind": "CXXRecordDecl",
+            "name": "RequestHeader",
+            "inner": [
+                {
+                    "kind": "FieldDecl",
+                    "name": "version",
+                    "type": { "qualType": "uint32_t" }
+                },
+                {
+                    "kind": "FieldDecl",
+                    "name": "content_length",
+                    "type": { "qualType": "uint64_t" }
+                },
+                {
+                    "kind": "FieldDecl",
+                    "name": "flags",
+                    "type": { "qualType": "uint32_t" }
+                }
+            ]
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "RequestValidator",
+            "inner": [
+                {
+                    "kind": "FieldDecl",
+                    "name": "m_maxContentLength",
+                    "type": { "qualType": "uint64_t" }
+                },
+                {
+                    "kind": "FieldDecl",
+                    "name": "m_allowedVersions",
+                    "type": { "qualType": "uint32_t" }
+                },
+                {
+                    "kind": "FieldDecl",
+                    "name": "m_validationEnabled",
+                    "type": { "qualType": "bool" }
+                }
+            ]
+        },
+        {
+            "kind": "CXXMethodDecl",
+            "name": "ValidateRequest",
+            "mangledName": "_ZN16RequestValidator15ValidateRequestEPK13RequestHeader",
+            "parentDeclContextId": "RequestValidator",
+            "type": { "qualType": "bool (const RequestHeader *) const noexcept" },
+            "inner": [
+                {
+                    "kind": "ParmVarDecl",
+                    "name": "header",
+                    "type": { "qualType": "const RequestHeader *" },
+                    "inner": [
+                        {
+                            "kind": "AnnotateAttr",
+                            "value": "_In_"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "kind": "CXXMethodDecl",
+            "name": "ValidateContentLength",
+            "mangledName": "_ZN16RequestValidator21ValidateContentLengthEy",
+            "parentDeclContextId": "RequestValidator",
+            "type": { "qualType": "bool (uint64_t) const noexcept" },
+            "inner": [
+                {
+                    "kind": "ParmVarDecl",
+                    "name": "length",
+                    "type": { "qualType": "uint64_t" }
+                }
+            ]
+        },
+        {
+            "kind": "CXXMethodDecl",
+            "name": "CopyHeaderData",
+            "mangledName": "_ZN16RequestValidator14CopyHeaderDataEPK13RequestHeaderPh",
+            "parentDeclContextId": "RequestValidator",
+            "type": { "qualType": "void (const RequestHeader *, unsigned char *)" },
+            "inner": [
+                {
+                    "kind": "ParmVarDecl",
+                    "name": "src",
+                    "type": { "qualType": "const RequestHeader *" },
+                    "inner": [
+                        {
+                            "kind": "AnnotateAttr",
+                            "value": "_In_"
+                        }
+                    ]
+                },
+                {
+                    "kind": "ParmVarDecl",
+                    "name": "dst",
+                    "type": { "qualType": "unsigned char *" },
+                    "inner": [
+                        {
+                            "kind": "AnnotateAttr",
+                            "value": "_Out_writes_(24)"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "kind": "FunctionTemplateDecl",
+            "name": "clamp_value",
+            "inner": [
+                {
+                    "kind": "FunctionDecl",
+                    "name": "clamp_value",
+                    "mangledName": "_Z11clamp_valueIiET_S0_S0_S0_",
+                    "type": { "qualType": "int (int, int, int) noexcept" },
+                    "inner": [
+                        {
+                            "kind": "ParmVarDecl",
+                            "name": "val",
+                            "type": { "qualType": "int" }
+                        },
+                        {
+                            "kind": "ParmVarDecl",
+                            "name": "min_val",
+                            "type": { "qualType": "int" }
+                        },
+                        {
+                            "kind": "ParmVarDecl",
+                            "name": "max_val",
+                            "type": { "qualType": "int" }
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "kind": "FunctionDecl",
+            "name": "ComputeChecksum",
+            "mangledName": "_Z15ComputeChecksumPKhm",
+            "type": { "qualType": "uint32_t (const unsigned char *, size_t) noexcept" },
+            "inner": [
+                {
+                    "kind": "ParmVarDecl",
+                    "name": "data",
+                    "type": { "qualType": "const unsigned char *" },
+                    "inner": [
+                        {
+                            "kind": "AnnotateAttr",
+                            "value": "_In_reads_bytes_(256)"
+                        }
+                    ]
+                },
+                {
+                    "kind": "ParmVarDecl",
+                    "name": "length",
+                    "type": { "qualType": "size_t" }
+                },
+                {
+                    "kind": "NoThrowAttr"
+                }
+            ]
+        }
+    ]
+}
