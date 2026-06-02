@@ -75,6 +75,9 @@ pub fn parse_cpp_type(qual_type: &str, ctx: &TypeContext) -> TypeInfo {
         | "uintptr_t" | "ssize_t" => TypeInfo::UnsignedInt(64),
         "unsigned short" | "uint16_t" | "WORD" | "USHORT" => TypeInfo::UnsignedInt(16),
         "unsigned char" | "uint8_t" | "BYTE" | "UCHAR" => TypeInfo::UnsignedInt(8),
+        "float" => TypeInfo::Float(32),
+        "double" => TypeInfo::Float(64),
+        "long double" => TypeInfo::Float(128),
         "void" => TypeInfo::Void,
         other => resolve_named(other, ctx),
     };
@@ -218,6 +221,9 @@ pub fn cpp_type_size_align(ty: &TypeInfo) -> Option<(usize, usize)> {
         TypeInfo::SignedInt(16) | TypeInfo::UnsignedInt(16) => Some((2, 2)),
         TypeInfo::SignedInt(32) | TypeInfo::UnsignedInt(32) => Some((4, 4)),
         TypeInfo::SignedInt(64) | TypeInfo::UnsignedInt(64) => Some((8, 8)),
+        TypeInfo::Float(32) => Some((4, 4)),
+        TypeInfo::Float(64) => Some((8, 8)),
+        TypeInfo::Float(128) => Some((16, 16)),
         TypeInfo::Pointer(_) => Some((8, 8)),
         TypeInfo::ByteArray(n) => Some((*n, 1)),
         TypeInfo::Struct {
@@ -359,5 +365,64 @@ mod tests {
             TypeInfo::SignedInt(32),
         );
         assert_eq!(parse_return_type("void (int)", &ctx), TypeInfo::Void);
+    }
+
+    #[test]
+    fn parses_float_and_double() {
+        let ctx = TypeContext::empty();
+        assert_eq!(parse_cpp_type("float", &ctx), TypeInfo::Float(32));
+        assert_eq!(parse_cpp_type("double", &ctx), TypeInfo::Float(64));
+        assert_eq!(parse_cpp_type("long double", &ctx), TypeInfo::Float(128));
+    }
+
+    #[test]
+    fn const_float_is_stripped() {
+        let ctx = TypeContext::empty();
+        assert_eq!(parse_cpp_type("const float", &ctx), TypeInfo::Float(32));
+        assert_eq!(parse_cpp_type("const double", &ctx), TypeInfo::Float(64));
+    }
+
+    #[test]
+    fn float_pointer_wraps_base_type() {
+        let ctx = TypeContext::empty();
+        let t = parse_cpp_type("float *", &ctx);
+        assert!(matches!(t, TypeInfo::Pointer(b) if *b == TypeInfo::Float(32)));
+        let t = parse_cpp_type("double *", &ctx);
+        assert!(matches!(t, TypeInfo::Pointer(b) if *b == TypeInfo::Float(64)));
+    }
+
+    #[test]
+    fn float_return_type_parsed() {
+        let ctx = TypeContext::empty();
+        assert_eq!(
+            parse_return_type("double (double, double)", &ctx),
+            TypeInfo::Float(64),
+        );
+        assert_eq!(parse_return_type("float (int)", &ctx), TypeInfo::Float(32),);
+    }
+
+    #[test]
+    fn float_size_align() {
+        assert_eq!(cpp_type_size_align(&TypeInfo::Float(32)), Some((4, 4)));
+        assert_eq!(cpp_type_size_align(&TypeInfo::Float(64)), Some((8, 8)));
+        assert_eq!(cpp_type_size_align(&TypeInfo::Float(128)), Some((16, 16)));
+    }
+
+    #[test]
+    fn struct_with_float_field_sizes_correctly() {
+        let fields = vec![
+            ("x".into(), TypeInfo::Float(32)),
+            ("y".into(), TypeInfo::Float(32)),
+        ];
+        assert_eq!(compute_struct_size_from_fields(&fields), Some(8));
+    }
+
+    #[test]
+    fn float_array_returns_byte_array() {
+        let ctx = TypeContext::empty();
+        // float[4] = 4 * 4 bytes = 16 bytes
+        assert_eq!(parse_cpp_type("float[4]", &ctx), TypeInfo::ByteArray(16));
+        // double[2] = 2 * 8 bytes = 16 bytes
+        assert_eq!(parse_cpp_type("double[2]", &ctx), TypeInfo::ByteArray(16));
     }
 }

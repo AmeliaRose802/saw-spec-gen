@@ -129,6 +129,7 @@ fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
                 TypeInfo::Bool
                 | TypeInfo::SignedInt(_)
                 | TypeInfo::UnsignedInt(_)
+                | TypeInfo::Float(_)
                 | TypeInfo::Enum { .. } => (AllocType::FreshVar, false),
                 _ => match param.mutability {
                     Mutability::Readonly => (AllocType::AllocReadonly, true),
@@ -357,6 +358,7 @@ fn derive_return_constraint(ty: &TypeInfo) -> ReturnConstraint {
         value_constraints,
         is_sret,
         returns_pointer,
+        sret_prestate: false,
     }
 }
 

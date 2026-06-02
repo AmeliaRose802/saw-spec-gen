@@ -103,6 +103,9 @@ pub enum WireType {
     UnsignedInt {
         bits: u32,
     },
+    Float {
+        bits: u32,
+    },
     Bool,
     ByteArray {
         len: usize,
@@ -136,6 +139,7 @@ impl From<&TypeInfo> for WireType {
         match t {
             TypeInfo::SignedInt(b) => WireType::SignedInt { bits: *b },
             TypeInfo::UnsignedInt(b) => WireType::UnsignedInt { bits: *b },
+            TypeInfo::Float(b) => WireType::Float { bits: *b },
             TypeInfo::Bool => WireType::Bool,
             TypeInfo::ByteArray(n) => WireType::ByteArray { len: *n },
             TypeInfo::Pointer(inner) => WireType::Pointer {

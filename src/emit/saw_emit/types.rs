@@ -46,6 +46,9 @@ pub fn type_to_llvm_ir(ty: &TypeInfo) -> String {
         TypeInfo::Void => "void".into(),
         TypeInfo::Bool => "i1".into(),
         TypeInfo::SignedInt(bits) | TypeInfo::UnsignedInt(bits) => format!("i{bits}"),
+        TypeInfo::Float(32) => "float".into(),
+        TypeInfo::Float(64) => "double".into(),
+        TypeInfo::Float(bits) => format!("i{bits}"),
         TypeInfo::Pointer(_) => "ptr".into(),
         TypeInfo::Struct {
             size_bytes: Some(n),
@@ -138,6 +141,8 @@ pub fn ir_default_return(ir_type: &str) -> String {
         "void" => "ret void".into(),
         "i1" => "ret i1 false".into(),
         "ptr" => "ret ptr null".into(),
+        "float" => "ret float 0.0".into(),
+        "double" => "ret double 0.0".into(),
         t => format!("ret {t} 0"),
     }
 }
@@ -183,6 +188,18 @@ mod tests {
             type_to_llvm_ir(&TypeInfo::Pointer(Box::new(TypeInfo::SignedInt(8)))),
             "ptr"
         );
+    }
+
+    #[test]
+    fn type_to_llvm_ir_handles_floats() {
+        assert_eq!(type_to_llvm_ir(&TypeInfo::Float(32)), "float");
+        assert_eq!(type_to_llvm_ir(&TypeInfo::Float(64)), "double");
+    }
+
+    #[test]
+    fn ir_default_return_handles_floats() {
+        assert_eq!(ir_default_return("float"), "ret float 0.0");
+        assert_eq!(ir_default_return("double"), "ret double 0.0");
     }
 
     #[test]

@@ -6,6 +6,9 @@ pub fn type_to_saw(ty: &TypeInfo) -> String {
     match ty {
         TypeInfo::Bool => "llvm_int 1".into(),
         TypeInfo::SignedInt(bits) | TypeInfo::UnsignedInt(bits) => format!("llvm_int {bits}"),
+        TypeInfo::Float(32) => "llvm_float".into(),
+        TypeInfo::Float(64) => "llvm_double".into(),
+        TypeInfo::Float(bits) => format!("llvm_int {bits}"),
         TypeInfo::ByteArray(n) => format!("llvm_array {n} (llvm_int 8)"),
         TypeInfo::Pointer(inner) => type_to_saw(inner),
         TypeInfo::Struct {
@@ -249,5 +252,21 @@ mod tests {
             };
             assert_eq!(type_to_saw(&ty), expect, "lowering for {name}");
         }
+    }
+
+    #[test]
+    fn test_type_to_saw_float() {
+        assert_eq!(type_to_saw(&TypeInfo::Float(32)), "llvm_float");
+    }
+
+    #[test]
+    fn test_type_to_saw_double() {
+        assert_eq!(type_to_saw(&TypeInfo::Float(64)), "llvm_double");
+    }
+
+    #[test]
+    fn test_type_to_saw_float_pointer() {
+        let ty = TypeInfo::Pointer(Box::new(TypeInfo::Float(64)));
+        assert_eq!(type_to_saw(&ty), "llvm_double");
     }
 }
