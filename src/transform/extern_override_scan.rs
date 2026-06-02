@@ -85,6 +85,11 @@ pub enum BrokenReason {
     /// The body uses `llvm.va_start.p0`, `llvm.va_end.p0`,
     /// `llvm.va_copy`, or `llvm.va_arg`.
     UsesVarargsIntrinsic,
+    /// The symbol matched the `saw_spec_gen-jpp` STL functional
+    /// override registry — Crucible can technically simulate the
+    /// body but tends to panic deep inside libstdc++ allocator
+    /// helpers (`Cannot mux LLVM values`). Force-havoc instead.
+    StlOverride,
 }
 
 /// Per-function parsed snapshot used internally by [`scan`].
@@ -152,6 +157,8 @@ pub fn scan(ir: &str, target_symbol: &str) -> Vec<OverrideTarget> {
             BrokenReason::DeclareOnly
         } else if f.body_uses_va_intrinsic {
             BrokenReason::UsesVarargsIntrinsic
+        } else if crate::emit::saw_emit::stl_overrides::matches(&f.name) {
+            BrokenReason::StlOverride
         } else {
             continue;
         };

@@ -5,14 +5,13 @@ struct allocation + GEP + load with no external calls — the pair
 constructor is a header-only `constexpr` template that clang
 inlines aggressively.
 
-This case tests whether saw-spec-gen handles the LLVM struct that
-backs `std::pair<uint32_t, uint32_t>` cleanly. If the constructor
-remains as a callable symbol in the bitcode (rather than being
-fully inlined), it will hit the same havoc gap as the algorithm
-cases.
+With the Crucible-safety analyzer (saw_spec_gen-9x5), even when
+the pair constructor survives as a callable symbol (e.g. at -O0),
+its body is allocator-free arithmetic + memory ops and gets
+symbolically executed instead of havoced.
 
-Expected RESULT: depends on clang's inlining decisions at -O0 —
-documented as the experimental side of the suite.
+Expected RESULT: VERIFIED. Set
+`SAW_SPEC_GEN_NO_SYSTEM_RECURSION=1` to bisect.
 */
 
 #include <cstdint>

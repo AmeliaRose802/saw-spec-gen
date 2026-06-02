@@ -8,11 +8,13 @@
 //!   4. Emit the top-level `verify.saw` script that wires everything together
 
 use crate::alias_fallbacks::{apply_cli_overrides, dump_fallback_diagnostics};
+use crate::gen_verify_callgraph::collect_external_call_specs;
 use crate::spec_rewrite::{apply_alias_rewrites, collect_type_sizes};
+use crate::transform::crucible_safety::SafetyAnalyzer;
 use crate::type_resolve::resolve_spec_types_quiet;
 use crate::{alias_fallbacks_ir, clang_ast, constraints, llvm_ir, saw_emit};
 use anyhow::Result;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::Path;
 
 #[allow(clippy::too_many_arguments)]
@@ -50,6 +52,17 @@ pub fn run(
     // MSVC-clang fully qualifies struct symbols, so without the IR we can't
     // match short C++ names against `%\"struct.Foo::Bar::Baz\"`.
     let (ir_struct_sizes, ir_funcs) = llvm_ir::load_optional(llvm_ir_path)?;
+
+    // Also load the IR text (cheap re-read) so the Crucible-safety
+    // analyzer can walk header-only STL template bodies. Without this
+    // the blanket `is_system` gate sweeps `std::max`, `std::min`,
+    // `std::pair::first` etc. into the adversarial-override fallback
+    // even though clang fully instantiates their bodies.
+    let ir_text = llvm_ir_path
+        .and_then(|p| llvm_ir::parse_llvm_ir(p).ok())
+        .unwrap_or_default();
+    let mut safety = SafetyAnalyzer::new(&ir_text);
+    let no_system_recursion = std::env::var_os("SAW_SPEC_GEN_NO_SYSTEM_RECURSION").is_some();
 
     // Sniff the bitcode's `target triple = "..."` line so vtable stub
     // generation can pick the correct ABI layout. Without this, an
@@ -159,83 +172,18 @@ pub fn run(
 
     std::fs::create_dir_all(output)?;
 
-    // Walk the call graph transitively to find ALL external calls reachable
-    // through any in-module function. Necessary because when SAW executes a
-    // real method body, that method's external calls (e.g. printf) also need
-    // overrides.
-    let fn_by_mangled: HashMap<String, &constraints::FunctionInfo> = all_functions
-        .iter()
-        .filter_map(|f| f.mangled_name.as_ref().map(|m| (m.clone(), f)))
-        .collect();
-    let fn_by_name: HashMap<String, &constraints::FunctionInfo> =
-        all_functions.iter().map(|f| (f.name.clone(), f)).collect();
-
-    let mut visited: HashSet<String> = HashSet::new();
-    let mut called_mangled: HashSet<String> = HashSet::new();
-    let mut worklist: Vec<&constraints::FunctionInfo> = vec![&target_fn];
-    while let Some(f) = worklist.pop() {
-        let key = f.mangled_name.clone().unwrap_or_else(|| f.name.clone());
-        if !visited.insert(key) {
-            continue;
-        }
-        for c in &f.called_functions {
-            called_mangled.insert(c.mangled_name.clone());
-            // Recurse only if callee has a body AND isn't a system function.
-            // System functions (stdio/ucrt/etc.) have inline bodies that rely
-            // on LLVM intrinsics SAW can't resolve, so we treat them as
-            // external instead.
-            let callee = fn_by_mangled
-                .get(&c.mangled_name)
-                .or_else(|| fn_by_name.get(&c.name))
-                .copied();
-            if let Some(callee) = callee {
-                if callee.has_body && !callee.is_system {
-                    worklist.push(callee);
-                }
-            }
-        }
-    }
-
-    // Find which called functions are treated as external. Skip clang
-    // `__builtin_*` intrinsics — they aren't real bitcode symbols. Skip
-    // virtuals — they're handled via vtable stubs.
-    let external_calls: Vec<&constraints::SpecConstraint> = all_specs
-        .iter()
-        .filter(|s| {
-            let fn_info = s
-                .mangled_name
-                .as_ref()
-                .and_then(|m| fn_by_mangled.get(m))
-                .or_else(|| fn_by_name.get(&s.function_name))
-                .copied();
-            let is_treated_external = match fn_info {
-                Some(f) => !f.has_body || f.is_system,
-                None => !s.has_body,
-            };
-            if !is_treated_external {
-                return false;
-            }
-            if s.is_virtual {
-                return false;
-            }
-            if let Some(f) = fn_info {
-                if f.is_virtual {
-                    return false;
-                }
-            }
-            if s.function_name.starts_with("__builtin_") {
-                return false;
-            }
-            if let Some(ref m) = s.mangled_name {
-                if m.starts_with("__builtin_") {
-                    return false;
-                }
-                called_mangled.contains(m)
-            } else {
-                false
-            }
-        })
-        .collect();
+    // Walk the call graph transitively to find ALL external calls
+    // reachable through any in-module function, and pre-decide which
+    // system callees have Crucible-safe bodies. See
+    // [`crate::gen_verify_callgraph`] for the full logic and the
+    // `SAW_SPEC_GEN_NO_SYSTEM_RECURSION=1` kill-switch.
+    let external_calls = collect_external_call_specs(
+        &target_fn,
+        &all_functions,
+        &all_specs,
+        &mut safety,
+        no_system_recursion,
+    );
 
     // Extract interface info first so external spec generation can detect
     // functions whose return type is an interface pointer.
