@@ -178,11 +178,18 @@ fn balanced_brace(s: &str, open: char, close: char) -> Option<usize> {
 // ── Exception-lower globals injection ──────────────────────────
 
 /// Scan the lowered LLVM IR for exception-lower globals and add them to
-/// the target spec so SAW can allocate them. The exception-lower pass
-/// synthesises `@__exclow_error_flag`, `@__exclow_error_typeinfo`, and
-/// `@__exclow_error_value` — none of which appear in the clang AST.
+/// the supplied global list so SAW allocates them in the verify spec.
+/// The exception-lower pass synthesises `@__exclow_error_flag`,
+/// `@__exclow_error_typeinfo`, and `@__exclow_error_value` — none of
+/// which appear in the clang AST, and only the bool flag has a scalar
+/// integer type the generic `discover_ir_only_globals` scan can handle.
+///
+/// Concretely seeding `__exclow_error_flag` to 0 in the pre-state is
+/// load-bearing: the lowered IR's `.ehcheck` block branches on it, so a
+/// fresh symbolic value would let SAW take the (unreachable) exception
+/// path for non-throwing inputs and disprove the spec.
 pub fn inject_exclow_globals(
-    spec: &mut crate::constraints::SpecConstraint,
+    all_globals: &mut Vec<crate::constraints::GlobalVarInfo>,
     ir_path: &std::path::Path,
 ) {
     use crate::constraints::types::{GlobalVarInfo, TypeInfo};
@@ -219,12 +226,11 @@ pub fn inject_exclow_globals(
     ];
 
     for g in exclow_globals {
-        if !spec
-            .referenced_globals
+        if !all_globals
             .iter()
             .any(|existing| existing.mangled_name == g.mangled_name)
         {
-            spec.referenced_globals.push(g);
+            all_globals.push(g);
         }
     }
 }
