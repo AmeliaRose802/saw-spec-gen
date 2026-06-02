@@ -200,6 +200,7 @@ fn emit_one(
     let reason_tag = match t.reason {
         BrokenReason::DeclareOnly => "declare-only",
         BrokenReason::UsesVarargsIntrinsic => "body uses llvm.va_*",
+        BrokenReason::StlOverride => "stl-override",
     };
     let variadic_tag = if t.is_variadic { "; variadic" } else { "" };
     out.push_str(&format!(

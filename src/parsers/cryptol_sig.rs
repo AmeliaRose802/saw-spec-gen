@@ -404,15 +404,24 @@ getStatus :
         assert_eq!(sig.params[1], CryType::Bit);
         assert_eq!(
             sig.params[2],
-            CryType::SeqBitvector { len: 16, elem_bits: 8 }
+            CryType::SeqBitvector {
+                len: 16,
+                elem_bits: 8
+            }
         );
         assert_eq!(
             sig.params[3],
-            CryType::SeqBitvector { len: 17, elem_bits: 8 }
+            CryType::SeqBitvector {
+                len: 17,
+                elem_bits: 8
+            }
         );
         assert_eq!(
             sig.ret,
-            CryType::SeqBitvector { len: 20, elem_bits: 8 }
+            CryType::SeqBitvector {
+                len: 20,
+                elem_bits: 8
+            }
         );
     }
 

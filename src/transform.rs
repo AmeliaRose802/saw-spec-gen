@@ -4,6 +4,7 @@
 
 pub mod alias_fallbacks;
 pub mod alias_fallbacks_ir;
+pub mod crucible_safety;
 pub mod eh_globals;
 pub mod extern_override_scan;
 pub(crate) mod ir_globals;
