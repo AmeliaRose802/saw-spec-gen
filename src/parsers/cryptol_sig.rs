@@ -150,7 +150,7 @@ pub fn parse_signature_from_str(text: &str, fn_name: &str) -> Option<CrySig> {
             let rest = rest.trim_start();
             if let Some(after_colon) = rest.strip_prefix(':') {
                 // Signature starts on this line after the colon.
-                sig_text.push_str(after_colon.trim_start());
+                sig_text.push_str(strip_line_comment(after_colon).trim());
                 // Collect continuation lines (indented or containing `->`)
                 i += 1;
                 while i < lines.len() {
@@ -163,7 +163,7 @@ pub fn parse_signature_from_str(text: &str, fn_name: &str) -> Option<CrySig> {
                     // Continuation: line starts with whitespace or contains ->
                     if next.starts_with(' ') || next.starts_with('\t') {
                         sig_text.push(' ');
-                        sig_text.push_str(next_trimmed);
+                        sig_text.push_str(strip_line_comment(next_trimmed).trim());
                     } else {
                         break;
                     }
@@ -180,6 +180,14 @@ pub fn parse_signature_from_str(text: &str, fn_name: &str) -> Option<CrySig> {
     }
 
     parse_arrow_type(&sig_text)
+}
+
+/// Strip a Cryptol `//` line comment, returning only the code portion.
+fn strip_line_comment(line: &str) -> &str {
+    match line.find("//") {
+        Some(pos) => &line[..pos],
+        None => line,
+    }
 }
 
 /// Parse a Cryptol arrow-type string like `Bit -> [16][8] -> [20][8]`.
@@ -378,5 +386,42 @@ getStatus_cpp :
         assert_eq!(sig.params.len(), 1);
         assert_eq!(sig.params[0], CryType::Bitvector(32));
         assert_eq!(sig.ret, CryType::Bitvector(32));
+    }
+
+    #[test]
+    fn parse_signature_with_line_comments() {
+        let cry = "\
+getStatus :
+    Bit ->  // fleetEnabled
+    Bit ->  // hasKey
+    [16][8] -> // input Uuid bytes (16 B)
+    [17][8] -> // pre-state sret buffer
+    [20][8]
+";
+        let sig = parse_signature_from_str(cry, "getStatus").unwrap();
+        assert_eq!(sig.params.len(), 4);
+        assert_eq!(sig.params[0], CryType::Bit);
+        assert_eq!(sig.params[1], CryType::Bit);
+        assert_eq!(
+            sig.params[2],
+            CryType::SeqBitvector { len: 16, elem_bits: 8 }
+        );
+        assert_eq!(
+            sig.params[3],
+            CryType::SeqBitvector { len: 17, elem_bits: 8 }
+        );
+        assert_eq!(
+            sig.ret,
+            CryType::SeqBitvector { len: 20, elem_bits: 8 }
+        );
+    }
+
+    #[test]
+    fn parse_comment_on_first_line() {
+        let cry = "f : Bit -> // comment on first line\n    [8]\n";
+        let sig = parse_signature_from_str(cry, "f").unwrap();
+        assert_eq!(sig.params.len(), 1);
+        assert_eq!(sig.params[0], CryType::Bit);
+        assert_eq!(sig.ret, CryType::Bitvector(8));
     }
 }
