@@ -1,0 +1,9 @@
+// Cryptol spec for stamp_header.
+//
+// The function writes v into all 4 header bytes, zeros the 12 body
+// bytes, and returns 16 bytes total.  The trailing [12][8] parameter
+// is the pre-call state of the body field (unused here because the
+// function writes every byte deterministically).
+
+stamp_header_spec : [8] -> [12][8] -> [16][8]
+stamp_header_spec v _pre = [v, v, v, v] # zero

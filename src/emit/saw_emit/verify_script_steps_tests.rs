@@ -4,6 +4,7 @@
 //! the 500-non-whitespace-line repository limit.
 
 use super::*;
+use super::super::verify_script::SretPrestate;
 
 #[test]
 fn cryptol_arg_for_wraps_bool_with_index_zero() {
@@ -252,23 +253,24 @@ fn emit_sret_prestate_threads_prebytes_into_cryptol_call() {
         &interface_classes,
         &interface_of,
         &[],
-        Some(17), // prestate: 17 bytes
+        Some(&SretPrestate { take_bytes: 17, drop_bytes: 3 }),
     );
 
-    // The preBytes fresh var should be emitted
+    // preBytes is allocated at FULL buffer size (20), not the slice size (17)
     assert!(
-        out.contains("preBytes <- llvm_fresh_var \"preBytes\" (llvm_array 17 (llvm_int 8))"),
-        "expected preBytes fresh var; got:\n{out}"
+        out.contains("preBytes <- llvm_fresh_var \"preBytes\" (llvm_array 20 (llvm_int 8))"),
+        "expected preBytes at full buffer size; got:\n{out}"
     );
     // The pre-condition binding into the sret buffer
     assert!(
         out.contains("llvm_points_to result_ptr (llvm_term preBytes)"),
         "expected preBytes pre-condition on sret buffer; got:\n{out}"
     );
-    // preBytes should be in cryptol_args
+    // The Cryptol arg should be a take/drop slice, NOT the raw preBytes
+    let slice_expr = "(take`{17} (drop`{3} preBytes))";
     assert!(
-        cryptol_args.contains(&"preBytes".to_string()),
-        "expected preBytes in cryptol_args; got: {cryptol_args:?}"
+        cryptol_args.contains(&slice_expr.to_string()),
+        "expected slice expression in cryptol_args; got: {cryptol_args:?}"
     );
     // result_ptr should be in execute_args
     assert!(
@@ -276,7 +278,7 @@ fn emit_sret_prestate_threads_prebytes_into_cryptol_call() {
         "expected result_ptr in execute_args; got: {execute_args:?}"
     );
 
-    // Now emit the postcondition and verify preBytes appears in the
+    // Now emit the postcondition and verify the slice appears in the
     // Cryptol call
     emit_postcondition_and_close(
         &mut out,
@@ -293,8 +295,8 @@ fn emit_sret_prestate_threads_prebytes_into_cryptol_call() {
     );
 
     assert!(
-        out.contains("getStatus_cpp (fE ! 0) (hK ! 0) (kA ! 0) keyId preBytes"),
-        "expected preBytes threaded into Cryptol call; got:\n{out}"
+        out.contains(&format!("getStatus_cpp (fE ! 0) (hK ! 0) (kA ! 0) keyId {slice_expr}")),
+        "expected slice expression in Cryptol call; got:\n{out}"
     );
 }
 

@@ -12,7 +12,7 @@ use super::verify_script_steps::{
     emit_postcondition_and_close, emit_sub_callee_step, emit_var_annotation_override,
     emit_verify_step, is_operator_new,
 };
-use crate::clang_ast::{ClassConstructor, InterfaceMethod};
+use crate::clang_ast::{self, ClassConstructor, InterfaceMethod};
 use crate::constraints::*;
 use crate::cryptol_sig;
 use anyhow::{Context, Result};
@@ -141,7 +141,7 @@ pub fn emit_verification_script(
     // Detect sret prestate threading: if the Cryptol function has one
     // extra trailing [N][8] parameter compared to the C++ user-arg
     // count, the model expects the sret buffer's pre-call bytes.
-    let sret_prestate_len = if target_spec.return_constraint.is_sret {
+    let sret_prestate = if target_spec.return_constraint.is_sret {
         detect_sret_prestate(cryptol_spec_path, cryptol_fn, target_spec, target_fn)
     } else {
         None
@@ -158,7 +158,7 @@ pub fn emit_verification_script(
         &interface_classes,
         &interface_of,
         all_globals,
-        sret_prestate_len,
+        sret_prestate.as_ref(),
     );
 
     emit_postcondition_and_close(
@@ -231,40 +231,41 @@ fn emit_header(
     }
 }
 
+/// How to pass sret pre-state bytes to the Cryptol model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct SretPrestate {
+    /// Number of bytes to `take` from the full sret buffer.
+    pub take_bytes: usize,
+    /// Number of bytes to `drop` before taking.
+    pub drop_bytes: usize,
+}
+
 /// Detect sret prestate threading by comparing the Cryptol function's
-/// arity to the C++ user-arg count. Returns `Some(N)` when the
-/// Cryptol function has exactly one extra trailing `[N][8]` parameter
-/// (the pre-call sret buffer bytes).
+/// arity to the C++ user-arg count. Returns `Some(SretPrestate)` when
+/// the Cryptol function has exactly one extra trailing `[K][8]`
+/// parameter (the pre-call sret buffer bytes). When `K` equals the
+/// full buffer size, `drop_bytes` is 0. When `K` is smaller, walks
+/// the return struct's field layout to find the matching field offset.
 fn detect_sret_prestate(
     cryptol_spec_path: &Path,
     cryptol_fn: &str,
     target_spec: &SpecConstraint,
     target_fn: &FunctionInfo,
-) -> Option<usize> {
+) -> Option<SretPrestate> {
     let sig = cryptol_sig::parse_signature(cryptol_spec_path, cryptol_fn)?;
-
-    // Count user-visible C++ args that become Cryptol parameters.
-    // Interface/container params don't produce Cryptol args, so
-    // approximate with spec params count (same as what
-    // emit_equiv_spec_body pushes to `cryptol_args`).
     let cpp_user_arg_count = target_spec.params.len();
 
-    match cryptol_sig::detect_prestate(&sig, cpp_user_arg_count) {
-        Ok(prestate) => {
-            if let Some(n) = prestate {
-                eprintln!(
-                    "  sret prestate threading: Cryptol `{cryptol_fn}` has trailing \
-                     [{}][8] parameter for pre-call buffer bytes",
-                    n,
-                );
-            }
-            prestate
+    let cry_k = match cryptol_sig::detect_prestate(&sig, cpp_user_arg_count) {
+        Ok(Some(n)) => {
+            eprintln!(
+                "  sret prestate threading: Cryptol `{cryptol_fn}` has trailing \
+                 [{}][8] parameter for pre-call buffer bytes",
+                n,
+            );
+            n
         }
+        Ok(None) => return None,
         Err(e) => {
-            // Arity mismatch — emit a diagnostic warning but don't
-            // abort.  The old non-prestate path will emit, and SAW
-            // will report the partial-application error if prestate
-            // was truly needed.
             let has_this = target_fn
                 .params
                 .first()
@@ -280,7 +281,69 @@ fn detect_sret_prestate(
                  Workaround: hand-write verify.saw or adjust the Cryptol spec.",
                 target_fn.name,
             );
-            None
+            return None;
+        }
+    };
+
+    // Get full buffer size from the return type.
+    let buf_size = match &target_fn.return_type {
+        TypeInfo::Struct {
+            size_bytes: Some(n),
+            ..
+        } => *n,
+        TypeInfo::Opaque { size_bytes, .. } if *size_bytes > 0 => *size_bytes,
+        _ => return Some(SretPrestate { take_bytes: cry_k, drop_bytes: 0 }),
+    };
+
+    // Full buffer — no slicing needed.
+    if cry_k >= buf_size {
+        return Some(SretPrestate { take_bytes: cry_k, drop_bytes: 0 });
+    }
+
+    // Walk fields to find the unique field of size K.
+    let fields = match &target_fn.return_type {
+        TypeInfo::Struct { fields, .. } => fields,
+        _ => return Some(SretPrestate { take_bytes: cry_k, drop_bytes: 0 }),
+    };
+    let mut matches = Vec::new();
+    let mut offset = 0usize;
+    for (fname, fty) in fields {
+        if let Some((sz, align)) = clang_ast::cpp_type_size_align(fty) {
+            let rem = offset % align;
+            if rem != 0 {
+                offset += align - rem;
+            }
+            if sz == cry_k {
+                matches.push((fname.clone(), offset));
+            }
+            offset += sz;
+        }
+    }
+    match matches.len() {
+        1 => {
+            eprintln!(
+                "  → field `{}` at offset {} matches [{}][8]",
+                matches[0].0, matches[0].1, cry_k,
+            );
+            Some(SretPrestate {
+                take_bytes: cry_k,
+                drop_bytes: matches[0].1,
+            })
+        }
+        0 => {
+            eprintln!(
+                "warning: Cryptol pre-state expects [{cry_k}][8] but no field \
+                 of that size in return type; passing full buffer",
+            );
+            Some(SretPrestate { take_bytes: cry_k, drop_bytes: 0 })
+        }
+        _ => {
+            eprintln!(
+                "warning: Cryptol pre-state expects [{cry_k}][8] — multiple \
+                 fields match: {}; passing full buffer",
+                matches.iter().map(|(n, o)| format!("{n}@{o}")).collect::<Vec<_>>().join(", "),
+            );
+            Some(SretPrestate { take_bytes: cry_k, drop_bytes: 0 })
         }
     }
 }

@@ -57,7 +57,7 @@ mod visitor;
 #[allow(unused_imports)]
 pub use constructors::{extract_constructors, filter_ctors_by_ir_symbols, ClassConstructor};
 #[allow(unused_imports)]
-pub use cpp_types::lookup_known_type_size;
+pub use cpp_types::{cpp_type_size_align, lookup_known_type_size};
 #[allow(unused_imports)]
 pub use enum_bits::collect_all_enum_bits;
 #[allow(unused_imports)]
