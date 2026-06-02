@@ -226,6 +226,12 @@ pub fn cpp_type_size_align(ty: &TypeInfo) -> Option<(usize, usize)> {
         TypeInfo::Float(128) => Some((16, 16)),
         TypeInfo::Pointer(_) => Some((8, 8)),
         TypeInfo::ByteArray(n) => Some((*n, 1)),
+        TypeInfo::Enum {
+            discriminant_bits, ..
+        } => {
+            let bytes = (*discriminant_bits).div_ceil(8) as usize;
+            Some((bytes, bytes.max(1)))
+        }
         TypeInfo::Struct {
             size_bytes: Some(n),
             ..

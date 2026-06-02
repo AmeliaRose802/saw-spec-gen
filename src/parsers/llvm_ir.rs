@@ -21,7 +21,7 @@ pub mod callgraph;
 mod function_sig;
 mod load;
 mod params;
-mod struct_types;
+pub mod struct_types;
 mod tokens;
 mod type_parser;
 
@@ -35,4 +35,4 @@ pub use function_sig::extract_functions;
 #[allow(unused_imports)]
 pub use load::{load_optional, parse_llvm_ir, read_target_triple, MAX_IR_FILE_SIZE};
 #[allow(unused_imports)]
-pub use struct_types::struct_sizes;
+pub use struct_types::{struct_defs, struct_sizes, IrStructDef};

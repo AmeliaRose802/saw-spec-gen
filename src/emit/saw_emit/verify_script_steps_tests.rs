@@ -255,6 +255,7 @@ fn emit_sret_prestate_threads_prebytes_into_cryptol_call() {
         &interface_of,
         &[],
         Some(&SretPrestate {
+            buf_size: 20,
             take_bytes: 17,
             drop_bytes: 3,
         }),

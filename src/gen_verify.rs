@@ -111,7 +111,7 @@ pub fn run(
     // generated globals, etc.).  Without this, SAW aborts with
     // "Global symbol not allocated" when symbolically executing a body
     // that touches an IR-only global.
-    if let Some(ir_path) = llvm_ir_path {
+    let ir_struct_defs = if let Some(ir_path) = llvm_ir_path {
         if let Ok(ir_text) = std::fs::read_to_string(ir_path) {
             let extra =
                 crate::transform::ir_globals::discover_ir_only_globals(&ir_text, &all_globals);
@@ -122,8 +122,13 @@ pub fn run(
                 );
                 all_globals.extend(extra);
             }
+            llvm_ir::struct_defs(&ir_text)
+        } else {
+            HashMap::new()
         }
-    }
+    } else {
+        HashMap::new()
+    };
 
     // Inject the exception-lower bookkeeping globals (@__exclow_error_*)
     // with the right TypeInfo and pre-state init values. Must run after
@@ -428,6 +433,7 @@ pub fn run(
         &ctors,
         &stubs_status,
         &bitcode_overrides,
+        &ir_struct_defs,
         output,
     )?;
 

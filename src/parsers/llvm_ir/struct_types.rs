@@ -60,6 +60,43 @@ pub fn struct_sizes(ir: &str) -> HashMap<String, usize> {
     sizes
 }
 
+/// Return cleaned `name → IrStructDef` map where keys have the `%` and
+/// surrounding `"` stripped (e.g. `struct.EnrollmentStatus`), matching
+/// the canonical form used in SAW `llvm_alias` references.
+pub fn struct_defs(ir: &str) -> HashMap<String, IrStructDef> {
+    let raw = parse_struct_types(ir);
+    raw.into_iter()
+        .map(|(k, v)| {
+            let cleaned = k.trim_start_matches('%').trim_matches('"').to_string();
+            (cleaned, v)
+        })
+        .collect()
+}
+
+/// Compute the byte offset of each field in a struct definition,
+/// honoring alignment / packing. Returns `None` when any field's size
+/// or alignment is unresolvable.
+pub fn field_offsets(
+    def: &IrStructDef,
+    struct_map: &HashMap<String, IrStructDef>,
+) -> Option<Vec<usize>> {
+    let mut offsets = Vec::with_capacity(def.fields.len());
+    let mut offset = 0usize;
+    for field in &def.fields {
+        let size = compute_ir_type_size(field, struct_map)?;
+        if !def.is_packed {
+            let align = type_alignment(field, struct_map)?;
+            let rem = offset % align;
+            if rem != 0 {
+                offset += align - rem;
+            }
+        }
+        offsets.push(offset);
+        offset += size;
+    }
+    Some(offsets)
+}
+
 /// Compute the size in bytes of an LLVM IR type. Returns `None` for
 /// unknown types or unresolved struct references.
 pub fn compute_ir_type_size(ty: &str, struct_map: &HashMap<String, IrStructDef>) -> Option<usize> {
