@@ -27,7 +27,7 @@
 
 .PARAMETER ReleaseTag
     Which release of llvm-exception-lower to download prebuilt binaries
-    from (default: v0.3.1). The asset name is derived from the host
+    from (default: latest-main). The asset name is derived from the host
     platform: exception-lower-{platform}-{arch}.{ext} where {ext} is
     .zip on Windows and .tar.gz elsewhere.
 
@@ -55,7 +55,7 @@
 [CmdletBinding()]
 param(
     [string]$InstallRoot,
-    [string]$ReleaseTag = 'v0.3.1',
+    [string]$ReleaseTag = 'latest-main',
     [string]$Ref = 'main',
     [string]$LlvmBin,
     [switch]$Quiet,

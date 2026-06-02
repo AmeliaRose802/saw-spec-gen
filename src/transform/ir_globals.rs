@@ -61,6 +61,11 @@ pub(crate) fn scan_mutable_globals(ir: &str) -> MutableGlobals {
         if sym.is_empty() {
             continue;
         }
+        // Skip exception-lower synthesised globals — they are internal
+        // bookkeeping and must never be adversarially clobbered.
+        if sym.starts_with("__exclow_") {
+            continue;
+        }
         let s = sym.to_string();
         all.insert(s.clone());
         let is_internal = rhs
@@ -130,6 +135,12 @@ pub(crate) fn discover_ir_only_globals(
         }
         let sym = lhs.trim_start_matches('@').trim().trim_matches('"');
         if sym.is_empty() || known.contains(sym) {
+            continue;
+        }
+        // Skip exception-lower synthesised globals — they are handled
+        // separately by `eh_globals::inject_exclow_globals` and must
+        // not end up in the adversarial-clobber set.
+        if sym.starts_with("__exclow_") {
             continue;
         }
         // Find the type token right after `global `.
