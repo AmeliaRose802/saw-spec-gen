@@ -43,6 +43,7 @@ fn push_value_clauses(ty: &TypeInfo, var_name: &str, out: &mut Vec<String>) {
         TypeInfo::Bool
         | TypeInfo::SignedInt(_)
         | TypeInfo::UnsignedInt(_)
+        | TypeInfo::Float(_)
         | TypeInfo::ByteArray(_)
         | TypeInfo::Pointer(_)
         | TypeInfo::Opaque { .. }
@@ -146,6 +147,12 @@ mod tests {
         );
         assert_eq!(value_clauses(&opt, "o"), vec!["o <= (1 : [8])"]);
         assert_eq!(value_clauses(&res, "r"), vec!["r <= (1 : [8])"]);
+    }
+
+    #[test]
+    fn float_types_have_no_clauses() {
+        assert!(value_clauses(&TypeInfo::Float(32), "f").is_empty());
+        assert!(value_clauses(&TypeInfo::Float(64), "d").is_empty());
     }
 
     #[test]

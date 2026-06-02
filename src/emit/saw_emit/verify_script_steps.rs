@@ -288,6 +288,18 @@ pub(super) fn emit_equiv_spec_body(
             "    result_ptr <- llvm_alloc ({});\n",
             target_spec.return_constraint.saw_type,
         ));
+        if target_spec.return_constraint.sret_prestate {
+            // The Cryptol model takes the sret buffer's pre-call contents
+            // as a trailing parameter. Allocate a fresh symbolic value,
+            // bind it to the buffer before llvm_execute_func, and append
+            // it to the Cryptol argument list.
+            out.push_str(&format!(
+                "    result_pre <- llvm_fresh_var \"result_pre\" ({});\n",
+                target_spec.return_constraint.saw_type,
+            ));
+            out.push_str("    llvm_points_to result_ptr (llvm_term result_pre);\n");
+            cryptol_args.push("result_pre".to_string());
+        }
         let has_this = target_fn
             .params
             .first()

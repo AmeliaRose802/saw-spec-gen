@@ -185,6 +185,8 @@ fn match_primitive(ty_name: &str) -> Option<TypeInfo> {
         "ty::Int::I32" | "i32" => TypeInfo::SignedInt(32),
         "ty::Int::I64" | "i64" => TypeInfo::SignedInt(64),
         "ty::Int::Isize" | "isize" => TypeInfo::SignedInt(64),
+        "ty::Float::F32" | "f32" => TypeInfo::Float(32),
+        "ty::Float::F64" | "f64" => TypeInfo::Float(64),
         "()" | "ty::Tuple::unit" => TypeInfo::Void,
         _ => return None,
     })
@@ -318,5 +320,18 @@ mod tests {
         let m = HashMap::new();
         let t = extract_ref_inner_type("ty::Ref<'_, u8, Shared>", &m);
         assert_eq!(t, TypeInfo::UnsignedInt(8));
+    }
+
+    #[test]
+    fn float_types_map_to_float_variant() {
+        let m = HashMap::new();
+        let (t, _, _) = parse_rust_type_string("f32", false, &m);
+        assert_eq!(t, TypeInfo::Float(32));
+        let (t, _, _) = parse_rust_type_string("f64", false, &m);
+        assert_eq!(t, TypeInfo::Float(64));
+        let (t, _, _) = parse_rust_type_string("ty::Float::F32", false, &m);
+        assert_eq!(t, TypeInfo::Float(32));
+        let (t, _, _) = parse_rust_type_string("ty::Float::F64", false, &m);
+        assert_eq!(t, TypeInfo::Float(64));
     }
 }
