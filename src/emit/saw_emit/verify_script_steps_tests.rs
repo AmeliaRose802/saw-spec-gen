@@ -3,8 +3,8 @@
 //! Kept in a sibling file so that `verify_script_steps.rs` stays under
 //! the 500-non-whitespace-line repository limit.
 
-use super::*;
 use super::super::verify_script::SretPrestate;
+use super::*;
 
 #[test]
 fn cryptol_arg_for_wraps_bool_with_index_zero() {
@@ -254,7 +254,10 @@ fn emit_sret_prestate_threads_prebytes_into_cryptol_call() {
         &interface_classes,
         &interface_of,
         &[],
-        Some(&SretPrestate { take_bytes: 17, drop_bytes: 3 }),
+        Some(&SretPrestate {
+            take_bytes: 17,
+            drop_bytes: 3,
+        }),
     );
 
     // preBytes is allocated at FULL buffer size (20), not the slice size (17)
@@ -296,7 +299,9 @@ fn emit_sret_prestate_threads_prebytes_into_cryptol_call() {
     );
 
     assert!(
-        out.contains(&format!("getStatus_cpp (fE ! 0) (hK ! 0) (kA ! 0) keyId {slice_expr}")),
+        out.contains(&format!(
+            "getStatus_cpp (fE ! 0) (hK ! 0) (kA ! 0) keyId {slice_expr}"
+        )),
         "expected slice expression in Cryptol call; got:\n{out}"
     );
 }

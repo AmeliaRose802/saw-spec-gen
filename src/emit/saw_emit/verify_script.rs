@@ -292,18 +292,31 @@ fn detect_sret_prestate(
             ..
         } => *n,
         TypeInfo::Opaque { size_bytes, .. } if *size_bytes > 0 => *size_bytes,
-        _ => return Some(SretPrestate { take_bytes: cry_k, drop_bytes: 0 }),
+        _ => {
+            return Some(SretPrestate {
+                take_bytes: cry_k,
+                drop_bytes: 0,
+            })
+        }
     };
 
     // Full buffer — no slicing needed.
     if cry_k >= buf_size {
-        return Some(SretPrestate { take_bytes: cry_k, drop_bytes: 0 });
+        return Some(SretPrestate {
+            take_bytes: cry_k,
+            drop_bytes: 0,
+        });
     }
 
     // Walk fields to find the unique field of size K.
     let fields = match &target_fn.return_type {
         TypeInfo::Struct { fields, .. } => fields,
-        _ => return Some(SretPrestate { take_bytes: cry_k, drop_bytes: 0 }),
+        _ => {
+            return Some(SretPrestate {
+                take_bytes: cry_k,
+                drop_bytes: 0,
+            })
+        }
     };
     let mut matches = Vec::new();
     let mut offset = 0usize;
@@ -335,15 +348,25 @@ fn detect_sret_prestate(
                 "warning: Cryptol pre-state expects [{cry_k}][8] but no field \
                  of that size in return type; passing full buffer",
             );
-            Some(SretPrestate { take_bytes: cry_k, drop_bytes: 0 })
+            Some(SretPrestate {
+                take_bytes: cry_k,
+                drop_bytes: 0,
+            })
         }
         _ => {
             eprintln!(
                 "warning: Cryptol pre-state expects [{cry_k}][8] — multiple \
                  fields match: {}; passing full buffer",
-                matches.iter().map(|(n, o)| format!("{n}@{o}")).collect::<Vec<_>>().join(", "),
+                matches
+                    .iter()
+                    .map(|(n, o)| format!("{n}@{o}"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
             );
-            Some(SretPrestate { take_bytes: cry_k, drop_bytes: 0 })
+            Some(SretPrestate {
+                take_bytes: cry_k,
+                drop_bytes: 0,
+            })
         }
     }
 }
