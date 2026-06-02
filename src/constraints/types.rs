@@ -62,6 +62,8 @@ pub enum TypeInfo {
     SignedInt(u32),
     /// Unsigned integer with bit width
     UnsignedInt(u32),
+    /// IEEE 754 floating-point with bit width (32 = float, 64 = double)
+    Float(u32),
     /// Boolean (1-bit)
     Bool,
     /// Byte array of known size

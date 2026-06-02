@@ -121,6 +121,7 @@ fn type_short_name(ty: &TypeInfo) -> String {
         TypeInfo::Bool => "bool".into(),
         TypeInfo::SignedInt(bits) => format!("i{bits}"),
         TypeInfo::UnsignedInt(bits) => format!("u{bits}"),
+        TypeInfo::Float(bits) => format!("f{bits}"),
         TypeInfo::Struct { name, .. } => name.clone(),
         TypeInfo::Enum { name, .. } => name.clone(),
         TypeInfo::Opaque { name, .. } => name.clone(),
@@ -262,5 +263,11 @@ mod tests {
         assert!(dir.join("auto_constraints.cry").exists());
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn type_short_name_handles_floats() {
+        assert_eq!(type_short_name(&TypeInfo::Float(32)), "f32");
+        assert_eq!(type_short_name(&TypeInfo::Float(64)), "f64");
     }
 }
