@@ -110,6 +110,7 @@ fn std_integer_typedef_bits(name: &str) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::types::EnumVariant;
     use super::*;
 
     #[test]
@@ -151,7 +152,11 @@ mod tests {
     fn test_type_to_saw_enum() {
         let ty = TypeInfo::Enum {
             name: "Status".into(),
-            variants: vec!["Ok".into(), "Err".into(), "Pending".into()],
+            variants: vec![
+                EnumVariant::new("Ok", 0),
+                EnumVariant::new("Err", 1),
+                EnumVariant::new("Pending", 2),
+            ],
             discriminant_bits: 64,
         };
         assert_eq!(type_to_saw(&ty), "llvm_int 64");

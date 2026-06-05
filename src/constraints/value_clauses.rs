@@ -22,7 +22,7 @@
 //! covers exactly the legal values. New constrained types are added by
 //! extending [`push_value_clauses`].
 
-use super::types::TypeInfo;
+use super::types::{EnumVariant, TypeInfo};
 
 /// Return Cryptol expressions (without `llvm_precond` / `llvm_postcond`
 /// wrapper) that clamp a symbolic variable named `var_name` of type
@@ -49,21 +49,22 @@ fn push_value_clauses(ty: &TypeInfo, var_name: &str, out: &mut Vec<String>) {
         | TypeInfo::Opaque { .. }
         | TypeInfo::Void => {}
 
-        // Discriminant in `[0, variants.len())`. Assumes contiguous
-        // variant numbering starting at 0 — the default for C++
-        // `enum class` and Rust `#[repr(uN)] enum` without explicit
-        // discriminants. Variants with gaps will be over-constrained
-        // until we capture explicit discriminant values too.
+        // Discriminant constrained to the *declared* set of variant
+        // values. When the variants form `0, 1, …, N-1` (the default
+        // for C++ `enum class` without explicit values and for Rust
+        // unit enums) we emit the tight bound `var <= N-1`. When the
+        // variant values have gaps (`Ok = 0, NotFound = 2, Denied =
+        // 100`) we emit a disjunction `(var == v0) \/ (var == v1) \/
+        // …` so SAW does not havoc bit patterns the source language
+        // promises will never appear. Duplicate values (C/C++ aliases
+        // like `enum { A = 1, B = 1 }`) are deduped so the disjunction
+        // stays minimal.
         TypeInfo::Enum {
             variants,
             discriminant_bits,
             ..
         } if !variants.is_empty() => {
-            let max = variants.len() as u64 - 1;
-            out.push(format!(
-                "{var_name} <= ({max} : [{bits}])",
-                bits = discriminant_bits,
-            ));
+            out.push(enum_clause(var_name, variants, *discriminant_bits));
         }
         TypeInfo::Enum { .. } => {} // no variants known — skip
 
@@ -90,6 +91,41 @@ fn push_value_clauses(ty: &TypeInfo, var_name: &str, out: &mut Vec<String>) {
     }
 }
 
+/// Build the Cryptol clause that clamps a symbolic enum discriminant
+/// to its declared variant values.
+///
+/// - Empty input is a programming error (caller guards on
+///   `!variants.is_empty()`).
+/// - Variants are deduplicated by value so aliased members
+///   (`enum { A = 1, B = 1 }`) don't blow up the disjunction.
+/// - If the deduped values are exactly `0, 1, …, N-1` the clause is
+///   `var <= (N-1 : [bits])` — the tight range form, same as before.
+/// - Otherwise the clause is `(var == (v0 : [bits])) \/ (var == (v1 :
+///   [bits])) \/ …`. Sorting by value keeps output deterministic.
+fn enum_clause(var_name: &str, variants: &[EnumVariant], discriminant_bits: u32) -> String {
+    let mut values: Vec<i128> = variants.iter().map(|v| v.value).collect();
+    values.sort_unstable();
+    values.dedup();
+
+    if is_contiguous_from_zero(&values) {
+        let max = values.last().copied().unwrap_or(0);
+        return format!("{var_name} <= ({max} : [{discriminant_bits}])");
+    }
+
+    let terms: Vec<String> = values
+        .iter()
+        .map(|v| format!("({var_name} == ({v} : [{discriminant_bits}]))"))
+        .collect();
+    terms.join(" \\/ ")
+}
+
+/// True when `values` is `[0, 1, 2, …, N-1]`. Assumes the slice is
+/// sorted ascending and contains no duplicates (the caller guarantees
+/// both).
+fn is_contiguous_from_zero(values: &[i128]) -> bool {
+    values.iter().enumerate().all(|(i, v)| *v == i as i128)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,7 +146,11 @@ mod tests {
     fn enum_clamps_discriminant_to_variants_minus_one() {
         let ty = TypeInfo::Enum {
             name: "Status".into(),
-            variants: vec!["Ok".into(), "Err".into(), "Pending".into()],
+            variants: vec![
+                EnumVariant::new("Ok", 0),
+                EnumVariant::new("Err", 1),
+                EnumVariant::new("Pending", 2),
+            ],
             discriminant_bits: 8,
         };
         let cs = value_clauses(&ty, "status");
@@ -121,7 +161,7 @@ mod tests {
     fn enum_uses_declared_discriminant_bits() {
         let ty = TypeInfo::Enum {
             name: "Big".into(),
-            variants: vec!["A".into(), "B".into()],
+            variants: vec![EnumVariant::new("A", 0), EnumVariant::new("B", 1)],
             discriminant_bits: 32,
         };
         let cs = value_clauses(&ty, "x");
@@ -136,6 +176,100 @@ mod tests {
             discriminant_bits: 8,
         };
         assert!(value_clauses(&ty, "x").is_empty());
+    }
+
+    #[test]
+    fn enum_gapped_values_emit_membership_disjunction() {
+        // C++ `enum class Status : uint8_t { Ok = 0, NotFound = 2,
+        // Denied = 100 }`. The old `<= 2` form let SAW havoc the
+        // illegal value 1 (and rejected the legal value 100). The
+        // membership form pins SAW to exactly the declared set.
+        let ty = TypeInfo::Enum {
+            name: "Status".into(),
+            variants: vec![
+                EnumVariant::new("Ok", 0),
+                EnumVariant::new("NotFound", 2),
+                EnumVariant::new("Denied", 100),
+            ],
+            discriminant_bits: 8,
+        };
+        let cs = value_clauses(&ty, "s");
+        assert_eq!(
+            cs,
+            vec!["(s == (0 : [8])) \\/ (s == (2 : [8])) \\/ (s == (100 : [8]))"]
+        );
+    }
+
+    #[test]
+    fn enum_single_high_value_emits_equality() {
+        // A single non-zero variant must still emit a membership
+        // clause (a `<= 100` range would allow every value below).
+        let ty = TypeInfo::Enum {
+            name: "Singleton".into(),
+            variants: vec![EnumVariant::new("Only", 100)],
+            discriminant_bits: 8,
+        };
+        let cs = value_clauses(&ty, "s");
+        assert_eq!(cs, vec!["(s == (100 : [8]))"]);
+    }
+
+    #[test]
+    fn enum_aliased_values_deduped() {
+        // `enum { A = 1, B = 1, C = 1 }` is one inhabited value, not
+        // three — the disjunction collapses to a single equality.
+        let ty = TypeInfo::Enum {
+            name: "Aliased".into(),
+            variants: vec![
+                EnumVariant::new("A", 1),
+                EnumVariant::new("B", 1),
+                EnumVariant::new("C", 1),
+            ],
+            discriminant_bits: 8,
+        };
+        let cs = value_clauses(&ty, "v");
+        assert_eq!(cs, vec!["(v == (1 : [8]))"]);
+    }
+
+    #[test]
+    fn enum_unordered_declaration_sorts_terms() {
+        // Source order is irrelevant — the clause is deterministic in
+        // declaration-independent (value-sorted) order so equivalent
+        // inputs produce byte-identical specs.
+        let ty = TypeInfo::Enum {
+            name: "Reordered".into(),
+            variants: vec![
+                EnumVariant::new("Hundred", 100),
+                EnumVariant::new("Zero", 0),
+                EnumVariant::new("Two", 2),
+            ],
+            discriminant_bits: 8,
+        };
+        let cs = value_clauses(&ty, "x");
+        assert_eq!(
+            cs,
+            vec!["(x == (0 : [8])) \\/ (x == (2 : [8])) \\/ (x == (100 : [8]))"]
+        );
+    }
+
+    #[test]
+    fn enum_negative_signed_value() {
+        // Signed C++ enum (`enum class Sign : int8_t { Neg = -1, Zero
+        // = 0, Pos = 1 }`). Cryptol parses the literal `-1 : [8]` as
+        // the two's-complement pattern — SAW handles the rest.
+        let ty = TypeInfo::Enum {
+            name: "Sign".into(),
+            variants: vec![
+                EnumVariant::new("Neg", -1),
+                EnumVariant::new("Zero", 0),
+                EnumVariant::new("Pos", 1),
+            ],
+            discriminant_bits: 8,
+        };
+        let cs = value_clauses(&ty, "s");
+        assert_eq!(
+            cs,
+            vec!["(s == (-1 : [8])) \\/ (s == (0 : [8])) \\/ (s == (1 : [8]))"]
+        );
     }
 
     #[test]
@@ -169,7 +303,11 @@ mod tests {
                     "status".into(),
                     TypeInfo::Enum {
                         name: "Status".into(),
-                        variants: vec!["A".into(), "B".into(), "C".into()],
+                        variants: vec![
+                            EnumVariant::new("A", 0),
+                            EnumVariant::new("B", 1),
+                            EnumVariant::new("C", 2),
+                        ],
                         discriminant_bits: 8,
                     },
                 ),
@@ -188,7 +326,7 @@ mod tests {
                 "tag".into(),
                 TypeInfo::Enum {
                     name: "Tag".into(),
-                    variants: vec!["X".into(), "Y".into()],
+                    variants: vec![EnumVariant::new("X", 0), EnumVariant::new("Y", 1)],
                     discriminant_bits: 8,
                 },
             )],

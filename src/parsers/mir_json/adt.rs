@@ -3,7 +3,7 @@
 
 use super::node::{AdtDef, MirJson};
 use super::rust_types::parse_rust_type_string;
-use crate::constraints::TypeInfo;
+use crate::constraints::{EnumVariant, TypeInfo};
 use std::collections::HashMap;
 
 /// Build a `name → TypeInfo` table from the `adts` array. Each ADT
@@ -40,11 +40,26 @@ pub fn parse_adt_def(adt: &AdtDef) -> Option<(String, TypeInfo)> {
 }
 
 fn build_enum(adt: &AdtDef) -> TypeInfo {
-    let variant_names: Vec<String> = adt.variants.iter().filter_map(|v| v.name.clone()).collect();
+    // Walk variants in declared order. Each variant's discriminant is
+    // either explicit (`discr`) or implied by source position; the
+    // implied value follows the C/Rust rule of "previous + 1, starting
+    // at 0" so mixed explicit/implicit declarations behave the way
+    // source authors expect.
+    let mut next_implicit: i128 = 0;
+    let mut variants: Vec<EnumVariant> = Vec::new();
+    for v in &adt.variants {
+        let Some(name) = v.name.clone() else { continue };
+        let value = match v.discr {
+            Some(d) => d,
+            None => next_implicit,
+        };
+        next_implicit = value.saturating_add(1);
+        variants.push(EnumVariant::new(name, value));
+    }
     let disc_bits = adt.discriminant_bits.unwrap_or(64) as u32;
     TypeInfo::Enum {
         name: String::new(),
-        variants: variant_names,
+        variants,
         discriminant_bits: disc_bits,
     }
 }
@@ -109,11 +124,75 @@ mod tests {
                 discriminant_bits,
                 ..
             } => {
-                assert_eq!(variants, &vec!["A".to_string(), "B".to_string()]);
+                assert_eq!(
+                    variants,
+                    &vec![EnumVariant::new("A", 0), EnumVariant::new("B", 1)]
+                );
                 assert_eq!(*discriminant_bits, 32);
             }
             other => panic!("expected Enum, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn enum_adt_honors_explicit_discriminants() {
+        // Regression: explicit `discr` values flow into EnumVariant so
+        // the constraint emitter can produce membership predicates
+        // instead of incorrect `<= len-1` bounds for sparse C-style
+        // enums.
+        let mir = from_json(json!({
+            "adts": [{
+                "name": "E",
+                "kind": "enum",
+                "discriminant_bits": 8,
+                "variants": [
+                    {"name": "Ok",       "fields": [], "discr": 0},
+                    {"name": "NotFound", "fields": [], "discr": 2},
+                    {"name": "Denied",   "fields": [], "discr": 100}
+                ]
+            }]
+        }));
+        let map = build_adt_map(&mir);
+        let TypeInfo::Enum { variants, .. } = map.get("E").unwrap() else {
+            panic!("expected Enum");
+        };
+        assert_eq!(
+            variants,
+            &vec![
+                EnumVariant::new("Ok", 0),
+                EnumVariant::new("NotFound", 2),
+                EnumVariant::new("Denied", 100),
+            ]
+        );
+    }
+
+    #[test]
+    fn enum_adt_implicit_value_continues_after_explicit() {
+        // Mirrors C/Rust: an absent `discr` means "previous + 1".
+        let mir = from_json(json!({
+            "adts": [{
+                "name": "E",
+                "kind": "enum",
+                "discriminant_bits": 8,
+                "variants": [
+                    {"name": "A", "fields": []},
+                    {"name": "B", "fields": [], "discr": 10},
+                    {"name": "C", "fields": []}
+                ]
+            }]
+        }));
+        let map = build_adt_map(&mir);
+        let TypeInfo::Enum { variants, .. } = map.get("E").unwrap() else {
+            panic!("expected Enum");
+        };
+        assert_eq!(
+            variants,
+            &vec![
+                EnumVariant::new("A", 0),
+                EnumVariant::new("B", 10),
+                EnumVariant::new("C", 11),
+            ]
+        );
     }
 
     #[test]

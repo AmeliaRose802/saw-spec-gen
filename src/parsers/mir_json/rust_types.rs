@@ -228,6 +228,7 @@ pub fn parse_mir_return_type(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constraints::EnumVariant;
 
     #[test]
     fn primitives_map_to_typed_int_widths() {
@@ -297,7 +298,7 @@ mod tests {
             "MyEnum".to_string(),
             TypeInfo::Enum {
                 name: String::new(),
-                variants: vec!["A".into(), "B".into()],
+                variants: vec![EnumVariant::new("A", 0), EnumVariant::new("B", 1)],
                 discriminant_bits: 32,
             },
         );

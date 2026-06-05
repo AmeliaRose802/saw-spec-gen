@@ -59,17 +59,17 @@ fn generate_type_predicate(
             if !emitted.insert(fn_name.clone()) {
                 return None;
             }
-            let max = variants.len() as u64 - 1;
             let mut out = String::new();
             out.push_str(&format!("// Enum: {name} ({} variants)\n", variants.len()));
-            for (i, v) in variants.iter().enumerate() {
-                out.push_str(&format!("//   {i} = {v}\n"));
+            for v in variants.iter() {
+                out.push_str(&format!("//   {} = {}\n", v.value, v.name));
             }
             out.push_str(&format!(
                 "{fn_name} : [{bits}] -> Bit\n",
                 bits = discriminant_bits,
             ));
-            out.push_str(&format!("{fn_name} x = x <= {max}\n"));
+            let body = enum_predicate_body(variants, *discriminant_bits);
+            out.push_str(&format!("{fn_name} x = {body}\n"));
             Some(out)
         }
         TypeInfo::Option(inner) => {
@@ -147,6 +147,31 @@ fn sanitize_cry_name(name: &str) -> String {
         .collect()
 }
 
+/// Right-hand side of the Cryptol predicate body for an enum.
+///
+/// Mirrors [`crate::constraints::value_clauses`]'s gap detection so
+/// the generated predicate matches the inline pre/postconditions. The
+/// variable is fixed to `x` because the caller hard-codes the
+/// argument name in the function signature.
+fn enum_predicate_body(variants: &[EnumVariant], discriminant_bits: u32) -> String {
+    if variants.is_empty() {
+        return "True".into();
+    }
+    let mut values: Vec<i128> = variants.iter().map(|v| v.value).collect();
+    values.sort_unstable();
+    values.dedup();
+    let is_contiguous = values.iter().enumerate().all(|(i, v)| *v == i as i128);
+    if is_contiguous {
+        let max = values.last().copied().unwrap_or(0);
+        return format!("x <= ({max} : [{discriminant_bits}])");
+    }
+    let terms: Vec<String> = values
+        .iter()
+        .map(|v| format!("(x == ({v} : [{discriminant_bits}]))"))
+        .collect();
+    terms.join(" \\/ ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,13 +181,40 @@ mod tests {
         let mut emitted = std::collections::HashSet::new();
         let ty = TypeInfo::Enum {
             name: "LatchState".into(),
-            variants: vec!["Unlatched".into(), "Latched".into()],
+            variants: vec![
+                EnumVariant::new("Unlatched", 0),
+                EnumVariant::new("Latched", 1),
+            ],
             discriminant_bits: 64,
         };
         let pred = generate_type_predicate(&ty, &mut emitted).unwrap();
         assert!(pred.contains("valid_LatchState_disc"));
         assert!(pred.contains("[64] -> Bit"));
-        assert!(pred.contains("<= 1"));
+        assert!(
+            pred.contains("<= (1 : [64])"),
+            "expected range bound on max discriminant, got: {pred}"
+        );
+    }
+
+    #[test]
+    fn test_enum_predicate_gapped() {
+        // Sparse C++ enum produces a disjunction predicate body.
+        let mut emitted = std::collections::HashSet::new();
+        let ty = TypeInfo::Enum {
+            name: "Status".into(),
+            variants: vec![
+                EnumVariant::new("Ok", 0),
+                EnumVariant::new("NotFound", 2),
+                EnumVariant::new("Denied", 100),
+            ],
+            discriminant_bits: 8,
+        };
+        let pred = generate_type_predicate(&ty, &mut emitted).unwrap();
+        assert!(pred.contains("valid_Status_disc"));
+        assert!(
+            pred.contains("(x == (0 : [8])) \\/ (x == (2 : [8])) \\/ (x == (100 : [8]))"),
+            "expected membership disjunction, got: {pred}"
+        );
     }
 
     #[test]
@@ -210,7 +262,7 @@ mod tests {
                 name: "state".into(),
                 ty: TypeInfo::Enum {
                     name: "Status".into(),
-                    variants: vec!["Ok".into(), "Err".into()],
+                    variants: vec![EnumVariant::new("Ok", 0), EnumVariant::new("Err", 1)],
                     discriminant_bits: 32,
                 },
                 mutability: Mutability::Readonly,
@@ -243,7 +295,7 @@ mod tests {
                 name: "x".into(),
                 ty: TypeInfo::Enum {
                     name: "Status".into(),
-                    variants: vec!["Ok".into(), "Err".into()],
+                    variants: vec![EnumVariant::new("Ok", 0), EnumVariant::new("Err", 1)],
                     discriminant_bits: 32,
                 },
                 mutability: Mutability::Readonly,
