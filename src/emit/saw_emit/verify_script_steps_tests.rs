@@ -396,3 +396,112 @@ fn emit_sret_no_prestate_omits_prebytes() {
         "preBytes should NOT be in cryptol_args; got: {cryptol_args:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// BEGIN_PROOF / PROVED marker contract (saw-spec-gen-dtb)
+// ---------------------------------------------------------------------------
+//
+// SAW's `llvm_verify` (and `prove_print`) is silent on success. To let
+// downstream aggregators turn a single SAW invocation into per-property
+// results, the emitter wraps every verification command with stable
+// marker lines:
+//
+//     print "BEGIN_PROOF <function>";
+//     <verification command>
+//     print "PROVED <function>";
+//
+// See docs/proof-markers.md for the full contract.
+
+#[test]
+fn emit_verify_step_emits_begin_proof_marker_before_llvm_verify() {
+    let mut out = String::new();
+    let iface = InterfaceCtx {
+        has_interfaces: false,
+        vmethods: &[],
+        constructors: &[],
+    };
+    emit_verify_step(
+        &mut out,
+        1,
+        "add_one",
+        "add_one_spec",
+        "add_one",
+        &iface,
+        vec![],
+    );
+
+    assert!(
+        out.contains("print \"BEGIN_PROOF add_one\";"),
+        "expected BEGIN_PROOF marker; got:\n{out}"
+    );
+    let begin_idx = out
+        .find("print \"BEGIN_PROOF add_one\";")
+        .expect("BEGIN_PROOF marker missing");
+    let verify_idx = out.find("llvm_verify").expect("llvm_verify missing");
+    assert!(
+        begin_idx < verify_idx,
+        "BEGIN_PROOF must appear before llvm_verify; got:\n{out}"
+    );
+}
+
+#[test]
+fn emit_verify_step_emits_proved_marker_after_llvm_verify() {
+    let mut out = String::new();
+    let iface = InterfaceCtx {
+        has_interfaces: false,
+        vmethods: &[],
+        constructors: &[],
+    };
+    emit_verify_step(
+        &mut out,
+        1,
+        "add_one",
+        "add_one_spec",
+        "add_one",
+        &iface,
+        vec![],
+    );
+
+    assert!(
+        out.contains("print \"PROVED add_one\";"),
+        "expected PROVED marker; got:\n{out}"
+    );
+    let verify_idx = out.find("llvm_verify").expect("llvm_verify missing");
+    let proved_idx = out
+        .find("print \"PROVED add_one\";")
+        .expect("PROVED marker missing");
+    assert!(
+        verify_idx < proved_idx,
+        "PROVED must appear after llvm_verify; got:\n{out}"
+    );
+}
+
+#[test]
+fn emit_verify_step_marker_uses_mangled_independent_function_name() {
+    // Marker name follows the source `function_name`, not the mangled
+    // symbol. This is the stable key Parse-PropertyLog.ps1 keys on.
+    let mut out = String::new();
+    let iface = InterfaceCtx {
+        has_interfaces: false,
+        vmethods: &[],
+        constructors: &[],
+    };
+    emit_verify_step(
+        &mut out,
+        2,
+        "compute_hash",
+        "compute_hash_cry",
+        "?compute_hash@@YAXH@Z",
+        &iface,
+        vec![],
+    );
+
+    assert!(
+        out.contains("print \"BEGIN_PROOF compute_hash\";"),
+        "got:\n{out}"
+    );
+    assert!(
+        out.contains("print \"PROVED compute_hash\";"),
+        "got:\n{out}"
+    );
+}
