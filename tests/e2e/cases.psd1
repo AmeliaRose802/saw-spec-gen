@@ -166,6 +166,15 @@
         @{ Tag = 'cryptol_len_bind'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/cryptol_len_bind'; File = 'count_bytes_bind_verified.cpp'; Cry = 'count_bytes_spec.cry'; CryptolFn = 'count_bytes_spec'; Function = 'count_bytes'; Expected = 'VERIFIED';  ExtraSpecGenArgs = @('--bind-cryptol-lengths') }
         @{ Tag = 'cryptol_len_bind'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/cryptol_len_bind'; File = 'count_bytes_bind_verified.cpp'; Cry = 'count_bytes_spec.cry'; CryptolFn = 'count_bytes_spec'; Function = 'count_bytes'; Expected = 'DISPROVED' }
 
+        # ── ArrayView rule 2 (saw_spec_gen-5mt): `_In_z_(N)` SAL macro
+        #    for null-terminated input strings. The macro allocates an
+        #    N-byte buffer (same shape as `_In_reads_(N)`) so reads in
+        #    the bounded loop succeed. A future revision will auto-emit
+        #    a `findNul` Cryptol precondition (helper lives in
+        #    lib/cryptol/saw_strings.cry); today the macro only handles
+        #    the allocation. ─────────────────────────────────────────────
+        @{ Tag = 'in_z_macro'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/in_z_macro'; File = 'count_digits_z_verified.cpp'; Cry = 'count_digits_z_spec.cry'; CryptolFn = 'count_digits_z_spec'; Function = 'count_digits_z'; Expected = 'VERIFIED' }
+
         # ── Bitcode-driven extern override tests ────────────────────────────
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/bump';                    File = 'bump_verified.cpp';          Cry = 'bump_spec.cry';          CryptolFn = 'bump_spec';          Function = 'bump';          Expected = 'VERIFIED'  }
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/use_helper';              File = 'use_helper_verified.cpp';    Cry = 'use_helper_spec.cry';    CryptolFn = 'use_helper_spec';    Function = 'use_helper';    Expected = 'VERIFIED'  }

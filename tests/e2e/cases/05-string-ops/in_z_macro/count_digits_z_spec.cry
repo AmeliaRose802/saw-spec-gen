@@ -1,0 +1,12 @@
+// Cryptol spec for the `_In_z_(MAX)` SAL-macro e2e test.
+//
+// The spec is intentionally identical to count_digits_spec: the NUL
+// terminator does not affect the value semantics of "count ASCII
+// digits in a fixed 8-byte window". The test exercises the
+// allocation path triggered by `_In_z_(8)` — saw-spec-gen must
+// allocate 8 bytes (not the 1-byte fallback) for the proof to go
+// through.
+
+count_digits_z_spec : [8][8] -> [32]
+count_digits_z_spec s =
+  sum [ if (b >= 0x30 /\ b <= 0x39) then 1 else 0 | b <- s ]

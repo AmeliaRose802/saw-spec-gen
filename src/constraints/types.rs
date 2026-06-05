@@ -158,6 +158,14 @@ pub enum Annotation {
     InReadsParam(String),
     /// SAL: `_Out_writes_(<paramName>)` — see [`Annotation::InReadsParam`].
     OutWritesParam(String),
+    /// SAL: `_In_z_(MAX)` — null-terminated input string with maximum
+    /// element count `MAX`. saw-spec-gen treats this as the same shape
+    /// as [`Annotation::InReads`] for allocation purposes (a `MAX`-byte
+    /// buffer is allocated) and additionally emits a TODO note marking
+    /// the parameter as carrying a NUL terminator. A future revision
+    /// will auto-emit a `findNul` Cryptol precondition; see
+    /// `lib/cryptol/saw_strings.cry` for the helper definition.
+    InZ(usize),
     /// SAL: _Inout_ — read on entry, may be modified
     Inout,
     /// SAL: _Pre_valid_ — pointer is valid on entry
