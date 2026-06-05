@@ -235,7 +235,7 @@ pub fn dump_fallback_diagnostics(fb: &AliasFallbacks) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constraints::{Mutability, Nullability, ParamInfo};
+    use crate::constraints::{EnumVariant, Mutability, Nullability, ParamInfo};
 
     fn empty_func() -> FunctionInfo {
         FunctionInfo {
@@ -285,7 +285,7 @@ mod tests {
             "s",
             TypeInfo::Enum {
                 name: "SessionState".into(),
-                variants: vec!["A".into(), "B".into()],
+                variants: vec![EnumVariant::new("A", 0), EnumVariant::new("B", 1)],
                 discriminant_bits: 32,
             },
         ));
@@ -307,7 +307,10 @@ mod tests {
         let mut f = empty_func();
         f.return_type = TypeInfo::Enum {
             name: "LatchResult".into(),
-            variants: vec!["Ok".into(), "AlreadyLatched".into()],
+            variants: vec![
+                EnumVariant::new("Ok", 0),
+                EnumVariant::new("AlreadyLatched", 1),
+            ],
             discriminant_bits: 32,
         };
         let fb = collect_type_sizes(&[f]);

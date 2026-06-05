@@ -55,6 +55,32 @@ pub struct GlobalVarInfo {
     pub init_value: Option<String>,
 }
 
+/// One discriminant of an enum.
+///
+/// The `value` is the declared integer discriminant — sequential by
+/// default (Rust unit-like enums, C++ enums without explicit `= N`),
+/// but can be sparse for C++ enums with explicit values (e.g.
+/// `enum Status { Ok = 0, NotFound = 2, Denied = 100 }`) and for
+/// Rust enums with `#[repr(uN)]` and explicit discriminants.
+///
+/// Stored as `i128` so the same struct can hold signed and unsigned
+/// discriminants up to 64 bits without loss.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct EnumVariant {
+    pub name: String,
+    pub value: i128,
+}
+
+impl EnumVariant {
+    /// Construct a variant with the given name and discriminant value.
+    pub fn new(name: impl Into<String>, value: i128) -> Self {
+        Self {
+            name: name.into(),
+            value,
+        }
+    }
+}
+
 /// Language-independent type representation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeInfo {
@@ -76,10 +102,16 @@ pub enum TypeInfo {
         size_bytes: Option<usize>,
         fields: Vec<(String, TypeInfo)>,
     },
-    /// Enum with known variants and discriminant range
+    /// Enum with known variants and discriminant range.
+    ///
+    /// Each [`EnumVariant`] carries its declared discriminant value
+    /// (`Ok = 0`, `NotFound = 2`, `Denied = 100` for a C++
+    /// `enum class Status : uint8_t`). Constraint emission uses the
+    /// values directly to clamp symbolic SAW variables — see
+    /// [`super::value_clauses`].
     Enum {
         name: String,
-        variants: Vec<String>,
+        variants: Vec<EnumVariant>,
         discriminant_bits: u32,
     },
     /// Option<T> -- None or Some(T)

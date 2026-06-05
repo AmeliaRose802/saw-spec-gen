@@ -1,0 +1,20 @@
+// Cryptol spec for a gapped (non-contiguous) C++ enum.
+//
+// `enum class Status : uint8_t { Ok = 0, NotFound = 2, Denied = 100 }`
+// has only three legal discriminants: 0, 2, and 100. The
+// implementation switches over all three and ends with
+// `__builtin_unreachable()`, so SAW treats any other tag as a
+// verification failure.
+//
+// Without the auto-emitted membership precondition
+//
+//     (r == (0 : [8])) \/ (r == (2 : [8])) \/ (r == (100 : [8]))
+//
+// the solver picks `r = 1` (or any other gap value) and the case
+// DISPROVES. With the precondition the spec verifies: the function
+// returns the discriminant unchanged for every legal tag.
+//
+// See bd issue `saw_spec_gen-iyh`.
+
+classify_spec : [8] -> [32]
+classify_spec r = zext r

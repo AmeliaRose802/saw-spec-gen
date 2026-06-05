@@ -6,7 +6,7 @@
 use super::cpp_types::parse_cpp_type;
 use super::node::AstNode;
 use super::visitor::{walk, ClassStack, Visitor, WalkAction};
-use crate::constraints::TypeInfo;
+use crate::constraints::{EnumVariant, TypeInfo};
 use std::collections::{HashMap, HashSet};
 
 /// Bundled type-resolution context shared by every extractor in this
@@ -37,8 +37,12 @@ pub struct TypeContext {
     /// with a vptr.
     pub polymorphic_classes: HashSet<String>,
 
-    /// Enum name → `(variant_names, discriminant_bits)`.
-    pub enums: HashMap<String, (Vec<String>, u32)>,
+    /// Enum name → `(variants, discriminant_bits)`. Each variant
+    /// carries its explicit discriminant value (or the implied
+    /// "previous + 1" value), so downstream constraint emission can
+    /// distinguish contiguous-from-zero enums (range bound) from
+    /// sparse / aliased enums (membership disjunction).
+    pub enums: HashMap<String, (Vec<EnumVariant>, u32)>,
 }
 
 impl TypeContext {
@@ -214,12 +218,7 @@ impl<'a> Visitor for EnumVisitor<'a> {
             .and_then(|t| t.qual_type.as_deref())
             .map(enum_bits_from_underlying)
             .unwrap_or(32);
-        let variants: Vec<String> = node
-            .inner
-            .iter()
-            .filter(|c| c.kind == "EnumConstantDecl")
-            .filter_map(|c| c.name.clone())
-            .collect();
+        let variants = collect_enum_variants(node);
         if !variants.is_empty() {
             self.ctx.enums.insert(name.to_string(), (variants, bits));
         } else if node.fixed_underlying_type.is_some() {
@@ -234,6 +233,48 @@ impl<'a> Visitor for EnumVisitor<'a> {
         }
         WalkAction::Continue
     }
+}
+
+/// Extract `(name, value)` pairs from an `EnumDecl`'s
+/// `EnumConstantDecl` children.
+///
+/// Each `EnumConstantDecl` carries an explicit initializer expression
+/// when the source spells one out (`Ok = 0`, `Denied = 100`); we look
+/// for an integer literal anywhere in that subtree. When the source
+/// omits an initializer, the discriminant follows the C rule of
+/// "previous variant + 1, starting at 0". Tracking explicit values is
+/// what lets the constraint emitter produce a membership disjunction
+/// for sparse enums instead of the wrong `<= len-1` bound.
+fn collect_enum_variants(enum_node: &AstNode) -> Vec<EnumVariant> {
+    let mut next_implicit: i128 = 0;
+    let mut out: Vec<EnumVariant> = Vec::new();
+    for child in &enum_node.inner {
+        if child.kind != "EnumConstantDecl" {
+            continue;
+        }
+        let Some(vname) = child.name.clone() else {
+            continue;
+        };
+        let value = extract_enum_constant_value(child).unwrap_or(next_implicit);
+        next_implicit = value.saturating_add(1);
+        out.push(EnumVariant::new(vname, value));
+    }
+    out
+}
+
+/// DFS the subtree of an `EnumConstantDecl` for the first
+/// `IntegerLiteral` (the value of the initializer when one is
+/// present). Mirrors [`extract_field_default_literal`]'s pattern.
+fn extract_enum_constant_value(decl: &AstNode) -> Option<i128> {
+    fn dfs(n: &AstNode) -> Option<i128> {
+        if n.kind == "IntegerLiteral" {
+            if let Some(s) = n.value.as_ref().and_then(|v| v.as_str()) {
+                return s.parse::<i128>().ok();
+            }
+        }
+        n.inner.iter().find_map(dfs)
+    }
+    decl.inner.iter().find_map(dfs)
 }
 
 /// Walk inheritance graphs to a fixed point, marking every class whose
@@ -350,175 +391,5 @@ pub fn build_node_id_map(ast: &AstNode) -> HashMap<String, String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    fn parse(v: serde_json::Value) -> AstNode {
-        serde_json::from_value(v).unwrap()
-    }
-
-    #[test]
-    fn collects_struct_fields_and_polymorphism() {
-        let ast = parse(json!({
-            "kind": "TranslationUnitDecl",
-            "inner": [{
-                "kind": "CXXRecordDecl",
-                "name": "Foo",
-                "inner": [
-                    {"kind": "FieldDecl", "name": "x", "type": {"qualType": "int"}},
-                    {"kind": "CXXMethodDecl", "name": "f", "virtual": true}
-                ]
-            }]
-        }));
-        let ctx = build(&ast);
-        assert!(ctx.structs.contains_key("Foo"));
-        assert_eq!(ctx.structs["Foo"][0].0, "x");
-        assert!(ctx.polymorphic_classes.contains("Foo"));
-    }
-
-    #[test]
-    fn enums_with_underlying_type_are_recorded() {
-        let ast = parse(json!({
-            "kind": "TranslationUnitDecl",
-            "inner": [{
-                "kind": "EnumDecl",
-                "name": "E",
-                "fixedUnderlyingType": {"qualType": "uint8_t"},
-                "inner": [
-                    {"kind": "EnumConstantDecl", "name": "A"},
-                    {"kind": "EnumConstantDecl", "name": "B"}
-                ]
-            }]
-        }));
-        let ctx = build(&ast);
-        assert_eq!(ctx.enums["E"].1, 8);
-        assert_eq!(ctx.enums["E"].0, vec!["A", "B"]);
-    }
-
-    /// Regression for the `std::`-qualified underlying-type spelling.
-    /// Before the fix this fell through to the 32-bit default and the
-    /// generator emitted `llvm_int 32` for an IR `i8` parameter.
-    #[test]
-    fn enums_with_std_qualified_underlying_type_get_correct_width() {
-        let ast = parse(json!({
-            "kind": "TranslationUnitDecl",
-            "inner": [{
-                "kind": "EnumDecl", "name": "AuthResult",
-                "fixedUnderlyingType": {"qualType": "std::uint8_t"},
-                "inner": [{"kind": "EnumConstantDecl", "name": "Ok"}]
-            }]
-        }));
-        let ctx = build(&ast);
-        assert_eq!(ctx.enums["AuthResult"].1, 8);
-    }
-
-    #[test]
-    fn forward_declared_enum_seeds_empty_variants() {
-        let ast = parse(json!({
-            "kind": "TranslationUnitDecl",
-            "inner": [{
-                "kind": "EnumDecl",
-                "name": "Fwd",
-                "fixedUnderlyingType": {"qualType": "uint64_t"}
-            }]
-        }));
-        let ctx = build(&ast);
-        assert_eq!(ctx.enums["Fwd"].1, 64);
-        assert!(ctx.enums["Fwd"].0.is_empty());
-    }
-
-    #[test]
-    fn mutable_field_propagates_through_bases() {
-        let ast = parse(json!({
-            "kind": "TranslationUnitDecl",
-            "inner": [
-                {
-                    "kind": "CXXRecordDecl",
-                    "name": "Base",
-                    "inner": [{
-                        "kind": "FieldDecl",
-                        "name": "m",
-                        "type": {"qualType": "int"},
-                        "mutable": true
-                    }]
-                },
-                {
-                    "kind": "CXXRecordDecl",
-                    "name": "Derived",
-                    "bases": [{"type": {"qualType": "Base"}}],
-                    "inner": []
-                }
-            ]
-        }));
-        let ctx = build(&ast);
-        assert!(ctx.classes_with_mutable_field.contains("Base"));
-        assert!(ctx.classes_with_mutable_field.contains("Derived"));
-    }
-
-    #[test]
-    fn compute_class_layout_reuses_topmost_ancestor() {
-        let ast = parse(json!({
-            "kind": "TranslationUnitDecl",
-            "inner": [
-                {
-                    "kind": "CXXRecordDecl",
-                    "name": "OkLog",
-                    "inner": [{
-                        "kind": "FieldDecl",
-                        "name": "state",
-                        "type": {"qualType": "int"}
-                    }]
-                },
-                {
-                    "kind": "CXXRecordDecl",
-                    "name": "OkLogV2",
-                    "bases": [{"type": {"qualType": "OkLog"}}],
-                    "inner": []
-                }
-            ]
-        }));
-        let ctx = build(&ast);
-        let (name, fields) = compute_class_layout("OkLogV2", &ctx).unwrap();
-        assert_eq!(name, "class.OkLog");
-        assert_eq!(fields.len(), 1);
-    }
-
-    #[test]
-    fn field_default_literal_extracts_int() {
-        let f = parse(json!({
-            "kind": "FieldDecl",
-            "name": "x",
-            "hasInClassInitializer": true,
-            "type": {"qualType": "int"},
-            "inner": [{"kind": "IntegerLiteral", "value": "42"}]
-        }));
-        assert_eq!(extract_field_default_literal(&f), "42");
-    }
-
-    #[test]
-    fn field_default_literal_extracts_bool() {
-        let f = parse(json!({
-            "kind": "FieldDecl",
-            "name": "b",
-            "hasInClassInitializer": true,
-            "type": {"qualType": "bool"},
-            "inner": [{"kind": "CXXBoolLiteralExpr", "value": true}]
-        }));
-        assert_eq!(extract_field_default_literal(&f), "1");
-    }
-
-    #[test]
-    fn node_id_map_records_only_records() {
-        let ast = parse(json!({
-            "kind": "TranslationUnitDecl",
-            "inner": [
-                {"kind": "CXXRecordDecl", "id": "0xa", "name": "A"},
-                {"kind": "FunctionDecl", "id": "0xb", "name": "B"}
-            ]
-        }));
-        let map = build_node_id_map(&ast);
-        assert_eq!(map.get("0xa").map(String::as_str), Some("A"));
-        assert!(!map.contains_key("0xb"));
-    }
-}
+#[path = "type_ctx_tests.rs"]
+mod tests;

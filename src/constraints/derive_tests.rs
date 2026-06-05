@@ -2,7 +2,7 @@
 //! Extracted from `derive.rs` to keep that file under the 500-line limit.
 
 use super::*;
-use crate::constraints::ParamInfo;
+use crate::constraints::{EnumVariant, ParamInfo};
 
 #[test]
 fn test_derive_readonly_param() {
@@ -106,7 +106,11 @@ fn test_derive_enum_discriminant_constraint() {
             name: "status".into(),
             ty: TypeInfo::Enum {
                 name: "Status".into(),
-                variants: vec!["Ok".into(), "Err".into(), "Pending".into()],
+                variants: vec![
+                    EnumVariant::new("Ok", 0),
+                    EnumVariant::new("Err", 1),
+                    EnumVariant::new("Pending", 2),
+                ],
                 discriminant_bits: 8,
             },
             mutability: Mutability::Readonly,
@@ -146,7 +150,7 @@ fn test_derive_enum_indirect_skips_precondition() {
             name: "out".into(),
             ty: TypeInfo::Pointer(Box::new(TypeInfo::Enum {
                 name: "Status".into(),
-                variants: vec!["Ok".into(), "Err".into()],
+                variants: vec![EnumVariant::new("Ok", 0), EnumVariant::new("Err", 1)],
                 discriminant_bits: 32,
             })),
             mutability: Mutability::Mutable,
@@ -197,7 +201,7 @@ fn test_derive_return_enum_constraint() {
         params: vec![],
         return_type: TypeInfo::Enum {
             name: "Status".into(),
-            variants: vec!["A".into(), "B".into()],
+            variants: vec![EnumVariant::new("A", 0), EnumVariant::new("B", 1)],
             discriminant_bits: 32,
         },
         can_throw: false,

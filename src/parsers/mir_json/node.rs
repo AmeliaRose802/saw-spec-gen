@@ -102,6 +102,11 @@ pub struct AdtVariant {
     pub name: Option<String>,
     #[serde(default)]
     pub fields: Vec<AdtField>,
+    /// Explicit discriminant value, when mir-json records one for a
+    /// C-style enum. Absent for variants whose discriminant is implied
+    /// by source order (Rust's default `0, 1, 2, ...`).
+    #[serde(default)]
+    pub discr: Option<i128>,
     #[serde(flatten)]
     #[allow(dead_code)]
     pub extra: Map<String, Value>,

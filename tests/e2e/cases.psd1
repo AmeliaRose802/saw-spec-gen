@@ -183,6 +183,14 @@
         # unreachable, we want to notice and emit the precondition there
         # too (verify-rust.ps1 doesn't currently use saw-spec-gen).
         @{ Tag = 'enum_constraints'; Runner = 'rust'; Dir = 'tests/e2e/cases/07-enum-constraints/auth_enum'; File = 'auth_enum_verified.rs';  Expected = 'VERIFIED'; Cry = 'auth_enum_spec.cry'; CryptolFn = 'classify_spec'; Function = 'classify' }
+        # Gapped (non-contiguous) enum: `Status : uint8_t { Ok = 0,
+        # NotFound = 2, Denied = 100 }`. Regression for bd issue
+        # `saw_spec_gen-iyh` — saw-spec-gen used to emit a contiguous
+        # range bound `r <= (variants-1 : [N])` that both admitted
+        # undefined gap values (e.g. r = 1) and excluded valid tags
+        # (e.g. r = 100). The fix emits a membership disjunction; this
+        # case fails to verify without it.
+        @{ Tag = 'enum_constraints'; Runner = 'cpp';  Dir = 'tests/e2e/cases/07-enum-constraints/gapped_enum'; File = 'gapped_enum_verified.cpp'; Expected = 'VERIFIED'; Cry = 'gapped_enum_spec.cry'; CryptolFn = 'classify_spec'; Function = 'classify' }
 
         # ── Unknown concrete-impl dyn-trait case — removed pending real
         #    tool support. See bd issue saw-spec-gen-uki: restore once
