@@ -1,0 +1,3 @@
+// Cryptol spec returns Bit: True when x >$ 0 (signed comparison).
+check_positive_spec : [32] -> Bit
+check_positive_spec x = x >$ 0

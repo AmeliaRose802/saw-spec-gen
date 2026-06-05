@@ -235,3 +235,279 @@ pub fn detect_sret_prestate(
         );
     }
 }
+
+// ─── ABI adapter layer ──────────────────────────────────────────────
+
+/// An ABI width adapter for one parameter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AbiParamBridge {
+    /// No bridge — widths match.
+    Identity,
+    /// LLVM `i1` → Cryptol `Bit` via `(name ! 0)`.
+    BitExtract,
+    /// LLVM `iN` → Cryptol `[M]` where M < N: `drop`{N-M} name`.
+    Truncate { llvm_bits: u32, cry_bits: u32 },
+    /// LLVM `iM` → Cryptol `[N]` where M < N: `zext name`.
+    ZeroExtend { llvm_bits: u32, cry_bits: u32 },
+}
+
+/// An ABI width adapter for the return value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AbiReturnBridge {
+    Identity,
+    /// Cryptol `Bit` → LLVM `i1`: `[expr] : [1]`.
+    BitPack,
+    /// Cryptol `[M]` → LLVM `iN` where M < N: `zext`{N} expr`.
+    ZeroExtend {
+        cry_bits: u32,
+        llvm_bits: u32,
+    },
+    /// Cryptol `[M]` → LLVM `iN` where M > N: `drop`{M-N} expr`.
+    Truncate {
+        cry_bits: u32,
+        llvm_bits: u32,
+    },
+}
+
+impl AbiParamBridge {
+    pub fn wrap(&self, name: &str) -> String {
+        match self {
+            AbiParamBridge::Identity => name.to_string(),
+            AbiParamBridge::BitExtract => format!("({name} ! 0)"),
+            AbiParamBridge::Truncate {
+                llvm_bits,
+                cry_bits,
+            } => {
+                let d = llvm_bits - cry_bits;
+                format!("drop`{{{d}}} {name}")
+            }
+            AbiParamBridge::ZeroExtend { .. } => format!("zext {name}"),
+        }
+    }
+}
+
+impl AbiReturnBridge {
+    pub fn wrap(&self, expr: &str) -> String {
+        match self {
+            AbiReturnBridge::Identity => expr.to_string(),
+            AbiReturnBridge::BitPack => format!("[{expr}] : [1]"),
+            AbiReturnBridge::ZeroExtend { llvm_bits, .. } => {
+                format!("zext`{{{llvm_bits}}} ({expr})")
+            }
+            AbiReturnBridge::Truncate {
+                cry_bits,
+                llvm_bits,
+            } => {
+                let d = cry_bits - llvm_bits;
+                format!("drop`{{{d}}} ({expr})")
+            }
+        }
+    }
+}
+
+/// Select the parameter bridge for given LLVM and Cryptol bit widths.
+pub fn param_bridge(llvm_bits: u32, cry_bits: u32) -> AbiParamBridge {
+    if llvm_bits == cry_bits {
+        if llvm_bits == 1 {
+            AbiParamBridge::BitExtract
+        } else {
+            AbiParamBridge::Identity
+        }
+    } else if llvm_bits > cry_bits {
+        AbiParamBridge::Truncate {
+            llvm_bits,
+            cry_bits,
+        }
+    } else {
+        AbiParamBridge::ZeroExtend {
+            llvm_bits,
+            cry_bits,
+        }
+    }
+}
+
+/// Select the return bridge.
+pub fn return_bridge(cry_bits: u32, llvm_bits: u32) -> AbiReturnBridge {
+    if cry_bits == llvm_bits {
+        if llvm_bits == 1 {
+            AbiReturnBridge::BitPack
+        } else {
+            AbiReturnBridge::Identity
+        }
+    } else if cry_bits > llvm_bits {
+        AbiReturnBridge::Truncate {
+            cry_bits,
+            llvm_bits,
+        }
+    } else {
+        AbiReturnBridge::ZeroExtend {
+            cry_bits,
+            llvm_bits,
+        }
+    }
+}
+
+/// Parse `[N]` or `Bit` width from a Cryptol type fragment.
+pub fn parse_cry_width(ty: &str) -> Option<u32> {
+    let ty = ty.trim();
+    if ty == "Bit" {
+        return Some(1);
+    }
+    // [N][M] compound (e.g. [4][8] = 32 bits) — check BEFORE simple [N]
+    if ty.starts_with('[') && !ty.ends_with(']')
+        || (ty.starts_with('[') && ty.matches('[').count() > 1)
+    {
+        let inner = &ty[1..];
+        if let Some((n_str, rest)) = inner.split_once(']') {
+            if let Ok(n) = n_str.trim().parse::<u32>() {
+                if let Some(m) = parse_cry_width(rest) {
+                    return Some(n * m);
+                }
+            }
+        }
+    }
+    // Simple [N]
+    if ty.starts_with('[') && ty.ends_with(']') {
+        let inner = &ty[1..ty.len() - 1];
+        return inner.trim().parse().ok();
+    }
+    None
+}
+
+/// Read Cryptol param bit-widths from a type signature.
+pub fn cryptol_param_widths(cry_path: &std::path::Path, fn_name: &str) -> Option<Vec<u32>> {
+    let text = std::fs::read_to_string(cry_path).ok()?;
+    cryptol_param_widths_from_str(&text, fn_name)
+}
+
+fn cryptol_param_widths_from_str(text: &str, fn_name: &str) -> Option<Vec<u32>> {
+    let sig_prefix = format!("{fn_name} :");
+    let mut sig_lines = Vec::new();
+    let mut collecting = false;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if !collecting {
+            if trimmed.starts_with(&sig_prefix) {
+                let after_colon = trimmed.split_once(':')?.1;
+                sig_lines.push(after_colon.to_string());
+                collecting = true;
+            }
+        } else {
+            if trimmed.is_empty() {
+                break;
+            }
+            let first_char = line.chars().next().unwrap_or(' ');
+            if !first_char.is_whitespace() && first_char != '-' {
+                break;
+            }
+            sig_lines.push(trimmed.to_string());
+        }
+    }
+    if sig_lines.is_empty() {
+        return None;
+    }
+    let cleaned: Vec<String> = sig_lines
+        .iter()
+        .map(|l| match l.find("//") {
+            Some(idx) => l[..idx].to_string(),
+            None => l.clone(),
+        })
+        .collect();
+    let sig = cleaned.join(" ");
+    let parts = split_top_level_arrows(&sig);
+    if parts.len() <= 1 {
+        return Some(vec![]);
+    }
+    parts[..parts.len() - 1]
+        .iter()
+        .map(|p| parse_cry_width(p.trim()))
+        .collect()
+}
+
+fn split_top_level_arrows(sig: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0i32;
+    let chars: Vec<char> = sig.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+    while i < len {
+        match chars[i] {
+            '(' | '[' | '{' => {
+                depth += 1;
+                current.push(chars[i]);
+            }
+            ')' | ']' | '}' => {
+                depth -= 1;
+                current.push(chars[i]);
+            }
+            '-' if depth == 0 && i + 1 < len && chars[i + 1] == '>' => {
+                parts.push(current.trim().to_string());
+                current.clear();
+                i += 2;
+                continue;
+            }
+            _ => current.push(chars[i]),
+        }
+        i += 1;
+    }
+    let t = current.trim().to_string();
+    if !t.is_empty() {
+        parts.push(t);
+    }
+    parts
+}
+
+/// Read the Cryptol spec's trailing parameter byte width.
+pub fn cryptol_prestate_byte_width(cry_path: &std::path::Path, fn_name: &str) -> Option<usize> {
+    let text = std::fs::read_to_string(cry_path).ok()?;
+    let sig_prefix = format!("{fn_name} :");
+    let mut sig_lines = Vec::new();
+    let mut collecting = false;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if !collecting {
+            if trimmed.starts_with(&sig_prefix) {
+                let after_colon = trimmed.split_once(':')?.1;
+                sig_lines.push(after_colon.to_string());
+                collecting = true;
+            }
+        } else {
+            if trimmed.is_empty() {
+                break;
+            }
+            let first_char = line.chars().next().unwrap_or(' ');
+            if !first_char.is_whitespace() && first_char != '-' {
+                break;
+            }
+            sig_lines.push(trimmed.to_string());
+        }
+    }
+    if sig_lines.is_empty() {
+        return None;
+    }
+    let cleaned: Vec<String> = sig_lines
+        .iter()
+        .map(|l| match l.find("//") {
+            Some(idx) => l[..idx].to_string(),
+            None => l.clone(),
+        })
+        .collect();
+    let sig = cleaned.join(" ");
+    let parts = split_top_level_arrows(&sig);
+    if parts.len() < 2 {
+        return None;
+    }
+    let last_param = parts[parts.len() - 2].trim();
+    if last_param.starts_with('[') && last_param.ends_with("[8]") {
+        let inner = &last_param[1..];
+        if let Some((n_str, _)) = inner.split_once(']') {
+            return n_str.parse().ok();
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+#[path = "cryptol_bridge_tests.rs"]
+mod bridge_tests;

@@ -2,13 +2,8 @@
 //!
 //! Produces a SAW verification script + meta sidecar that lets
 //! `verify-rust.ps1` prove a Rust function matches a hand-written
-//! Cryptol spec. Replaces the inline `.ll`-regex + here-string
-//! emission that previously lived in PowerShell.
-//!
-//! The C++ generator (`commands::gen_verify_cmd`) and this Rust
-//! generator both go through [`crate::saw_emit::cryptol_bridge`] for
-//! the Cryptol/LLVM type bridge so a `*_spec.cry` authored for one
-//! runner type-checks under the other without surprise.
+//! Cryptol spec. Now supports sret, aggregate returns, range
+//! preconditions, buffer overrides, and `--spec-only-on-missing`.
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::json;
@@ -16,13 +11,16 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
-use crate::constraints::{FunctionInfo, TypeInfo};
+use crate::buffer_overrides::BufferOverrides;
+use crate::constraints::TypeInfo;
+use crate::gen_verify_helpers::emit_spec_only_result;
+use crate::gen_verify_rust_emit::{self, RustReturnKind, RustVerifyArtifacts, RustVerifyParam};
 use crate::parsers::llvm_ir::extract_functions;
-use crate::saw_emit::cryptol_bridge::cryptol_arg_for;
 
 /// Run the `gen-verify-rust` subcommand. Writes `verify_rust.saw`
 /// and `verify_rust.meta.json` into `output`, and copies the Cryptol
 /// spec next to them.
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     llvm_ir: &Path,
     bitcode: &Path,
@@ -30,6 +28,9 @@ pub fn run(
     cryptol_fn: &str,
     function: &str,
     output: &Path,
+    spec_only_on_missing: bool,
+    overrides: &BufferOverrides,
+    variant_map: &gen_verify_rust_emit::VariantMap,
 ) -> Result<()> {
     fs::create_dir_all(output)
         .with_context(|| format!("creating output dir {}", output.display()))?;
@@ -37,7 +38,13 @@ pub fn run(
     let ir =
         fs::read_to_string(llvm_ir).with_context(|| format!("reading {}", llvm_ir.display()))?;
 
-    let arts = resolve_target(&ir, function)?;
+    let arts = match resolve_target(&ir, function) {
+        Ok(a) => a,
+        Err(e) if spec_only_on_missing => {
+            return emit_spec_only_result(output, cryptol_fn, function, &format!("{e:#}"));
+        }
+        Err(e) => return Err(e),
+    };
 
     let cry_name = cryptol_spec
         .file_name()
@@ -60,7 +67,15 @@ pub fn run(
         .into_owned();
 
     let saw_path = output.join("verify_rust.saw");
-    let saw_text = emit_saw_script(function, cryptol_fn, &bc_name, &cry_name, &arts);
+    let saw_text = gen_verify_rust_emit::emit_saw_script(
+        function,
+        cryptol_fn,
+        &bc_name,
+        &cry_name,
+        &arts,
+        overrides,
+        variant_map,
+    );
     fs::write(&saw_path, saw_text).with_context(|| format!("writing {}", saw_path.display()))?;
 
     let meta_path = output.join("verify_rust.meta.json");
@@ -75,7 +90,7 @@ pub fn run(
             "bits": p.bits,
             "llvm_type": p.llvm_type,
         })).collect::<Vec<_>>(),
-        "return_bits": arts.return_bits,
+        "return_bits": arts.return_bits(),
         "return_llvm_type": arts.return_llvm_type,
         "globals": arts.globals,
     });
@@ -104,46 +119,28 @@ pub fn run(
     Ok(())
 }
 
-/// A single integer parameter to verify (every supported Rust fn arg
-/// today lowers to an `iN` at the LLVM boundary).
-#[derive(Debug, Clone)]
-pub struct RustVerifyParam {
-    pub index: usize,
-    /// Fresh-var name used in the SAW script (`x0`, `x1`, …). Stable
-    /// across runs so the counterexample probe in `verify-rust.ps1`
-    /// can correlate by index.
-    pub name: String,
-    pub bits: u32,
-    pub llvm_type: String,
-}
-
-/// Everything the SAW + meta emitters need about the resolved target.
-#[derive(Debug)]
-pub struct RustVerifyArtifacts {
-    pub mangled_name: String,
-    pub params: Vec<RustVerifyParam>,
-    pub return_bits: u32,
-    pub return_llvm_type: String,
-    pub globals: Vec<String>,
+/// A candidate target function with its resolved type information.
+struct ResolvedCandidate {
+    name: String,
+    params: Vec<RustVerifyParam>,
+    return_kind: RustReturnKind,
+    return_llvm_type: String,
 }
 
 /// Walk the IR text and resolve the mangled symbol whose source name
 /// is `function`, plus its full signature + the module's mutable
-/// globals. Mirrors the heuristic that used to live in
-/// `verify-rust.ps1` step 2:
+/// globals.
 ///
 /// 1. Pull every `define …` line via [`extract_functions`].
-/// 2. Keep those whose mangled symbol ends with `<len><function>` —
-///    the trailing length-prefixed segment of Rust v0 mangling.
-/// 3. Keep those with an integer-only `(iN, …) -> iN` signature so
-///    instantiated drop glue / vtable shims that the user's crate
-///    happens to monomorphize get filtered out.
+/// 2. Keep those whose mangled symbol ends with `<len><function>`.
+/// 3. Accept functions with integer params and scalar, sret, or
+///    aggregate return types. Reject ptr/void-only shims.
 /// 4. Pick the shortest remaining symbol; bail on a tie.
 fn resolve_target(ir: &str, function: &str) -> Result<RustVerifyArtifacts> {
     let funcs = extract_functions(ir, None).context("parsing LLVM IR functions")?;
     let suffix = format!("{}{}", function.len(), function);
 
-    let name_matches: Vec<&FunctionInfo> = funcs
+    let name_matches: Vec<_> = funcs
         .iter()
         .filter(|f| f.has_body && f.name.ends_with(&suffix))
         .collect();
@@ -157,37 +154,35 @@ fn resolve_target(ir: &str, function: &str) -> Result<RustVerifyArtifacts> {
         );
     }
 
-    let mut int_matches: Vec<(&FunctionInfo, Vec<u32>, u32)> = Vec::new();
-    for f in name_matches.iter().copied() {
-        let Some(bits) = collect_int_bits(&f.params) else {
-            continue;
-        };
-        let Some(ret) = type_int_bits(&f.return_type) else {
-            continue;
-        };
-        int_matches.push((f, bits, ret));
+    // Parse range attributes from raw IR lines for each candidate.
+    let range_map = parse_range_attrs(ir, &suffix);
+
+    let mut candidates: Vec<ResolvedCandidate> = Vec::new();
+    for f in &name_matches {
+        if let Some(c) = try_resolve_candidate(f, &range_map) {
+            candidates.push(c);
+        }
     }
-    if int_matches.is_empty() {
+    if candidates.is_empty() {
         let names = name_matches
             .iter()
             .map(|f| format!("  {}", f.name))
             .collect::<Vec<_>>()
             .join("\n");
         bail!(
-            "Found symbol(s) ending in '{}' but none have an integer-only \
-             (iN, ...) -> iN signature compatible with this verifier.\n\
-             Candidates were:\n{}",
+            "Found symbol(s) ending in '{}' but none have a compatible \
+             signature for this verifier.\nCandidates were:\n{}",
             suffix,
             names
         );
     }
-    int_matches.sort_by_key(|(f, ..)| f.name.len());
-    if int_matches.len() >= 2 && int_matches[0].0.name.len() == int_matches[1].0.name.len() {
-        let shortest = int_matches[0].0.name.len();
-        let tied = int_matches
+    candidates.sort_by_key(|c| c.name.len());
+    if candidates.len() >= 2 && candidates[0].name.len() == candidates[1].name.len() {
+        let shortest = candidates[0].name.len();
+        let tied = candidates
             .iter()
-            .take_while(|(f, ..)| f.name.len() == shortest)
-            .map(|(f, ..)| format!("  {}", f.name))
+            .take_while(|c| c.name.len() == shortest)
+            .map(|c| format!("  {}", c.name))
             .collect::<Vec<_>>()
             .join("\n");
         bail!(
@@ -200,33 +195,98 @@ fn resolve_target(ir: &str, function: &str) -> Result<RustVerifyArtifacts> {
         );
     }
 
-    let (chosen, arg_bits, ret_bits) = int_matches.into_iter().next().unwrap();
-    let params: Vec<RustVerifyParam> = arg_bits
-        .iter()
-        .enumerate()
-        .map(|(i, &bits)| RustVerifyParam {
-            index: i,
-            name: format!("x{i}"),
-            bits,
-            llvm_type: format!("i{bits}"),
-        })
-        .collect();
+    let chosen = candidates.into_iter().next().unwrap();
     let globals = scan_globals(ir);
     Ok(RustVerifyArtifacts {
-        mangled_name: chosen.name.clone(),
-        params,
-        return_bits: ret_bits,
-        return_llvm_type: format!("i{ret_bits}"),
+        mangled_name: chosen.name,
+        params: chosen.params,
+        return_kind: chosen.return_kind,
+        return_llvm_type: chosen.return_llvm_type,
         globals,
     })
 }
 
-fn collect_int_bits(params: &[crate::constraints::ParamInfo]) -> Option<Vec<u32>> {
-    params.iter().map(|p| type_int_bits(&p.ty)).collect()
+/// Try to build a [`ResolvedCandidate`] from a parsed function.
+/// Returns `None` if the signature is incompatible (e.g. ptr-only
+/// drop glue, void without sret).
+fn try_resolve_candidate(
+    f: &crate::constraints::FunctionInfo,
+    range_map: &std::collections::HashMap<String, Vec<Option<(u64, u64)>>>,
+) -> Option<ResolvedCandidate> {
+    let ranges = range_map.get(&f.name);
+    // Collect params — must all be integer-typed
+    let mut params = Vec::new();
+    for (i, p) in f.params.iter().enumerate() {
+        let bits = type_int_bits(&p.ty)?;
+        let range = ranges.and_then(|r| r.get(i).copied().flatten());
+        params.push(RustVerifyParam {
+            index: i,
+            name: format!("x{i}"),
+            bits,
+            llvm_type: format!("i{bits}"),
+            range,
+        });
+    }
+    // Determine return kind
+    let return_kind = classify_return(&f.return_type)?;
+    let return_llvm_type = format_return_llvm_type(&return_kind);
+    Some(ResolvedCandidate {
+        name: f.name.clone(),
+        params,
+        return_kind,
+        return_llvm_type,
+    })
+}
+
+fn classify_return(ty: &TypeInfo) -> Option<RustReturnKind> {
+    match ty {
+        TypeInfo::Bool => Some(RustReturnKind::Scalar { bits: 1 }),
+        TypeInfo::SignedInt(n) | TypeInfo::UnsignedInt(n) => {
+            Some(RustReturnKind::Scalar { bits: *n })
+        }
+        TypeInfo::Struct {
+            name,
+            size_bytes,
+            fields,
+        } => {
+            // Try aggregate (all fields are iN)
+            let field_bits: Option<Vec<u32>> =
+                fields.iter().map(|(_, ft)| type_int_bits(ft)).collect();
+            if let Some(fb) = field_bits {
+                return Some(RustReturnKind::Aggregate { field_bits: fb });
+            }
+            // Fallback: sret with known size
+            if let Some(sz) = size_bytes {
+                if *sz > 0 {
+                    return Some(RustReturnKind::Sret {
+                        llvm_type: format!("%{name}"),
+                        size_bytes: *sz,
+                    });
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn format_return_llvm_type(kind: &RustReturnKind) -> String {
+    match kind {
+        RustReturnKind::Scalar { bits } => format!("i{bits}"),
+        RustReturnKind::Sret { llvm_type, .. } => llvm_type.clone(),
+        RustReturnKind::Aggregate { field_bits } => {
+            let fields = field_bits
+                .iter()
+                .map(|b| format!("i{b}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{{ {fields} }}")
+        }
+    }
 }
 
 /// Width in bits of an `iN`-shaped [`TypeInfo`], or `None` for any
-/// other type (struct/ptr/array/void/etc.).
+/// other type.
 fn type_int_bits(t: &TypeInfo) -> Option<u32> {
     match t {
         TypeInfo::Bool => Some(1),
@@ -235,9 +295,111 @@ fn type_int_bits(t: &TypeInfo) -> Option<u32> {
     }
 }
 
-/// Scan the IR for mutable `global` *definitions* (skipping immutable
-/// `constant` items, external decls, and MSVC `__imp_*` import
-/// thunks). Returns names in source order, de-duplicated.
+/// Parse `range(lo, hi)` parameter attributes from IR define lines
+/// for functions matching `suffix`. Returns a map from mangled name
+/// to per-param optional range bounds.
+fn parse_range_attrs(
+    ir: &str,
+    suffix: &str,
+) -> std::collections::HashMap<String, Vec<Option<(u64, u64)>>> {
+    let mut map = std::collections::HashMap::new();
+    for line in ir.lines() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with("define ") {
+            continue;
+        }
+        let Some(at_pos) = trimmed.find('@') else {
+            continue;
+        };
+        let Some(paren_pos) = trimmed[at_pos..].find('(') else {
+            continue;
+        };
+        let name = &trimmed[at_pos + 1..at_pos + paren_pos];
+        if !name.ends_with(suffix) {
+            continue;
+        }
+        // Find matching close paren (respecting nesting).
+        let open = at_pos + paren_pos;
+        let Some(close) = find_matching_close(trimmed, open) else {
+            continue;
+        };
+        let params_str = &trimmed[open + 1..close];
+        let ranges = extract_param_ranges(params_str);
+        map.insert(name.to_string(), ranges);
+    }
+    map
+}
+
+/// Find closing `)` that matches the opening `(` at `open_pos`.
+fn find_matching_close(s: &str, open_pos: usize) -> Option<usize> {
+    let mut depth = 0i32;
+    for (i, ch) in s[open_pos..].char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(open_pos + i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Extract `range(lo, hi)` from a comma-separated parameter list.
+fn extract_param_ranges(params_str: &str) -> Vec<Option<(u64, u64)>> {
+    if params_str.trim().is_empty() {
+        return vec![];
+    }
+    split_ir_params(params_str)
+        .iter()
+        .map(|p| extract_single_range(p))
+        .collect()
+}
+
+fn extract_single_range(param: &str) -> Option<(u64, u64)> {
+    let idx = param.find("range(")?;
+    let rest = &param[idx + 6..];
+    let close = rest.find(')')?;
+    let inner = &rest[..close];
+    let mut parts = inner.split(',');
+    let lo: u64 = parts.next()?.trim().parse().ok()?;
+    let hi: u64 = parts.next()?.trim().parse().ok()?;
+    Some((lo, hi))
+}
+
+/// Split IR parameter list on commas, respecting parenthesized groups.
+fn split_ir_params(s: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0i32;
+    for ch in s.chars() {
+        match ch {
+            '(' => {
+                depth += 1;
+                current.push(ch);
+            }
+            ')' => {
+                depth -= 1;
+                current.push(ch);
+            }
+            ',' if depth == 0 => {
+                result.push(current.trim().to_string());
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+    let trimmed = current.trim().to_string();
+    if !trimmed.is_empty() {
+        result.push(trimmed);
+    }
+    result
+}
+
+/// Scan the IR for mutable `global` definitions.
 fn scan_globals(ir: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut seen = BTreeSet::new();
@@ -249,7 +411,6 @@ fn scan_globals(ir: &str) -> Vec<String> {
         let Some(eq_pos) = line.find('=') else {
             continue;
         };
-        // The `@<name>` token: stops at whitespace or `=`. Preserve quoting.
         let head = line[1..eq_pos].trim();
         if head.is_empty() {
             continue;
@@ -261,8 +422,6 @@ fn scan_globals(ir: &str) -> Vec<String> {
         if name.contains("__imp_") {
             continue;
         }
-        // What follows the `=` must be `(linkage-words…)? global ` —
-        // not `constant`, not `alias`, not `=` continuation, etc.
         let tail = line[eq_pos + 1..].trim_start();
         if !contains_global_keyword(tail) {
             continue;
@@ -274,246 +433,21 @@ fn scan_globals(ir: &str) -> Vec<String> {
     out
 }
 
-/// Return `true` if the first non-identifier token in `tail` is the
-/// `global` keyword (modulo any leading linkage / attribute words).
 fn contains_global_keyword(tail: &str) -> bool {
     for tok in tail.split_whitespace() {
-        // Identifier-shaped tokens are linkage/attr words to skip.
         let is_word = tok.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
         if !is_word {
             return false;
         }
-        if tok == "global" {
-            return true;
+        match tok {
+            "global" => return true,
+            "constant" | "alias" | "ifunc" => return false,
+            _ => {}
         }
-        if tok == "constant" || tok == "alias" || tok == "ifunc" {
-            return false;
-        }
-        // else: linkage/visibility/attr (private, internal, dso_local,
-        // unnamed_addr, …) → keep scanning.
     }
     false
 }
 
-fn emit_saw_script(
-    function: &str,
-    cryptol_fn: &str,
-    bc_name: &str,
-    cry_name: &str,
-    arts: &RustVerifyArtifacts,
-) -> String {
-    let mut buf = String::new();
-    buf.push_str(&format!(
-        "// Auto-generated by `saw-spec-gen gen-verify-rust`.\n\
-         // Prove that the Rust {function} (compiled to LLVM bitcode by rustc)\n\
-         // is extensionally equal to the Cryptol spec {cryptol_fn}.\n\
-         //\n\
-         // Mangled symbol resolved from the .ll: {mangled}\n\n\
-         m <- llvm_load_module \"{bc_name}\";\n\n\
-         import \"{cry_name}\";\n\n",
-        mangled = arts.mangled_name,
-    ));
-    buf.push_str(&format!("let {function}_equiv_spec = do {{\n"));
-    for g in &arts.globals {
-        buf.push_str(&format!(
-            "    llvm_alloc_global \"{g}\";\n    llvm_points_to (llvm_global \"{g}\") (llvm_global_initializer \"{g}\");\n"
-        ));
-    }
-    for p in &arts.params {
-        buf.push_str(&format!(
-            "    {name} <- llvm_fresh_var \"{name}\" (llvm_int {bits});\n",
-            name = p.name,
-            bits = p.bits,
-        ));
-    }
-    let exec_args = arts
-        .params
-        .iter()
-        .map(|p| format!("llvm_term {}", p.name))
-        .collect::<Vec<_>>()
-        .join(", ");
-    buf.push_str(&format!("    llvm_execute_func [{exec_args}];\n"));
-    let cry_call = if arts.params.is_empty() {
-        cryptol_fn.to_string()
-    } else {
-        let args = arts
-            .params
-            .iter()
-            .map(|p| cryptol_arg_for(&p.name, &bits_to_typeinfo(p.bits)))
-            .collect::<Vec<_>>()
-            .join(" ");
-        format!("{cryptol_fn} {args}")
-    };
-    buf.push_str(&format!(
-        "    llvm_return (llvm_term {{{{ {cry_call} }}}});\n"
-    ));
-    buf.push_str("};\n\n");
-    buf.push_str(&format!(
-        "print \"BEGIN_PROOF {function}\";\n\
-         llvm_verify m \"{}\" [] true {}_equiv_spec z3;\n\
-         print \"PROVED {function}\";\n\
-         print \"VERIFIED\";\n",
-        arts.mangled_name, function,
-    ));
-    buf
-}
-
-fn bits_to_typeinfo(bits: u32) -> TypeInfo {
-    match bits {
-        1 => TypeInfo::Bool,
-        n => TypeInfo::UnsignedInt(n),
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn resolves_simple_unary_function() {
-        let ir = "\
-define internal i32 @_RNvCs1234_8mycrate7add_one(i32 %x) unnamed_addr {
-entry:
-  ret i32 1
-}
-";
-        let arts = resolve_target(ir, "add_one").unwrap();
-        assert_eq!(arts.mangled_name, "_RNvCs1234_8mycrate7add_one");
-        assert_eq!(arts.params.len(), 1);
-        assert_eq!(arts.params[0].bits, 32);
-        assert_eq!(arts.return_bits, 32);
-        assert!(arts.globals.is_empty());
-    }
-
-    #[test]
-    fn bool_arg_is_bridged_in_saw_script() {
-        let ir = "\
-define i32 @_RNvCs0_4test4bf32(i1 %b) {
-entry:
-  ret i32 0
-}
-";
-        let arts = resolve_target(ir, "bf32").unwrap();
-        assert_eq!(arts.params[0].bits, 1);
-        let saw = emit_saw_script("bf32", "bf32_spec", "x.bc", "x.cry", &arts);
-        assert!(saw.contains("(x0 ! 0)"), "missing Bit bridge:\n{saw}");
-    }
-
-    #[test]
-    fn skips_drop_glue_via_signature_filter() {
-        // A monomorphized drop_in_place::<add_one> shim would match
-        // the `7add_one` suffix but have a ptr arg, which fails the
-        // integer-only filter — leaving the user's fn as the unique
-        // candidate.
-        let ir = "\
-define internal void @_RINvNtCs0_4core3ptr13drop_in_placeNvCs1_8mycrate7add_oneEB7_(ptr %0) {
-entry:
-  ret void
-}
-define internal i32 @_RNvCs1_8mycrate7add_one(i32 %x) {
-entry:
-  ret i32 1
-}
-";
-        let arts = resolve_target(ir, "add_one").unwrap();
-        assert_eq!(arts.mangled_name, "_RNvCs1_8mycrate7add_one");
-    }
-
-    #[test]
-    fn picks_up_mutable_globals_only() {
-        let ir = "\
-@COUNTER = internal global i32 0
-@MAX = internal constant i32 42
-@__imp_foo = external global ptr
-define i32 @_RNvCs0_2cc3get() {
-entry:
-  ret i32 0
-}
-";
-        let arts = resolve_target(ir, "get").unwrap();
-        assert_eq!(arts.globals, vec!["COUNTER".to_string()]);
-    }
-
-    // -----------------------------------------------------------------
-    // BEGIN_PROOF / PROVED marker contract (saw-spec-gen-dtb)
-    // -----------------------------------------------------------------
-
-    fn unary_i32_arts() -> RustVerifyArtifacts {
-        let ir = "\
-define internal i32 @_RNvCs1234_8mycrate7add_one(i32 %x) unnamed_addr {
-entry:
-  ret i32 1
-}
-";
-        resolve_target(ir, "add_one").unwrap()
-    }
-
-    #[test]
-    fn emit_saw_script_emits_begin_proof_before_llvm_verify() {
-        let arts = unary_i32_arts();
-        let saw = emit_saw_script(
-            "add_one",
-            "add_one_spec",
-            "add_one.bc",
-            "add_one.cry",
-            &arts,
-        );
-
-        assert!(
-            saw.contains("print \"BEGIN_PROOF add_one\";"),
-            "missing BEGIN_PROOF marker:\n{saw}"
-        );
-        let begin_idx = saw
-            .find("print \"BEGIN_PROOF add_one\";")
-            .expect("BEGIN_PROOF marker missing");
-        let verify_idx = saw.find("llvm_verify").expect("llvm_verify missing");
-        assert!(
-            begin_idx < verify_idx,
-            "BEGIN_PROOF must appear before llvm_verify:\n{saw}"
-        );
-    }
-
-    #[test]
-    fn emit_saw_script_emits_proved_after_llvm_verify() {
-        let arts = unary_i32_arts();
-        let saw = emit_saw_script(
-            "add_one",
-            "add_one_spec",
-            "add_one.bc",
-            "add_one.cry",
-            &arts,
-        );
-
-        assert!(
-            saw.contains("print \"PROVED add_one\";"),
-            "missing PROVED marker:\n{saw}"
-        );
-        let verify_idx = saw.find("llvm_verify").expect("llvm_verify missing");
-        let proved_idx = saw
-            .find("print \"PROVED add_one\";")
-            .expect("PROVED marker missing");
-        assert!(
-            verify_idx < proved_idx,
-            "PROVED must appear after llvm_verify:\n{saw}"
-        );
-    }
-
-    #[test]
-    fn emit_saw_script_keeps_legacy_verified_token_for_verify_ps1() {
-        // verify.ps1 currently regex-matches the literal `VERIFIED` to
-        // produce its RESULT line; preserve that signal so the new
-        // markers are purely additive.
-        let arts = unary_i32_arts();
-        let saw = emit_saw_script(
-            "add_one",
-            "add_one_spec",
-            "add_one.bc",
-            "add_one.cry",
-            &arts,
-        );
-        assert!(
-            saw.contains("VERIFIED"),
-            "lost legacy VERIFIED token:\n{saw}"
-        );
-    }
-}
+#[path = "gen_verify_rust_tests.rs"]
+mod tests;

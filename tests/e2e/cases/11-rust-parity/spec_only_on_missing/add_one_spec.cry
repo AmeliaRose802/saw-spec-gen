@@ -1,0 +1,3 @@
+// Dummy spec — function name won't match any Rust symbol.
+nonexistent_fn : [32] -> [32]
+nonexistent_fn x = x

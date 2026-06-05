@@ -123,13 +123,20 @@ pub enum Commands {
     ///          --cryptol-spec spec.cry --cryptol-fn add_one_spec \
     ///          --function add_one --output verify.saw
     GenVerify {
-        /// Path(s) to clang -ast-dump=json output.
+        /// Target language: `cpp` or `rust`. Auto-detected from
+        /// inputs when omitted: `rust` if `--llvm-ir` is provided
+        /// without `--ast`, `cpp` otherwise.
+        #[arg(long, value_name = "cpp|rust")]
+        lang: Option<String>,
+
+        /// Path(s) to clang -ast-dump=json output (C++ path).
         ///
         /// Pass `--ast` multiple times to merge interface headers with the
         /// translation unit holding the target function — gen-verify needs
         /// the interface ASTs to generate vtable stubs for virtual calls
         /// through `this->member` smart pointers.
-        #[arg(long, num_args = 1.., action = clap::ArgAction::Append, required = true)]
+        /// Not required when `--lang rust` is used.
+        #[arg(long, num_args = 1.., action = clap::ArgAction::Append)]
         ast: Vec<PathBuf>,
 
         /// Path to LLVM bitcode (.bc) file
@@ -278,6 +285,15 @@ pub enum Commands {
         /// Format: `FN=arg1,arg2,...`. Pass once per Cryptol fn.
         #[arg(long = "cryptol-arg-order", value_name = "FN=arg1,arg2,...", num_args = 0..)]
         cryptol_arg_order: Vec<String>,
+
+        /// Restrict verification to a subset of enum variants when
+        /// the impl has fewer variants than the canonical spec
+        /// (Rust path only).
+        /// Format: `PARAM=V1:disc1,V2:disc2,...` (e.g.
+        /// `x0=Success:0,AlreadyActive:1`). Use `return=V1:D1,...`
+        /// for a narrowing adapter on the return type.
+        #[arg(long = "variant-map", value_name = "PARAM=V1:D1,V2:D2,...", num_args = 0..)]
+        variant_map: Vec<String>,
     },
 
     /// Generate Rust trait vtable stubs + havoc specs for opaque
@@ -346,6 +362,43 @@ pub enum Commands {
         /// `verify_rust.meta.json`, and the copied Cryptol spec.
         #[arg(short, long)]
         output: PathBuf,
+
+        /// Soft-exit with `result.json` status `not_attempted`
+        /// instead of erroring when `--function` has no matching
+        /// Rust symbol in the LLVM IR. Same semantics as
+        /// `gen-verify --spec-only-on-missing`.
+        #[arg(long = "spec-only-on-missing", default_value_t = false)]
+        spec_only_on_missing: bool,
+
+        /// Read-only input buffer override. Format: `NAME=BYTES`.
+        #[arg(long = "in-buffer-size", value_name = "NAME=BYTES", num_args = 0..)]
+        in_buffer_size: Vec<String>,
+
+        /// Writable output buffer override. Format: `NAME=BYTES`.
+        #[arg(long = "out-buffer-param", value_name = "NAME=BYTES", num_args = 0..)]
+        out_buffer_param: Vec<String>,
+
+        /// Cryptol fn for out-buffer postcondition. Format: `OUT_PARAM=FN`.
+        #[arg(long = "cryptol-fn-out", value_name = "OUT_PARAM=FN", num_args = 0..)]
+        cryptol_fn_out: Vec<String>,
+
+        /// Emit `llvm_precond {{ NAME <= VAL }}`. Format: `NAME=VAL`.
+        #[arg(long = "max-len-precond", value_name = "NAME=VAL", num_args = 0..)]
+        max_len_precond: Vec<String>,
+
+        /// Explicit Cryptol argument order. Format: `FN=arg1,arg2,...`.
+        #[arg(long = "cryptol-arg-order", value_name = "FN=arg1,arg2,...", num_args = 0..)]
+        cryptol_arg_order: Vec<String>,
+
+        /// Restrict verification to a subset of enum variants when
+        /// the impl has fewer variants than the canonical spec.
+        /// Format: `PARAM=V1:disc1,V2:disc2,...` (e.g.
+        /// `x0=Success:0,AlreadyActive:1`). The generated spec
+        /// emits a membership precondition restricting the parameter
+        /// to the listed discriminants, and a narrowing adapter for
+        /// the return value. Pass once per parameter.
+        #[arg(long = "variant-map", value_name = "PARAM=V1:D1,V2:D2,...", num_args = 0..)]
+        variant_map: Vec<String>,
     },
 
     /// Strip system-header decls from a clang AST dump.
