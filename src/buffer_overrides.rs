@@ -157,6 +157,37 @@ impl BufferOverrides {
         }
         None
     }
+
+    /// Whether `param_name` is declared as an out-buffer.
+    pub fn is_out_buffer(&self, param_name: &str) -> bool {
+        self.out_buffer_sizes.contains_key(param_name)
+    }
+
+    /// Iterator over `(out_param_name, cryptol_fn)` pairs from
+    /// `--cryptol-fn-out`.
+    pub fn out_buffer_fns(&self) -> Vec<(&str, &str)> {
+        let mut v: Vec<_> = self
+            .cryptol_fn_out
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        v.sort_by_key(|(k, _)| k.to_string());
+        v
+    }
+
+    /// Ordered max-len preconditions for deterministic emission.
+    pub fn max_len_preconds_ordered(&self) -> &[(String, u64)] {
+        &self.max_len_preconds
+    }
+
+    /// Whether any overrides are configured.
+    pub fn is_empty(&self) -> bool {
+        self.in_buffer_sizes.is_empty()
+            && self.out_buffer_sizes.is_empty()
+            && self.cryptol_fn_out.is_empty()
+            && self.max_len_preconds.is_empty()
+            && self.cryptol_arg_orders.is_empty()
+    }
 }
 
 fn split_name_eq<'a>(s: &'a str, flag: &str) -> Result<(&'a str, &'a str)> {

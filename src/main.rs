@@ -34,6 +34,7 @@ fn main() -> Result<()> {
             target,
         } => commands::from_llvm_ir(input, output, filter, cryptol, emit_overrides, target),
         Commands::GenVerify {
+            lang,
             ast,
             bitcode,
             llvm_ir,
@@ -50,7 +51,9 @@ fn main() -> Result<()> {
             cryptol_fn_out,
             max_len_precond,
             cryptol_arg_order,
+            variant_map,
         } => commands::gen_verify_cmd(
+            lang,
             ast,
             bitcode,
             llvm_ir,
@@ -67,6 +70,7 @@ fn main() -> Result<()> {
             cryptol_fn_out,
             max_len_precond,
             cryptol_arg_order,
+            variant_map,
         ),
         Commands::GenRustTraitStubs { schema, output } => {
             commands::gen_rust_trait_stubs(schema, output)
@@ -78,6 +82,13 @@ fn main() -> Result<()> {
             cryptol_fn,
             function,
             output,
+            spec_only_on_missing,
+            in_buffer_size,
+            out_buffer_param,
+            cryptol_fn_out,
+            max_len_precond,
+            cryptol_arg_order,
+            variant_map,
         } => commands::gen_verify_rust_cmd(
             llvm_ir,
             bitcode,
@@ -85,6 +96,13 @@ fn main() -> Result<()> {
             cryptol_fn,
             function,
             output,
+            spec_only_on_missing,
+            in_buffer_size,
+            out_buffer_param,
+            cryptol_fn_out,
+            max_len_precond,
+            cryptol_arg_order,
+            variant_map,
         ),
         Commands::FilterAst {
             input,

@@ -1,0 +1,5 @@
+// Cryptol spec for is_success.
+// Takes a [8] (discriminant) and returns a [8] result.
+// When status == 0 → 1, else → 0.
+is_success_spec : [8] -> [8]
+is_success_spec status = if status == 0 then 1 else 0

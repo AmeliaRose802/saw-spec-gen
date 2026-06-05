@@ -296,5 +296,31 @@
         @{ Tag = 'proof_markers'; Runner = 'custom'; Expected = 'VERIFIED';
            Script = 'tests/e2e/cases/10-proof-markers/Check-ProofMarkers.ps1';
            ScriptArgs = @{} }
+
+        # ── Rust parity tests (saw-spec-gen-7fd / saw-spec-gen-5yl / saw-spec-gen-15t)
+        # Toolchain-light: need rustc + llvm-dis but NOT SAW (script
+        # generation only). These verify the gen-verify-rust CLI surface.
+
+        # spec-only-on-missing: gen-verify-rust soft-exits when the target
+        # function has no matching symbol in the LLVM IR.
+        @{ Tag = 'rust_parity'; Runner = 'custom'; Expected = 'VERIFIED';
+           Script = 'tests/e2e/cases/11-rust-parity/spec_only_on_missing/Check-SpecOnlyOnMissing.ps1';
+           ScriptArgs = @{} }
+
+        # variant-map: membership precondition emitted in generated SAW script.
+        @{ Tag = 'rust_parity'; Runner = 'custom'; Expected = 'VERIFIED';
+           Script = 'tests/e2e/cases/11-rust-parity/variant_map/Check-VariantMap.ps1';
+           ScriptArgs = @{} }
+
+        # return narrowing: --variant-map return=... emits if/then/else adapter.
+        @{ Tag = 'rust_parity'; Runner = 'custom'; Expected = 'VERIFIED';
+           Script = 'tests/e2e/cases/11-rust-parity/return_narrowing/Check-ReturnNarrowing.ps1';
+           ScriptArgs = @{} }
+
+        # unified gen-verify: gen-verify --lang rust produces identical output
+        # to gen-verify-rust.
+        @{ Tag = 'rust_parity'; Runner = 'custom'; Expected = 'VERIFIED';
+           Script = 'tests/e2e/cases/11-rust-parity/unified_gen_verify/Check-UnifiedGenVerify.ps1';
+           ScriptArgs = @{} }
     )
 }

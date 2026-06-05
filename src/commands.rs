@@ -273,6 +273,7 @@ fn emit_llvm_ir_overrides(
 
 #[allow(clippy::too_many_arguments)]
 pub fn gen_verify_cmd(
+    lang: Option<String>,
     ast: Vec<PathBuf>,
     bitcode: PathBuf,
     llvm_ir: Option<PathBuf>,
@@ -289,7 +290,49 @@ pub fn gen_verify_cmd(
     cryptol_fn_out: Vec<String>,
     max_len_precond: Vec<String>,
     cryptol_arg_order: Vec<String>,
+    variant_map: Vec<String>,
 ) -> Result<()> {
+    // Auto-detect language: Rust when --llvm-ir is provided without --ast
+    let effective_lang = match lang.as_deref() {
+        Some("rust") => "rust",
+        Some("cpp") => "cpp",
+        Some(other) => anyhow::bail!("--lang must be 'cpp' or 'rust', got '{other}'"),
+        None => {
+            if ast.is_empty() && llvm_ir.is_some() {
+                "rust"
+            } else {
+                "cpp"
+            }
+        }
+    };
+
+    if effective_lang == "rust" {
+        let ir_path = llvm_ir.ok_or_else(|| anyhow::anyhow!("--lang rust requires --llvm-ir"))?;
+        let overrides = crate::buffer_overrides::BufferOverrides::from_cli(
+            &in_buffer_size,
+            &out_buffer_param,
+            &cryptol_fn_out,
+            &max_len_precond,
+            &cryptol_arg_order,
+        )?;
+        let vmap = crate::gen_verify_rust_emit::VariantMap::parse_all(&variant_map)?;
+        return gen_verify_rust::run(
+            &ir_path,
+            &bitcode,
+            &cryptol_spec,
+            &cryptol_fn,
+            &function,
+            &output,
+            spec_only_on_missing,
+            &overrides,
+            &vmap,
+        );
+    }
+
+    // C++ path — --ast is required
+    if ast.is_empty() {
+        anyhow::bail!("--ast is required for C++ verification (use --lang rust for Rust)");
+    }
     let buffer_overrides = crate::buffer_overrides::BufferOverrides::from_cli(
         &in_buffer_size,
         &out_buffer_param,
@@ -325,6 +368,7 @@ pub fn gen_rust_trait_stubs(schema: PathBuf, output: PathBuf) -> Result<()> {
 
 /// Implementation of `gen-verify-rust`. See [`gen_verify_rust::run`]
 /// for the heavy lifting.
+#[allow(clippy::too_many_arguments)]
 pub fn gen_verify_rust_cmd(
     llvm_ir: PathBuf,
     bitcode: PathBuf,
@@ -332,7 +376,22 @@ pub fn gen_verify_rust_cmd(
     cryptol_fn: String,
     function: String,
     output: PathBuf,
+    spec_only_on_missing: bool,
+    in_buffer_size: Vec<String>,
+    out_buffer_param: Vec<String>,
+    cryptol_fn_out: Vec<String>,
+    max_len_precond: Vec<String>,
+    cryptol_arg_order: Vec<String>,
+    variant_map: Vec<String>,
 ) -> Result<()> {
+    let overrides = crate::buffer_overrides::BufferOverrides::from_cli(
+        &in_buffer_size,
+        &out_buffer_param,
+        &cryptol_fn_out,
+        &max_len_precond,
+        &cryptol_arg_order,
+    )?;
+    let vmap = crate::gen_verify_rust_emit::VariantMap::parse_all(&variant_map)?;
     gen_verify_rust::run(
         &llvm_ir,
         &bitcode,
@@ -340,6 +399,9 @@ pub fn gen_verify_rust_cmd(
         &cryptol_fn,
         &function,
         &output,
+        spec_only_on_missing,
+        &overrides,
+        &vmap,
     )
 }
 
