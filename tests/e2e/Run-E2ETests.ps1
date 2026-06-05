@@ -133,9 +133,14 @@ function Invoke-Case($c) {
             Remove-StaleOutputDir $c.Dir 'out_' $c.File
             $cpp = Resolve-RepoPath (Join-Path $c.Dir $c.File)
             $cry = Resolve-RepoPath (Join-Path $c.Dir $d.Cry)
-            & (Join-Path $RepoRoot 'verify.ps1') `
-                -CppFile $cpp -CryptolSpec $cry `
-                -CryptolFn $d.CryptolFn -Function $d.Function *>&1 | Out-String
+            $verifyArgs = @{
+                CppFile     = $cpp
+                CryptolSpec = $cry
+                CryptolFn   = $d.CryptolFn
+                Function    = $d.Function
+            }
+            if ($c.ExtraSpecGenArgs) { $verifyArgs.ExtraSpecGenArgs = $c.ExtraSpecGenArgs }
+            & (Join-Path $RepoRoot 'verify.ps1') @verifyArgs *>&1 | Out-String
         }
         'rust' {
             $d = Get-CaseDefaults $c

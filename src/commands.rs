@@ -283,7 +283,20 @@ pub fn gen_verify_cmd(
     alias_size: Vec<String>,
     alias_enum: Vec<String>,
     use_llvm_combine_modules: bool,
+    spec_only_on_missing: bool,
+    in_buffer_size: Vec<String>,
+    out_buffer_param: Vec<String>,
+    cryptol_fn_out: Vec<String>,
+    max_len_precond: Vec<String>,
+    cryptol_arg_order: Vec<String>,
 ) -> Result<()> {
+    let buffer_overrides = crate::buffer_overrides::BufferOverrides::from_cli(
+        &in_buffer_size,
+        &out_buffer_param,
+        &cryptol_fn_out,
+        &max_len_precond,
+        &cryptol_arg_order,
+    )?;
     gen_verify::run(
         &ast,
         &bitcode,
@@ -295,6 +308,8 @@ pub fn gen_verify_cmd(
         &alias_size,
         &alias_enum,
         use_llvm_combine_modules,
+        spec_only_on_missing,
+        &buffer_overrides,
     )
 }
 

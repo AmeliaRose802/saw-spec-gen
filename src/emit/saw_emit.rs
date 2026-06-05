@@ -37,6 +37,7 @@ pub mod stl_overrides;
 mod stubs;
 mod types;
 mod verify_script;
+mod verify_script_close;
 mod verify_script_steps;
 mod vtable_ir;
 mod writer;

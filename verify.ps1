@@ -74,7 +74,19 @@ param(
     [string]$OutputDir,
     [string[]]$IncludeDirs = @(),
     [string]$CxxStandard,
-    [string[]]$ClangFlags = @()
+    [string[]]$ClangFlags = @(),
+    # Extra flags appended verbatim to `saw-spec-gen gen-verify`. Used to
+    # thread per-case buffer-override CLI flags (--out-buffer-param,
+    # --in-buffer-size, --cryptol-fn-out, --max-len-precond,
+    # --cryptol-arg-order, …) without hard-coding them here. Each entry
+    # is passed as a separate argv element.
+    [string[]]$ExtraSpecGenArgs = @(),
+    # Soft-exit (write result.json with status=not_attempted) instead
+    # of erroring out when the target Cryptol function has no matching
+    # C++ symbol — i.e. it's a Cryptol-only helper. Intended for batch
+    # pipelines (pretty-specs/pipeline.ps1) that drive verify.ps1 over
+    # every Cryptol top-level def.
+    [switch]$SpecOnlyOnMissing
 )
 
 $ErrorActionPreference = "Stop"
@@ -254,8 +266,32 @@ $genVerifyArgs = @(
 if ($llFile) {
     $genVerifyArgs += @('--llvm-ir', $llFile)
 }
+if ($SpecOnlyOnMissing) {
+    $genVerifyArgs += @('--spec-only-on-missing')
+}
+if ($ExtraSpecGenArgs -and $ExtraSpecGenArgs.Count -gt 0) {
+    $genVerifyArgs += $ExtraSpecGenArgs
+}
 & $specGen @genVerifyArgs 2>&1 | Write-Host
 if ($LASTEXITCODE -ne 0) { Write-Error "saw-spec-gen failed"; exit 1 }
+
+# Spec-only short-circuit: if --spec-only-on-missing was set and the
+# target had no implementation, gen-verify wrote a result.json marking
+# it as not_attempted and produced no verify.saw. Skip the SAW steps
+# and exit cleanly so the parent pipeline classifies this as a soft
+# success (not_attempted) rather than a hard error.
+$resultFile = Join-Path $OutputDir "result.json"
+if ($SpecOnlyOnMissing -and (Test-Path $resultFile)) {
+    try {
+        $existing = Get-Content $resultFile -Raw | ConvertFrom-Json
+        if ($existing.status -eq "not_attempted") {
+            Write-Host "  spec-only: no C++ implementation for '$Function' — skipping SAW." -ForegroundColor DarkYellow
+            exit 0
+        }
+    } catch {
+        # malformed result.json — fall through and let SAW try
+    }
+}
 $verifySaw = Join-Path $OutputDir "verify.saw"
 Write-Host "  → $verifySaw" -ForegroundColor Green
 
@@ -334,6 +370,7 @@ Write-Host "══════════════════════�
 # verify-equiv.ps1, the e2e runner, and the `saw-spec-gen
 # collect-results` adapter.  See docs/result-json.md for the schema.
 . (Join-Path $ScriptRoot 'scripts/Write-ResultJson.ps1')
+. (Join-Path $ScriptRoot 'scripts/Invoke-CounterexampleProbe.ps1')
 function Write-ResultJson($verdict, $cex, $expected, $actual) {
     $payloadArgs = @{
         OutputDir      = $OutputDir
@@ -386,96 +423,17 @@ if ($sawOutput -match "Counterexample") {
     }
 
     # ── Evaluate expected vs actual at counterexample inputs ────────────────
+    $expectedVal = $null
+    $actualVal   = $null
     if ($cexPairs.Count -gt 0) {
-        $displayArgs = ($cexPairs | ForEach-Object { "$($_.Value)" }) -join ", "
-
-        # Evaluate Cryptol spec at counterexample values
-        $cryptolArgs = ($cexPairs | ForEach-Object { "($($_.Value) : [32])" }) -join " "
-        $cryptolExpr = "$CryptolFn $cryptolArgs"
-        $evalScript  = Join-Path $OutputDir "_eval_cex.saw"
-        $cryFileName = [System.IO.Path]::GetFileName($cryDest)
-        @"
-import "$cryFileName";
-let r = eval_int {{ $cryptolExpr }};
-print (str_concat "CRYPTOL_RESULT=" (show r));
-"@ | Set-Content $evalScript -Encoding utf8
-
-        Push-Location $OutputDir
-        $evalOut = & $saw "_eval_cex.saw" 2>&1 | Out-String
-        Pop-Location
-
-        $expectedVal = $null
-        if ($evalOut -match "CRYPTOL_RESULT=(\d+)") {
-            $expectedVal = $Matches[1]
-        }
-
-        # Compile + run C++ function at counterexample values
-        $testCpp = Join-Path $OutputDir "_test_cex.cpp"
-        $testExe = Join-Path $OutputDir ("_test_cex" + $exeExt)
-        $cppArgs = ($cexPairs | ForEach-Object { "$($_.Value)u" }) -join ", "
-        $origSrc = Get-Content $CppFile -Raw
-        @"
-$origSrc
-
-#include <cstdio>
-#include <cstring>
-int main() {
-    auto result = ${Function}($cppArgs);
-    // memcpy zero-fills any padding so signed return types don't get
-    // sign-extended into the upper bits of the printed u64. Matches the
-    // bit pattern SAW sees, so the poison-detection heuristic below
-    // can compare it apples-to-apples against the Cryptol spec value.
-    unsigned long long _bits = 0;
-    size_t _n = sizeof(result) < sizeof(_bits) ? sizeof(result) : sizeof(_bits);
-    std::memcpy(&_bits, &result, _n);
-    printf("CPP_RESULT=%llu\n", _bits);
-    return 0;
-}
-"@ | Set-Content $testCpp -Encoding utf8
-
-        & $clang -O0 -target $llvmTarget @userClangFlags $testCpp -o $testExe 2>$null
-        $actualVal = $null
-        if (Test-Path $testExe) {
-            $cppOut = & $testExe 2>&1 | Out-String
-            if ($cppOut -match "CPP_RESULT=(\d+)") {
-                $actualVal = $Matches[1]
-            }
-        }
-
-        if ($expectedVal -or $actualVal) {
-            Write-Host "  Expected vs Actual at ($displayArgs):" -ForegroundColor White
-            if ($expectedVal) {
-                Write-Host "    Cryptol $CryptolFn($displayArgs) = $expectedVal" -ForegroundColor Green
-            }
-            if ($actualVal) {
-                Write-Host "    C++     $Function($displayArgs)  = $actualVal" -ForegroundColor Red
-            }
-            Write-Host ""
-        }
-
-        # ── Poison / UB heuristic ─────────────────────────────────
-        # If the Cryptol spec and a concrete recompile-and-run of the C++
-        # produce the *same* value at the counterexample inputs, the proof
-        # almost certainly failed not because of a logic disagreement but
-        # because the LLVM IR carries an `nsw` / `nuw` / `inbounds` flag,
-        # or an `sdiv` / `udiv` whose UB-on-overflow case is reachable,
-        # which turns the operation into *poison* at those inputs. SAW
-        # compares LLVM semantics (poison ≠ any concrete spec value), so
-        # the obligation fails even though both sides agree on the value.
-        if ($expectedVal -and $actualVal -and $expectedVal -eq $actualVal) {
-            Write-Host "  NOTE: Expected and Actual agree at the counterexample." -ForegroundColor Yellow
-            Write-Host "        This is the signature of an LLVM UB / poison failure," -ForegroundColor Yellow
-            Write-Host "        not a logic disagreement. Common causes in C++:" -ForegroundColor Yellow
-            Write-Host "          - signed arithmetic with nsw       (signed overflow -> poison)" -ForegroundColor DarkYellow
-            Write-Host "          - unsigned arithmetic with nuw     (unsigned overflow -> poison)" -ForegroundColor DarkYellow
-            Write-Host "          - sdiv / udiv on a path where the divisor or overflow" -ForegroundColor DarkYellow
-            Write-Host "            corner is reachable (sdiv INT_MIN,-1 / udiv x,0 -> poison)" -ForegroundColor DarkYellow
-            Write-Host "          - getelementptr with inbounds      (out-of-bounds -> poison)" -ForegroundColor DarkYellow
-            Write-Host "        Inspect the emitted .ll for the relevant flag, and either" -ForegroundColor DarkYellow
-            Write-Host "        recompile with -fwrapv / cast through unsigned, or fix" -ForegroundColor DarkYellow
-            Write-Host "        the underlying bug the flag is warning about." -ForegroundColor DarkYellow
-            Write-Host ""
-        }
+        $probeResult = Invoke-CounterexampleProbe `
+            -CexPairs $cexPairs -CryptolFn $CryptolFn `
+            -OutputDir $OutputDir -CryDest $cryDest `
+            -SawExe $saw -CppFile $CppFile -ExeExt $exeExt `
+            -Function $Function -ClangExe $clang `
+            -LlvmTarget $llvmTarget -UserClangFlags $userClangFlags
+        $expectedVal = $probeResult.ExpectedVal
+        $actualVal   = $probeResult.ActualVal
     }
 
     # Show which overrides fired (with demangled names)
