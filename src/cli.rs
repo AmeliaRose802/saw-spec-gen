@@ -304,6 +304,25 @@ pub enum Commands {
         /// for a narrowing adapter on the return type.
         #[arg(long = "variant-map", value_name = "PARAM=V1:D1,V2:D2,...", num_args = 0..)]
         variant_map: Vec<String>,
+
+        /// Bind Cryptol-signature type variables to the lengths of
+        /// the matching C++/Rust pointer parameters (ArrayView rule
+        /// 1, saw_spec_gen-4po).
+        ///
+        /// When set, the generator parses the attached Cryptol
+        /// signature's binders + predicate context (e.g.
+        /// `{n}(fin n, n <= 64) => [n][8] -> ...`) and treats each
+        /// `[n][T]` parameter as if it carried `_In_reads_(MAX)` for
+        /// the variable's declared upper bound. Two pointer
+        /// parameters sharing the same `n` are both sized to the
+        /// same MAX. Open-ended variables fall back to
+        /// `DEFAULT_PARAMREF_MAX_LEN` and emit a stderr warning.
+        ///
+        /// Off by default: existing specs that rely on the 1-byte
+        /// fallback or on hand-edited `.saw` scripts keep working
+        /// unchanged.
+        #[arg(long = "bind-cryptol-lengths", default_value_t = false)]
+        bind_cryptol_lengths: bool,
     },
 
     /// Generate Rust trait vtable stubs + havoc specs for opaque
