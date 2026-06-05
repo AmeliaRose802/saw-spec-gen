@@ -39,15 +39,21 @@ NO_BUILD="${NO_BUILD:-0}"
 EL_ROOT="${INSTALL_ROOT}/exception-lower"
 EL_BIN_DIR="${EL_ROOT}/bin"
 EL_BIN="${EL_BIN_DIR}/exception-lower"
+EL_STAMP="${EL_BIN_DIR}/.installed-tag"
 
 log() {
     [[ "$QUIET" == "1" ]] && return 0
     echo "$*" >&2
 }
 
-# Fast path: already installed.
-if [[ -x "$EL_BIN" && "$FORCE" != "1" ]]; then
-    log "  exception-lower already installed: $EL_BIN"
+# Fast path: already installed at the requested tag.
+stamp_match=0
+if [[ -f "$EL_STAMP" ]]; then
+    installed_tag="$(cat "$EL_STAMP" 2>/dev/null | tr -d '[:space:]')"
+    [[ "$installed_tag" == "$EXCEPTION_LOWER_TAG" ]] && stamp_match=1
+fi
+if [[ -x "$EL_BIN" && "$stamp_match" == "1" && "$FORCE" != "1" ]]; then
+    log "  exception-lower already installed ($EXCEPTION_LOWER_TAG): $EL_BIN"
     echo "$EL_BIN"
     exit 0
 fi
@@ -146,8 +152,8 @@ to point at an existing build.
 
 Source: https://github.com/AmeliaRose802/llvm-exception-lower
 
-Without the pass, verify.ps1 will still work for everything except C++
-try/catch demos.
+Without the pass, verify.ps1 will still work for everything except
+demos that use C++ exceptions or Rust cleanup funclets.
 EOF
         return 1
     fi
@@ -204,4 +210,5 @@ if [[ "$ok" != "1" || ! -x "$EL_BIN" ]]; then
 fi
 
 log "  installed: $EL_BIN"
+printf '%s' "$EXCEPTION_LOWER_TAG" > "$EL_STAMP"
 echo "$EL_BIN"

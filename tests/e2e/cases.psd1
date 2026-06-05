@@ -208,8 +208,6 @@
         #    Expected verdicts captured from baseline runs.
         @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/rust_adversarial/cell_interior_mutation';  File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
         @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/rust_adversarial/cross_fn_global';         File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
-        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/rust_adversarial/drop_noinline';           File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
-        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/rust_adversarial/drop_side_effect';        File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
         @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/rust_adversarial/raw_pointer_aliasing';    File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
         @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/rust_adversarial/symbol_collision';        File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
         @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/rust_adversarial/unreachable_unchecked';   File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
@@ -300,6 +298,14 @@
         # ── Rust parity tests (saw-spec-gen-7fd / saw-spec-gen-5yl / saw-spec-gen-15t)
         # Toolchain-light: need rustc + llvm-dis but NOT SAW (script
         # generation only). These verify the gen-verify-rust CLI surface.
+
+        # ── Rust cleanup funclet tests: exercise the exception-lower pass
+        #    on Rust bitcode compiled with -C panic=unwind. Each has a Drop
+        #    impl that produces cleanuppad/cleanupret funclets which must
+        #    be lowered before SAW can parse the module.
+        @{ Tag = 'rust_cleanup'; Runner = 'rust'; Dir = 'tests/e2e/cases/11-rust-parity/drop_noinline';    File = 'add_one_verified.rs'; Expected = 'VERIFIED' }
+        @{ Tag = 'rust_cleanup'; Runner = 'rust'; Dir = 'tests/e2e/cases/11-rust-parity/drop_side_effect'; File = 'add_one_verified.rs'; Expected = 'VERIFIED' }
+        @{ Tag = 'rust_cleanup'; Runner = 'rust'; Dir = 'tests/e2e/cases/11-rust-parity/cleanup_unwind';   File = 'add_one_verified.rs'; Expected = 'VERIFIED' }
 
         # spec-only-on-missing: gen-verify-rust soft-exits when the target
         # function has no matching symbol in the LLVM IR.

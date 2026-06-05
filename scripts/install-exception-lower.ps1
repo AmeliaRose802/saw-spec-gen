@@ -79,14 +79,17 @@ $elBinDir = Join-Path $elRoot 'bin'
 # build/exception-lower. Both layouts work — discover-tools.ps1 looks
 # in both. Canonical install path is bin/.
 $elBin = Join-Path $elBinDir ('exception-lower' + $exeExt)
+$elStamp = Join-Path $elBinDir '.installed-tag'
 
 function _Log([string]$msg, [string]$color = 'White') {
     if (-not $Quiet) { Write-Host $msg -ForegroundColor $color }
 }
 
-# Fast path: already installed.
-if ((Test-Path -LiteralPath $elBin) -and (-not $Force)) {
-    _Log "  exception-lower already installed: $elBin" 'DarkGreen'
+# Fast path: already installed at the requested tag.
+$stampMatch = (Test-Path -LiteralPath $elStamp) -and
+              ((Get-Content $elStamp -Raw).Trim() -eq $ReleaseTag)
+if ((Test-Path -LiteralPath $elBin) -and $stampMatch -and (-not $Force)) {
+    _Log "  exception-lower already installed ($ReleaseTag): $elBin" 'DarkGreen'
     Write-Output $elBin
     exit 0
 }
@@ -185,8 +188,8 @@ to point at an existing build.
 
 Source: https://github.com/AmeliaRose802/llvm-exception-lower
 
-Without the pass, verify.ps1 will still work for everything except C++
-try/catch demos.
+Without the pass, verify.ps1 will still work for everything except
+demos that use C++ exceptions or Rust cleanup funclets.
 "@
         return $false
     }
@@ -248,5 +251,6 @@ if (-not $ok -or -not (Test-Path -LiteralPath $elBin)) {
 }
 
 _Log "  installed: $elBin" 'Green'
+$ReleaseTag | Set-Content -LiteralPath $elStamp -NoNewline
 Write-Output $elBin
 

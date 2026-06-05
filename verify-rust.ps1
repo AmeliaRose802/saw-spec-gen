@@ -107,7 +107,8 @@ Write-Host "══════════════════════�
 #                              modular arithmetic, matches Cryptol's +
 #                              (otherwise debug builds call core::panicking
 #                              which has no body and SAW can't resolve)
-#   -C panic=abort             no unwinding personality functions
+#   -C panic=unwind            real unwind semantics; cleanup funclets are
+#                              lowered by exception-lower in Step 1.25
 #   -C codegen-units=1         single LLVM module
 #   -C debuginfo=0             smaller, self-contained
 #   -C lto=off / embed-bitcode=no
@@ -127,7 +128,7 @@ $bcFile = Join-Path $OutputDir "$baseName.bc"
     -C symbol-mangling-version=v0 `
     -C overflow-checks=off `
     -C debug-assertions=off `
-    -C panic=abort `
+    -C panic=unwind `
     -C codegen-units=1 `
     -C debuginfo=0 `
     -C lto=off `
@@ -139,6 +140,23 @@ if (-not (Test-Path $bcFile)) {
     exit 1
 }
 Write-Host "  → $bcFile ($((Get-Item $bcFile).Length) bytes)" -ForegroundColor Green
+
+# ── Step 1.25: Lower Rust cleanup funclets ────────────────────────────────────
+# With -C panic=unwind, rustc emits Win64 SEH cleanup funclets
+# (cleanuppad / cleanupret + "funclet" operand bundles) that SAW's
+# parser cannot handle. The exception-lower pass rewrites them into
+# funclet-free IR. Reuses the same script as the C++ pipeline.
+$exceptionLower = $tools.ExceptionLower
+$isMsvc = ($llvmTarget -match 'windows-msvc')
+$exceptionLower = & (Join-Path $ScriptRoot 'scripts/ensure-exception-lower.ps1') `
+    -ExceptionLower $exceptionLower `
+    -IsMsvc $isMsvc `
+    -ScriptRoot $ScriptRoot `
+    -BcFile $bcFile `
+    -LlvmDis '' `
+    -OutputDir $OutputDir `
+    -BaseName $baseName `
+    -Tools $tools
 
 # ── Step 2: disassemble (saw-spec-gen reads .ll for symbol resolution) ────────
 Write-Host ""
