@@ -1,5 +1,6 @@
 //! Derivation of [`SpecConstraint`] values from [`FunctionInfo`].
 
+use super::length_companion::{guess_with_shared_flag, LengthCompanionGuess};
 use super::saw_type::{pointee_saw_type, type_to_saw};
 use super::types::{
     AllocType, Annotation, FunctionInfo, Mutability, Nullability, ParamConstraint,
@@ -7,6 +8,7 @@ use super::types::{
 };
 use super::value_clauses::value_clauses;
 use anyhow::Result;
+use std::collections::HashMap;
 
 /// Default symbolic upper bound used when a pointer parameter has a
 /// parameter-reference SAL annotation (`_In_reads_(<name>)` /
@@ -36,6 +38,13 @@ fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
     // point the user at a likely length-companion parameter
     // (e.g. `buf` + `buf_len`, or `n` + any pointer).
     let all_param_names: Vec<String> = func.params.iter().map(|p| p.name.clone()).collect();
+
+    // Pre-compute the inbound-pointer count for every parameter name:
+    // how many *pointer* parameters in this function would name-match
+    // it as a length companion? When the count is > 1 we have a copy-
+    // pattern ambiguity (`void copy(void* src, void* dst, size_t n)`)
+    // and the heuristic must refuse to commit to either pointer.
+    let shared_companions: HashMap<String, usize> = build_shared_companion_map(&func.params);
 
     // Check function-level annotations for NoThrow override
     let can_throw = if func
@@ -163,29 +172,12 @@ fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
             && !matches!(alloc_type, AllocType::FreshVar)
             && !has_size_annotation
         {
-            let companion = guess_length_companion(&param.name, &all_param_names);
-            preconditions.push(format!(
-                "// TODO[saw-spec-gen]: pointer parameter `{}` has no size annotation.",
-                param.name,
-            ));
-            match companion {
-                Some(c) => preconditions.push(format!(
-                    "//   Heuristic: sibling parameter `{c}` looks like its length.",
-                )),
-                None => preconditions
-                    .push("//   No obvious length-companion parameter was found.".into()),
-            }
-            preconditions.push(
-                "//   The auto-spec allocates a single element, which is almost certainly wrong"
-                    .into(),
+            let guess: LengthCompanionGuess = guess_with_shared_flag(
+                &param.name,
+                &all_param_names,
+                any_shared_companion(&param.name, &all_param_names, &shared_companions),
             );
-            preconditions.push(
-                "//   for a buffer. Fix by adding _In_reads_(N) / _Out_writes_(N) to the C++ decl,"
-                    .into(),
-            );
-            preconditions.push(
-                "//   or by hand-editing this file to use (llvm_array N (llvm_int 8)).".into(),
-            );
+            preconditions.extend(guess.todo_lines());
         } else if param.nullable == Nullability::Nullable
             && !matches!(alloc_type, AllocType::FreshVar)
         {
@@ -199,8 +191,11 @@ fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
         // dispatcher lives in [`super::value_clauses`]; we only emit
         // for FreshVar params because indirect (pointer-passed) values
         // are named `{name}_before` in the auto-spec but `{name}` in
-        // the equiv-spec body. Indirect users can attach a precondition
-        // via `--precond` until that naming is unified.
+        // the equiv-spec body. Indirect users currently have no
+        // auto-precondition surface for value clauses; reach for the
+        // ArrayView annotation surfaces (Cryptol `[n][T]`, SAL
+        // `_In_reads_` / `SAW_BUF`, or a sidecar `.spec.toml`) to
+        // bind a length when needed.
         if matches!(alloc_type, AllocType::FreshVar) {
             for clause in value_clauses(inner_ty, &param.name) {
                 preconditions.push(format!("llvm_precond {{{{ {clause} }}}}"));
@@ -397,45 +392,47 @@ pub fn correct_sret_from_ir(spec: &mut SpecConstraint, ir_funcs: &[FunctionInfo]
     }
 }
 
-/// Heuristic: scan the function's other parameter names for one that
-/// looks like a length companion for the given pointer parameter.
+/// For every parameter, count how many *pointer* parameters in this
+/// function would name-match it as a length companion via the
+/// [`super::length_companion`] heuristic. The map's keys are
+/// parameter names; values are inbound-pointer counts.
 ///
-/// Recognized shapes (case-insensitive):
-///   - `n`, `len`, `count`, `size`, `length`         -- bare length names
-///   - `<ptr>_len`, `<ptr>_count`, `<ptr>_size`,
-///     `<ptr>_length`, `<ptr>_n`                     -- suffix style
-///   - `n<ptr>`, `c<ptr>`, `cb<ptr>`, `cch<ptr>`,
-///     `len_<ptr>`, `size_<ptr>`                     -- prefix / Win32 style
-///
-/// Returns the first matching sibling parameter's name (preserving
-/// original casing), or `None` if no candidate is found.
-fn guess_length_companion(ptr_name: &str, all_names: &[String]) -> Option<String> {
-    let p = ptr_name.to_ascii_lowercase();
-    let bare = ["n", "len", "count", "size", "length", "num"];
-    let suffixes = [
-        "_len", "_count", "_size", "_length", "_n", "len", "count", "size",
-    ];
-    let prefixes = ["n", "c", "cb", "cch", "len_", "size_", "count_", "num_"];
-    for cand in all_names {
-        if cand == ptr_name {
+/// Used to detect copy-pattern ambiguity: in
+/// `void copy(void* src, void* dst, size_t n)`, `n` matches both
+/// `src` and `dst`. Either guess in isolation looks unambiguous, so
+/// the per-pointer heuristic needs this map to know it must refuse.
+fn build_shared_companion_map(params: &[super::types::ParamInfo]) -> HashMap<String, usize> {
+    use super::length_companion::guess;
+    let all_names: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for p in params {
+        if !matches!(&p.ty, TypeInfo::Pointer(_)) {
             continue;
         }
-        let c = cand.to_ascii_lowercase();
-        if bare.contains(&c.as_str()) {
-            return Some(cand.clone());
-        }
-        for s in &suffixes {
-            if c == format!("{p}{s}") {
-                return Some(cand.clone());
-            }
-        }
-        for pre in &prefixes {
-            if c == format!("{pre}{p}") {
-                return Some(cand.clone());
-            }
+        // We don't want to count `void*` parameters that the rest of
+        // derive() will pass-by-value (no buffer behind them); but the
+        // ambiguity test is cheap and the false-positive cost (forcing
+        // AMBIGUOUS in a corner case) is small, so include all pointers.
+        let g = guess(&p.name, &all_names);
+        for cand in g.candidate_names_for_internal_use() {
+            *counts.entry(cand).or_insert(0) += 1;
         }
     }
-    None
+    counts
+}
+
+/// True iff *any* candidate the heuristic would propose for
+/// `ptr_name` is currently claimed by another pointer parameter too.
+fn any_shared_companion(
+    ptr_name: &str,
+    all_names: &[String],
+    shared: &HashMap<String, usize>,
+) -> bool {
+    use super::length_companion::guess;
+    let g = guess(ptr_name, all_names);
+    g.candidate_names_for_internal_use()
+        .iter()
+        .any(|c| shared.get(c).copied().unwrap_or(0) > 1)
 }
 
 #[cfg(test)]

@@ -18,6 +18,7 @@
 //! `crate::constraints::*`.
 
 pub mod derive;
+pub mod length_companion;
 pub mod saw_type;
 pub mod types;
 pub mod value_clauses;

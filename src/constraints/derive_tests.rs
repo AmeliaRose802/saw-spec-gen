@@ -142,7 +142,9 @@ fn test_derive_enum_indirect_skips_precondition() {
     // Pointer-to-enum (rare but legal). The discriminant lives in
     // heap memory and the equiv-spec/auto-spec emitters disagree on
     // the variable name, so emit no automatic precondition. Users
-    // can attach one via `--precond` if they need it.
+    // can bind a length / clamp via an ArrayView annotation surface
+    // (Cryptol `[n][T]`, SAL `_In_reads_` / `SAW_BUF`, or a sidecar
+    // `.spec.toml`) if they need it.
     let func = FunctionInfo {
         name: "set_status".into(),
         mangled_name: None,

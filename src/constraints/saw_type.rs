@@ -74,8 +74,10 @@ pub fn pointee_saw_type(ty: &TypeInfo) -> String {
     if lowered.starts_with("//") {
         eprintln!(
             "warning: pointee type {ty:?} has no SAW lowering (got `{lowered}`); \
-             substituting `llvm_int 8` so the spec parses. Use --precond or \
-             extend constraints::saw_type to override."
+             substituting `llvm_int 8` so the spec parses. Reach for an \
+             ArrayView annotation surface (Cryptol `[n][T]`, SAL `_In_reads_` / \
+             `SAW_BUF`, or sidecar `.spec.toml`) or extend constraints::saw_type \
+             to override."
         );
         return "llvm_int 8".into();
     }
