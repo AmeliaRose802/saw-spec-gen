@@ -9,78 +9,106 @@ work happens in how `add_one` reaches its return value: via
 `std::max`, via `std::pair{x+1, x}.first`, via `std::vector::back`,
 etc.
 
-## Why every case currently RESOLVES TO DISPROVED
+> The default e2e suite (`pwsh tests/e2e/Run-E2ETests.ps1`)
+> intentionally omits the `stl_coverage` tag — these cases are
+> research carve-outs that require the libstdc++/MSVC STL headers
+> already on the build host. Run them with `-Tag stl_coverage`
+> (or `-All`) once you have SAW + a C++ toolchain wired up.
 
-The tool's compositional havoc model classifies any function whose
-declaration lives in a system include path (MSVC SDK, libstdc++,
-LLVM headers) as an external symbol and emits an adversarial
-override for it. The override is intentionally weak: it lets the
-solver pick **any** return value, with no relationship to the
-inputs. So a call like
+## Two complementary fixes — `saw_spec_gen-9x5` + `-jpp`
 
-```cpp
-uint32_t y = x + 1;
-return std::max(y, y);  // mathematically equal to x + 1
+The cases in this directory used to all `RESOLVE TO DISPROVED`
+for algebraically correct code. Two changes (landed together)
+fixed that:
+
+1. **`saw_spec_gen-9x5` — Crucible-safety analyzer**
+   (`src/transform/crucible_safety.rs`). Replaces the blanket
+   "any function in a system header is a havoced extern" rule
+   with a two-step gate:
+   - Does the callee have a body in the bitcode?
+   - Does the body use only opcodes / intrinsics Crucible can
+     lower without an external override? (See the allow-list in
+     `crucible_safety.rs`.)
+   If both answer yes, the call-graph walker descends into the
+   body and SAW symbolically executes it. This is what flips
+   `std::max`, `std::min`, `std::clamp`, `std::pair::first`,
+   `std::tuple::get`, and `std::accumulate` over a concrete
+   `std::array` from `DISPROVED` to `VERIFIED`.
+
+2. **`saw_spec_gen-jpp` — STL functional-override registry**
+   (`src/emit/saw_emit/stl_overrides.rs`). A hard-coded
+   pattern list that forces specific STL family symbols
+   (`std::vector`, `std::unique_ptr`, `std::shared_ptr`,
+   `std::basic_string`, `std::list`/`deque`,
+   `std::map`/`set`/`unordered_*`) to be treated as externals
+   even when the safety analyzer would let them through.
+   This stops Crucible from descending into libstdc++ allocator
+   helpers that crash it with `Cannot mux LLVM values`
+   (`v1: <int8>` muxed against `v2: <int1>` in the SSO branch
+   of `_M_realloc_insert`). The adversarial-spec emitter then
+   havocs the return value, which is enough to recover a clean
+   `DISPROVED` verdict for the existing havoc test cases.
+
+The two passes are independent and individually killable:
+
+```bash
+# Revert to the pre-9x5 "everything system is external" rule.
+SAW_SPEC_GEN_NO_SYSTEM_RECURSION=1 pwsh tests/e2e/Run-E2ETests.ps1 -Tag stl_coverage
+
+# Disable the jpp registry so libstdc++ container helpers go back to
+# panicking inside Crucible (UNKNOWN).
+SAW_SPEC_GEN_NO_STL_OVERRIDES=1 pwsh tests/e2e/Run-E2ETests.ps1 -Tag stl_coverage
+
+# Both off at once = baseline behaviour before this branch.
+SAW_SPEC_GEN_NO_SYSTEM_RECURSION=1 SAW_SPEC_GEN_NO_STL_OVERRIDES=1 \
+    pwsh tests/e2e/Run-E2ETests.ps1 -Tag stl_coverage
 ```
-
-becomes "return value of `std::max` is unconstrained" in the SAW
-proof goal, and the equivalence against `add_one_spec` is
-trivially refuted with a counterexample.
-
-This is documented behaviour, not a bug. The suite exists to:
-
-1. **Document the gap** so contributors discover it before
-   re-reporting the same issue.
-2. **Catch regressions in the gap.** If a future tool change
-   strengthens overrides for the math-only subset of `<algorithm>`,
-   the `*_gap_disproved.cpp` cases will flip to `VERIFIED`. The runner
-   will then report the case as failing-against-expected, and the
-   author can rename them back to `*_verified.cpp`, update `Expected`
-   to `VERIFIED` in `cases.psd1`, and celebrate the improvement.
-3. **Exercise the C++ frontend.** Even when the proof is refuted,
-   the pipeline runs: clang → AST dump → filter → spec generation
-   → SAW load → solver. Any crash, hang, or wrong-shape spec along
-   the way gets caught by this suite even if the verdict itself is
-   uninteresting.
 
 ## Coverage matrix
 
-| Case                       | STL feature                                    | Expected | Notes |
-|----------------------------|------------------------------------------------|----------|-------|
-| `algorithm_max/`           | `std::max<uint32_t>(a, b)`                     | DISPROVED | Havoc gap on `<algorithm>`. |
-| `algorithm_min/`           | `std::min<uint32_t>(a, b)`                     | DISPROVED | Havoc gap on `<algorithm>`. |
-| `algorithm_clamp/`         | `std::clamp<uint32_t>(v, lo, hi)` (C++17)      | DISPROVED | Havoc gap on `<algorithm>`. Requires `CxxStandard = 'c++17'`. |
-| `numeric_accumulate/`      | `std::accumulate(begin, end, init)`            | DISPROVED | Havoc gap on `<numeric>`; plus iterator havoc. |
-| `pair_first/`              | `std::pair<u32, u32>{a, b}.first`              | DISPROVED | Pair constructor lives in `<utility>` → havoced. |
-| `tuple_get/`               | `std::tuple<u32, u32>{a, b}` + `std::get<I>`   | DISPROVED | Both construction and `get` are `<tuple>` symbols. |
-| `vector_back_havoc/`       | `std::vector::push_back` + `back()`            | DISPROVED | Compositional gap: allocator + buffer write/read can't be tied to the same value by the havoc model. |
-| `unique_ptr_deref_havoc/`  | `std::make_unique<u32>(v)` + `*p`              | DISPROVED | Smart-pointer analog of vector gap; `operator new` + placement write are independent allocations under the override. |
+| Case                       | STL feature                                    | Expected      | Notes |
+|----------------------------|------------------------------------------------|---------------|-------|
+| `algorithm_max/`           | `std::max<uint32_t>(a, b)`                     | **VERIFIED**  | Body is `alloca`/`load`/`store`/`icmp`/`br` — `9x5` safety check accepts it. |
+| `algorithm_min/`           | `std::min<uint32_t>(a, b)`                     | **VERIFIED**  | Same as above. |
+| `algorithm_clamp/`         | `std::clamp<uint32_t>(v, lo, hi)` (C++17)      | **VERIFIED**  | Requires `CxxStandard = 'c++17'`. |
+| `numeric_accumulate/`      | `std::accumulate(begin, end, init)`            | **VERIFIED**  | Iterators over a concrete `std::array` resolve to pointer arithmetic; loop body is safe. |
+| `pair_first/`              | `std::pair<u32, u32>{a, b}.first`              | **VERIFIED**  | Pair constructor body is plain `getelementptr` + `store`/`load`. |
+| `tuple_get/`               | `std::tuple<u32, u32>{a, b}` + `std::get<I>`   | **VERIFIED**  | Same as `pair_first`, with variadic-template scaffolding. |
+| `vector_back_havoc/`       | `std::vector::push_back` + `back()`            | **DISPROVED** | `jpp` forces `vector::{ctor,push_back,back,dtor}` to havoc — `back()` returns a fresh symbolic `u32`, so the equivalence is unprovable. The original symptom was an UNKNOWN/Crucible panic. |
+| `unique_ptr_deref_havoc/`  | `std::make_unique<u32>(v)` + `*p`              | **DISPROVED** | Same shape as above, via `unique_ptr` family patterns. |
+
+The `*_havoc/` cases are intentionally retained as DISPROVED
+witnesses: they verify that the `jpp` registry is doing its
+job (no Crucible panic) without claiming we can functionally
+reason about `std::vector` element identity. That latter
+work — proving `push_back(v); back() == v` — would require
+the full Cryptol postcondition story from `jpp`'s scope
+("Future work" below).
 
 Each directory ships:
 
-* `add_one_gap_disproved.cpp` — code that *should* match `add_one_spec`
-  but doesn't, due to the gap above. (Named `_gap_disproved` rather
-  than `_verified` so the filename matches the actual expected
-  verdict per the project naming convention.)
-* `add_one_disproved.cpp` — code that genuinely returns the wrong
-  value (e.g. `x + 2`) and gets disproved for the *right* reason.
-* `add_one_spec.cry` — the shared `add_one_spec x = x + 1` Cryptol
-  spec.
+* `add_one_verified.cpp` (or, for the havoc cases,
+  `add_one_gap_disproved.cpp`) — code that *should* match
+  `add_one_spec`. The `_gap_disproved` suffix flags that the
+  code is morally correct but the verifier can't yet *prove*
+  the equivalence.
+* `add_one_disproved.cpp` — code that genuinely returns the
+  wrong value (e.g. `x + 2`) and gets disproved for the
+  *right* reason.
+* `add_one_spec.cry` — the shared `add_one_spec x = x + 1`
+  Cryptol spec.
 
 ## Running
 
 ```powershell
-# Whole STL suite.
+# Whole STL suite (not in the default tag set).
 pwsh tests/e2e/Run-E2ETests.ps1 -Tag stl_coverage
 
 # Single case.
 pwsh -NoLogo -NoProfile -File verify.ps1 `
-    -CppFile tests/e2e/cases/10-stl-coverage/algorithm_max/add_one_gap_disproved.cpp `
+    -CppFile tests/e2e/cases/10-stl-coverage/algorithm_max/add_one_verified.cpp `
     -CryptolSpec tests/e2e/cases/10-stl-coverage/algorithm_max/add_one_spec.cry `
     -CryptolFn add_one_spec -Function add_one
-
-# C++17-required case via the runner.
-pwsh tests/e2e/Run-E2ETests.ps1 -Tag stl_coverage
 ```
 
 The runner forwards `CxxStandard`, `ClangFlags`, and `IncludeDirs`
@@ -117,15 +145,18 @@ caught and fixed:
    freely.
 
 Without these fixes, every test in this directory would have
-aborted at SAW load time instead of resolving to a clean
-DISPROVED verdict.
+aborted at SAW load time instead of producing a clean verdict.
 
-## When (not if) the gap closes
+## Future work
 
-A future improvement might add a "smart" override for the
-math-only subset of `<algorithm>` / `<utility>` (e.g. recognise
-`std::max<T>` as `\\ x y -> if x >= y then x else y` and emit a
-value-preserving spec instead of a pure-havoc one). When that
-lands, the `*_gap_disproved.cpp` cases will start passing — rename
-them back to `*_verified.cpp`, flip their `Expected` to `VERIFIED`
-in `cases.psd1`, and update this README in the same PR.
+The `jpp` registry is currently a "force-havoc" allow-list —
+it stops Crucible from panicking but doesn't model what the
+overridden methods actually do. To recover `VERIFIED` for
+`vector_back_havoc/add_one_gap_disproved.cpp` we'd need
+functional overrides in SAW + Cryptol that capture the
+operational semantics (`push_back(v); back() == v`,
+`*make_unique<T>(v) == v`, etc.). The scaffolding for that
+work — the registry + override sites — is already in place;
+the missing piece is writing the per-template Cryptol
+postconditions. Tracked by the open bullet list in
+`saw_spec_gen-jpp`.

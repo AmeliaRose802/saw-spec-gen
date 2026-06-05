@@ -11,6 +11,7 @@ pub mod commands;
 pub mod constraints;
 pub mod dump_types;
 pub mod gen_verify;
+pub mod gen_verify_callgraph;
 pub mod gen_verify_helpers;
 pub mod gen_verify_rust;
 pub mod mangle;
