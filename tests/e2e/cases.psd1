@@ -244,6 +244,36 @@
         # emit take`{12}/drop`{4} slice, not the full buffer.
         @{ Tag = 'sret_slice'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-type-coverage/sret_slice'; File = 'stamp_header_verified.cpp'; Expected = 'VERIFIED'; Cry = 'stamp_header_spec.cry'; CryptolFn = 'stamp_header_spec'; Function = 'stamp_header' }
 
+        # ── Buffer overrides (08-overrides) ─────────────────────────────────
+        # Exercises the --out-buffer-param / --in-buffer-size /
+        # --cryptol-fn-out / --max-len-precond CLI surface plus the
+        # `emit_param_preconditions_filtered` cosmetic-TODO suppressor
+        # in src/emit/saw_emit/verify_script_steps.rs. The override
+        # branch is the same one demo_protocol's canonicalize_lp relies
+        # on for its real-world proof — without this case, that pipeline
+        # is our only end-to-end witness.
+        #
+        # verified  : honours the postcondition (out[nb..] left untouched).
+        # disproved : zero-fills out[nb..]; postcondition rejects it,
+        #             proving the override-branch postcondition is not
+        #             vacuous.
+        @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/bounded_copy'; File = 'bounded_copy_verified.cpp';  Expected = 'VERIFIED';
+           Cry = 'bounded_copy_spec.cry'; CryptolFn = 'bounded_copy_ret'; Function = 'bounded_copy';
+           ExtraSpecGenArgs = @(
+               '--in-buffer-size',    'src=4',
+               '--out-buffer-param',  'out=4',
+               '--cryptol-fn-out',    'out=bounded_copy_post',
+               '--max-len-precond',   'nb=4'
+           ) }
+        @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/bounded_copy'; File = 'bounded_copy_disproved.cpp'; Expected = 'DISPROVED';
+           Cry = 'bounded_copy_spec.cry'; CryptolFn = 'bounded_copy_ret'; Function = 'bounded_copy';
+           ExtraSpecGenArgs = @(
+               '--in-buffer-size',    'src=4',
+               '--out-buffer-param',  'out=4',
+               '--cryptol-fn-out',    'out=bounded_copy_post',
+               '--max-len-precond',   'nb=4'
+           ) }
+
         # ── Box allocator: currently UNKNOWN due to MIR allocator model gap
         # box_allocator currently produces UNKNOWN under the default pipeline
         # (Box::new path the front-end can't model). Tracked separately; not

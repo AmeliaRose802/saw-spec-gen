@@ -48,7 +48,13 @@ param(
     [Parameter(Mandatory)][string]$CryptolSpec,
     [Parameter(Mandatory)][string]$CryptolFn,
     [Parameter(Mandatory)][string]$Function,
-    [string]$OutputDir
+    [string]$OutputDir,
+    # Accepted for parameter-parity with verify.ps1 so the pretty-specs
+    # pipeline can pass it uniformly. Currently a no-op for the Rust
+    # path — gen-verify-rust uses LLVM IR symbol lookup, not a clang
+    # AST, so the failure modes are different. TODO: wire this through
+    # gen-verify-rust if the same need arises on the Rust side.
+    [switch]$SpecOnlyOnMissing
 )
 
 $ErrorActionPreference = "Stop"

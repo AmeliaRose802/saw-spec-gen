@@ -5,6 +5,8 @@
 
 use super::super::verify_script::SretPrestate;
 use super::*;
+use crate::buffer_overrides::BufferOverrides;
+use crate::emit::saw_emit::cryptol_bridge::cryptol_return_for;
 
 #[test]
 fn cryptol_arg_for_wraps_bool_with_index_zero() {
@@ -68,9 +70,12 @@ fn emit_postcondition_wraps_bool_return() {
             "llvm_term signatureValid".to_string(),
             "llvm_term claimsValid".to_string(),
         ],
-        &[],
-        &TypeInfo::Bool,
-        false,
+        &PostconditionCtx {
+            sub_callee_specs: &[],
+            return_type: &TypeInfo::Bool,
+            is_sret: false,
+        },
+        &BufferOverrides::default(),
     );
 
     assert!(
@@ -90,9 +95,12 @@ fn emit_postcondition_does_not_wrap_int_return() {
         "compute",
         &["x".to_string()],
         &["llvm_term x".to_string()],
-        &[],
-        &TypeInfo::SignedInt(32),
-        false,
+        &PostconditionCtx {
+            sub_callee_specs: &[],
+            return_type: &TypeInfo::SignedInt(32),
+            is_sret: false,
+        },
+        &BufferOverrides::default(),
     );
 
     assert!(
@@ -116,16 +124,16 @@ fn emit_postcondition_uses_points_to_for_sret_return() {
         "getStatus",
         &["x".to_string()],
         &["result_ptr".to_string(), "llvm_term x".to_string()],
-        &[],
-        // The C++-level return type is the aggregate; the LLVM-level
-        // signature lowers it to void+sret. The is_sret=true flag is
-        // what tells the emitter which form to use.
-        &TypeInfo::Struct {
-            name: "EnrollmentStatus".into(),
-            size_bytes: None,
-            fields: vec![],
+        &PostconditionCtx {
+            sub_callee_specs: &[],
+            return_type: &TypeInfo::Struct {
+                name: "EnrollmentStatus".into(),
+                size_bytes: None,
+                fields: vec![],
+            },
+            is_sret: true,
         },
-        true,
+        &BufferOverrides::default(),
     );
 
     assert!(
@@ -259,6 +267,7 @@ fn emit_sret_prestate_threads_prebytes_into_cryptol_call() {
             take_bytes: 17,
             drop_bytes: 3,
         }),
+        &BufferOverrides::default(),
     );
 
     // preBytes is allocated at FULL buffer size (20), not the slice size (17)
@@ -290,13 +299,16 @@ fn emit_sret_prestate_threads_prebytes_into_cryptol_call() {
         "getStatus_cpp",
         &cryptol_args,
         &execute_args,
-        &[],
-        &TypeInfo::Struct {
-            name: "EnrollmentStatus".into(),
-            size_bytes: Some(20),
-            fields: vec![],
+        &PostconditionCtx {
+            sub_callee_specs: &[],
+            return_type: &TypeInfo::Struct {
+                name: "EnrollmentStatus".into(),
+                size_bytes: Some(20),
+                fields: vec![],
+            },
+            is_sret: true,
         },
-        true,
+        &BufferOverrides::default(),
     );
 
     assert!(
@@ -372,6 +384,7 @@ fn emit_sret_no_prestate_omits_prebytes() {
         &interface_of,
         &[],
         None, // no prestate
+        &BufferOverrides::default(),
     );
 
     assert!(

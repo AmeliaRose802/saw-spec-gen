@@ -27,6 +27,8 @@ pub fn run(
     alias_size_overrides: &[String],
     alias_enum_overrides: &[String],
     use_llvm_combine_modules: bool,
+    spec_only_on_missing: bool,
+    buffer_overrides: &crate::buffer_overrides::BufferOverrides,
 ) -> Result<()> {
     if ast.is_empty() {
         anyhow::bail!("At least one --ast file is required");
@@ -61,12 +63,27 @@ pub fn run(
     let target_triple = llvm_ir_path.and_then(llvm_ir::read_target_triple);
 
     // Find the target function (FunctionInfo with call graph)
-    let target_fn = all_functions
+    let target_fn_opt = all_functions
         .iter()
         .filter(|f| f.name == function)
         .min_by_key(|f| if f.is_virtual { 1 } else { 0 })
-        .ok_or_else(|| anyhow::anyhow!("Function '{}' not found in AST", function))?
-        .clone();
+        .cloned();
+    let target_fn = match target_fn_opt {
+        Some(f) => f,
+        None => {
+            if spec_only_on_missing {
+                return emit_spec_only_result(
+                    output,
+                    cryptol_fn,
+                    function,
+                    "No matching C++ implementation symbol found in clang AST — \
+                     this is a Cryptol-only helper used by other models, with \
+                     no implementation to verify against at this layer.",
+                );
+            }
+            anyhow::bail!("Function '{}' not found in AST", function);
+        }
+    };
 
     // Find the target function's spec
     let target_spec = {
@@ -79,12 +96,36 @@ pub fn run(
             .into_iter()
             .min_by_key(|s| if s.is_virtual { 1 } else { 0 })
     };
-    let mut target_spec =
-        target_spec.ok_or_else(|| anyhow::anyhow!("Function '{}' not found in AST", function))?;
-    let target_mangled = target_spec
-        .mangled_name
-        .clone()
-        .ok_or_else(|| anyhow::anyhow!("No mangled name for '{}'", function))?;
+    let mut target_spec = match target_spec {
+        Some(s) => s,
+        None => {
+            if spec_only_on_missing {
+                return emit_spec_only_result(
+                    output,
+                    cryptol_fn,
+                    function,
+                    "Function found in AST but no constraint spec could be derived — \
+                     treating as Cryptol-only helper.",
+                );
+            }
+            anyhow::bail!("Function '{}' not found in AST", function);
+        }
+    };
+    let target_mangled = match target_spec.mangled_name.clone() {
+        Some(m) => m,
+        None => {
+            if spec_only_on_missing {
+                return emit_spec_only_result(
+                    output,
+                    cryptol_fn,
+                    function,
+                    "No mangled name for function — likely an inline / template / \
+                     header-only helper with no out-of-line symbol to verify.",
+                );
+            }
+            anyhow::bail!("No mangled name for '{}'", function);
+        }
+    };
 
     // Resolve any opaque `llvm_alias` parameter / return types against the
     // LLVM IR struct table.  Without this, MSVC-clang output (which fully
@@ -442,6 +483,7 @@ pub fn run(
         &bitcode_overrides,
         &ir_struct_defs,
         output,
+        buffer_overrides,
     )?;
 
     // Post-processing: rewrite unresolved `llvm_alias "X"` references into
@@ -468,59 +510,4 @@ pub fn run(
     Ok(())
 }
 
-/// Assemble `vtable_stubs.ll` → `.bc` and optionally pre-link with the
-/// main bitcode. Extracted from [`run`] to keep it under the line limit.
-fn assemble_and_link_stubs(
-    has_interfaces: bool,
-    use_llvm_combine_modules: bool,
-    bitcode: &Path,
-    output: &Path,
-) -> saw_emit::AssembledStubs {
-    if !has_interfaces {
-        return saw_emit::AssembledStubs::NoStubs;
-    }
-    let assembled = saw_emit::assemble_vtable_stubs(output);
-    match &assembled {
-        saw_emit::AssembledStubs::Bitcode {
-            bc_filename,
-            assembler,
-        } => {
-            eprintln!("Assembled vtable stubs to {bc_filename} via `{assembler}`");
-        }
-        saw_emit::AssembledStubs::TextOnly { ll_filename } => {
-            let ll = output.join(ll_filename).display().to_string();
-            let bc = format!("{}/vtable_stubs.bc", output.display());
-            eprintln!(
-                "warning: no llvm-as / clang on PATH — {ll_filename} not assembled.\n\
-                 Run: llvm-as {ll} -o {bc}\n  or: clang -c -emit-llvm {ll} -o {bc}",
-            );
-        }
-        saw_emit::AssembledStubs::LinkedBitcode { .. } | saw_emit::AssembledStubs::NoStubs => {}
-    }
-    if use_llvm_combine_modules {
-        return assembled;
-    }
-    let linked = saw_emit::link_stubs_with_main(bitcode, output, assembled);
-    match &linked {
-        saw_emit::AssembledStubs::LinkedBitcode {
-            combined_filename,
-            linker,
-        } => {
-            eprintln!(
-                "Pre-linked main + vtable stubs into {combined_filename} via `{linker}` \
-                 (verify.saw will not need llvm_combine_modules).",
-            );
-        }
-        saw_emit::AssembledStubs::Bitcode { .. } => {
-            eprintln!(
-                "warning: llvm-link not found on PATH; falling back to \
-                 llvm_combine_modules in the emitted script. Stock SAW \
-                 v1.5 will not be able to run that — install llvm-link \
-                 (ships with LLVM) or pass --use-llvm-combine-modules \
-                 to silence this warning.",
-            );
-        }
-        _ => {}
-    }
-    linked
-}
+use crate::gen_verify_helpers::{assemble_and_link_stubs, emit_spec_only_result};

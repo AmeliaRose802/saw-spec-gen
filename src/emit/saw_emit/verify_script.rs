@@ -10,8 +10,9 @@ use super::stubs::AssembledStubs;
 use super::verify_script_steps::{
     emit_equiv_spec_body, emit_external_overrides_step, emit_load_bitcode_step,
     emit_postcondition_and_close, emit_sub_callee_step, emit_var_annotation_override,
-    emit_verify_step, is_operator_new,
+    emit_verify_step, is_operator_new, InterfaceCtx, PostconditionCtx,
 };
+use crate::buffer_overrides::BufferOverrides;
 use crate::clang_ast::{self, ClassConstructor, InterfaceMethod};
 use crate::constraints::*;
 use crate::cryptol_sig;
@@ -42,6 +43,7 @@ pub fn emit_verification_script(
     bitcode_overrides: &EmittedBitcodeOverrides,
     ir_struct_defs: &HashMap<String, IrStructDef>,
     output_dir: &Path,
+    buffer_overrides: &BufferOverrides,
 ) -> Result<()> {
     fs::create_dir_all(output_dir)?;
 
@@ -89,13 +91,8 @@ pub fn emit_verification_script(
 
     let mut override_names: Vec<String> = Vec::new();
 
-    // `__attribute__((annotate("..."))` on a parameter (used by the SAL
-    // shim under tests/e2e/cases/) compiles into a `call @llvm.var.annotation` in
-    // every callsite's prelude. SAW can't simulate that intrinsic and
-    // bails out with "No implementation or override found for pointer".
-    // Inject a no-op assume-spec override whenever the target function
-    // carries SAL annotations on any parameter, so the verifier can
-    // silently pass through them.
+    // Inject a no-op override for `@llvm.var.annotation` intrinsics generated
+    // by SAL annotations on parameters (SAW can't simulate them).
     let needs_var_annotation_ov = target_fn.params.iter().any(|p| !p.annotations.is_empty());
     if needs_var_annotation_ov {
         step += 1;
@@ -167,18 +164,28 @@ pub fn emit_verification_script(
         &interface_of,
         all_globals,
         sret_prestate.as_ref(),
+        buffer_overrides,
     );
 
+    let post_ctx = PostconditionCtx {
+        sub_callee_specs,
+        return_type: &target_fn.return_type,
+        is_sret: target_spec.return_constraint.is_sret,
+    };
     emit_postcondition_and_close(
         &mut out,
         cryptol_fn,
         &cryptol_args,
         &execute_args,
-        sub_callee_specs,
-        &target_fn.return_type,
-        target_spec.return_constraint.is_sret,
+        &post_ctx,
+        buffer_overrides,
     );
 
+    let iface_ctx = InterfaceCtx {
+        has_interfaces,
+        vmethods,
+        constructors,
+    };
     step += 1;
     emit_verify_step(
         &mut out,
@@ -186,9 +193,7 @@ pub fn emit_verification_script(
         function_name,
         cryptol_fn,
         mangled_name,
-        has_interfaces,
-        vmethods,
-        constructors,
+        &iface_ctx,
         override_names,
     );
 

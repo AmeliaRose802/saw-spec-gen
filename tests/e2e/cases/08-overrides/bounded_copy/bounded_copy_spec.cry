@@ -1,0 +1,29 @@
+// Cryptol model for bounded_copy.
+//
+//   bounded_copy_post : pre-state of `out`, contents of `in`, length nb
+//                       → post-state of `out`.
+//   bounded_copy_ret  : same arg list (verbatim 1:1 with C++) → return value.
+//
+// Both fns take the C arg list verbatim so saw-spec-gen's default 1:1
+// mapping works with no --cryptol-arg-order override.  The wiring is:
+//
+//   --in-buffer-size    src=4        src : [4][8]   (readonly)
+//   --out-buffer-param  out=4        out : [4][8]   (mutable; pre-state arg)
+//   --cryptol-fn-out    out=bounded_copy_post
+//   --max-len-precond   nb=4         assumes nb <= 4 so the C loop terminates
+//
+// NB: the C parameter is called `src` rather than `in` because saw-spec-gen
+// echoes the C parameter name verbatim into SAWScript, and `in` is a
+// reserved keyword there (used in `let ... in ...`).
+
+module bounded_copy_spec where
+
+bounded_copy_post : [4][8] -> [4][8] -> [8] -> [4][8]
+bounded_copy_post out src nb =
+    [ byteAt i | i <- ([0 .. 3] : [4][8]) ]
+  where
+    byteAt : [8] -> [8]
+    byteAt i = if i < nb then src @ (i % 4) else out @ i
+
+bounded_copy_ret : [4][8] -> [4][8] -> [8] -> [64]
+bounded_copy_ret _ _ nb = zext nb

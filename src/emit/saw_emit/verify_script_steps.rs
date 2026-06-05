@@ -5,12 +5,12 @@
 //! function appends its corresponding chunk of SAWScript to the `out`
 //! buffer.
 
-use super::cryptol_bridge::{cryptol_arg_for, cryptol_return_for};
-use super::names::{sanitize_name, spec_safe_id, stub_function_name};
+use super::cryptol_bridge::cryptol_arg_for;
+use super::names::{sanitize_name, spec_safe_id};
 use super::overrides::{container_layout_for, emit_container_this};
 use super::stubs::AssembledStubs;
 use super::verify_script::SretPrestate;
-use crate::clang_ast::{ClassConstructor, InterfaceMethod};
+use crate::buffer_overrides::BufferOverrides;
 use crate::constraints::*;
 use std::collections::HashSet;
 
@@ -23,6 +23,42 @@ pub(super) fn is_operator_new(spec: &SpecConstraint) -> bool {
 /// passed through verbatim; everything else gets a trailing `;`.
 fn emit_param_preconditions(out: &mut String, preconditions: &[String]) {
     for pre in preconditions {
+        let trimmed = pre.trim_start();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.starts_with("//") {
+            out.push_str(&format!("    {pre}\n"));
+        } else {
+            out.push_str(&format!("    {pre};\n"));
+        }
+    }
+}
+
+/// Like [`emit_param_preconditions`] but drops the auto-emitted
+/// "unsized pointer" TODO block (the 5-line warning starting with
+/// `// TODO[saw-spec-gen]: pointer parameter \`<name>\` has no size
+/// annotation.`). Used in the buffer-override branch where the CLI
+/// flag has already supplied the missing size and the warning would
+/// only be noise.
+fn emit_param_preconditions_filtered(out: &mut String, preconditions: &[String], param_name: &str) {
+    let todo_marker =
+        format!("// TODO[saw-spec-gen]: pointer parameter `{param_name}` has no size annotation.",);
+    let mut iter = preconditions.iter().peekable();
+    while let Some(pre) = iter.next() {
+        if pre.trim_start() == todo_marker {
+            // Skip up to the next 4 continuation comment lines that
+            // belong to this TODO block (they all start with "//   ").
+            for _ in 0..4 {
+                match iter.peek() {
+                    Some(next) if next.trim_start().starts_with("//   ") => {
+                        iter.next();
+                    }
+                    _ => break,
+                }
+            }
+            continue;
+        }
         let trimmed = pre.trim_start();
         if trimmed.is_empty() {
             continue;
@@ -198,6 +234,7 @@ pub(super) fn emit_equiv_spec_body(
     interface_of: &dyn Fn(&TypeInfo) -> Option<String>,
     all_globals: &[GlobalVarInfo],
     sret_prestate: Option<&SretPrestate>,
+    buffer_overrides: &BufferOverrides,
 ) -> (Vec<String>, Vec<String>) {
     out.push_str(&format!(
         "// Step {step}: Equivalence spec — C++ {function_name} == Cryptol {cryptol_fn}\n",
@@ -228,6 +265,45 @@ pub(super) fn emit_equiv_spec_body(
             execute_args.push(format!("{}_ptr", param.name));
             continue;
         }
+
+        // CLI buffer-shape overrides (--in-buffer-size / --out-buffer-param):
+        // upgrade an auto-inferred 1-byte pointer alloc (or a scalar)
+        // into a typed byte-array buffer of the user-declared size.
+        // This is what makes pointer-to-buffer C++ APIs verifiable
+        // without a hand-written SAW spec.
+        let is_in_buf = buffer_overrides.in_buffer_sizes.contains_key(&param.name);
+        let is_out_buf = buffer_overrides.out_buffer_sizes.contains_key(&param.name);
+        if is_in_buf || is_out_buf {
+            let saw_ty = buffer_overrides
+                .override_saw_type(&param.name)
+                .expect("buffer override saw_type present");
+            let alloc_fn = if is_out_buf {
+                "llvm_alloc"
+            } else {
+                "llvm_alloc_readonly"
+            };
+            let ptr_name = format!("{}_ptr", param.name);
+            // For out-buffers, the value var captures the pre-call
+            // contents — rename to `_pre` so its later use in the
+            // postcondition reads as "pre-state", not "final state".
+            let val_name = buffer_overrides.value_var_for(&param.name);
+            out.push_str(&format!("    {ptr_name} <- {alloc_fn} ({saw_ty});\n"));
+            out.push_str(&format!(
+                "    {val_name} <- llvm_fresh_var \"{val_name}\" ({saw_ty});\n",
+            ));
+            out.push_str(&format!(
+                "    llvm_points_to {ptr_name} (llvm_term {val_name});\n",
+            ));
+            emit_param_preconditions_filtered(out, &param.preconditions, &param.name);
+            // Push the raw value name as the default Cryptol arg.
+            // `--cryptol-arg-order` (consumed in
+            // `emit_postcondition_and_close`) overrides this
+            // wholesale when the model takes a different shape.
+            cryptol_args.push(val_name);
+            execute_args.push(ptr_name);
+            continue;
+        }
+
         match param.alloc_type {
             AllocType::FreshVar => {
                 out.push_str(&format!(
@@ -353,6 +429,18 @@ pub(super) fn emit_equiv_spec_body(
 
     out.push('\n');
 
+    // --max-len-precond bounds: constrain symbolic length params to
+    // the declared buffer sizes so SAW can reason about bounded
+    // write loops without exhausting the symbolic execution budget.
+    // Placed after globals (so all symbolic vars are in scope) and
+    // before `llvm_execute_func` (emitted in `emit_postcondition_and_close`).
+    for (name, val) in &buffer_overrides.max_len_preconds {
+        out.push_str(&format!("    llvm_precond {{{{ `{val} >= {name} }}}};\n",));
+    }
+    if !buffer_overrides.max_len_preconds.is_empty() {
+        out.push('\n');
+    }
+
     for global in all_globals {
         out.push_str(&format!(
             "    llvm_alloc_global \"{}\";\n",
@@ -375,137 +463,13 @@ pub(super) fn emit_equiv_spec_body(
     (cryptol_args, execute_args)
 }
 
-pub(super) fn emit_postcondition_and_close(
-    out: &mut String,
-    cryptol_fn: &str,
-    cryptol_args: &[String],
-    execute_args: &[String],
-    sub_callee_specs: &[SpecConstraint],
-    return_type: &TypeInfo,
-    is_sret: bool,
-) {
-    out.push_str(&format!(
-        "    llvm_execute_func [{}];\n\n",
-        execute_args.join(", "),
-    ));
-    let cryptol_call = if cryptol_args.is_empty() {
-        cryptol_fn.to_string()
-    } else {
-        format!("{} {}", cryptol_fn, cryptol_args.join(" "))
-    };
-    let cryptol_return = cryptol_return_for(&cryptol_call, return_type);
-    let is_void_return = matches!(return_type, TypeInfo::Void);
-    if is_sret {
-        // Aggregate return via hidden sret pointer: the LLVM function
-        // returns void, so `llvm_return` would be a no-op. Bind the
-        // Cryptol value into `*result_ptr` via `llvm_points_to`.
-        // `result_ptr` was allocated and inserted into the argument
-        // list by `emit_equiv_spec_body`.
-        if sub_callee_specs.is_empty() {
-            out.push_str("    // Postcondition (sret): *result_ptr == Cryptol spec\n");
-        } else {
-            out.push_str("    // TODO: Compositional sret postcondition — fill in by hand.\n");
-            out.push_str("    // The sub-function overrides above return fresh symbolic values;\n");
-            out.push_str("    // thread them into the Cryptol call below before relying on\n");
-            out.push_str("    // this assertion. The auto-derived call uses only the target's\n");
-            out.push_str("    // own parameters and is almost certainly incomplete.\n");
-        }
-        out.push_str(&format!(
-            "    llvm_points_to result_ptr (llvm_term {{{{ {} }}}});\n",
-            cryptol_return,
-        ));
-    } else if is_void_return {
-        // Void-returning target: no `llvm_return` to emit. The harness
-        // still proves "no UB" (load module + execute), and any
-        // `_Out_` parameters require a hand-written
-        // `llvm_points_to <ptr> ...` postcondition — the auto-generator
-        // does not yet thread output-buffer values back through Cryptol
-        // (tracked separately; see tests/e2e/cases/09-type-coverage/void_out_inc).
-        out.push_str("    // Void return — no llvm_return to emit.\n");
-        out.push_str(&format!(
-            "    // (Cryptol spec `{}` is referenced for documentation only.)\n",
-            cryptol_return,
-        ));
-    } else if sub_callee_specs.is_empty() {
-        out.push_str("    // Postcondition: C++ result == Cryptol spec\n");
-        out.push_str(&format!(
-            "    llvm_return (llvm_term {{{{ {} }}}});\n",
-            cryptol_return,
-        ));
-    } else {
-        out.push_str("    // TODO: Compositional postcondition — fill in by hand.\n");
-        out.push_str("    //\n");
-        out.push_str("    // The sub-function overrides above return fresh symbolic values.\n");
-        out.push_str("    // To check functional correctness, capture those returns (e.g.\n");
-        out.push_str("    //   ret_helper <- llvm_fresh_var \"ret_helper\" (llvm_int 32);\n");
-        out.push_str("    // inside the matching override spec) and thread them into the\n");
-        out.push_str("    // Cryptol equivalence call below.  The auto-derived call only uses\n");
-        out.push_str("    // the target's own parameters and is almost certainly incomplete.\n");
-        out.push_str(&format!(
-            "    llvm_return (llvm_term {{{{ {} }}}});  // <-- replace with full mapping\n",
-            cryptol_return,
-        ));
-    }
-    out.push_str("};\n\n");
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(super) fn emit_verify_step(
-    out: &mut String,
-    step: u32,
-    function_name: &str,
-    cryptol_fn: &str,
-    mangled_name: &str,
-    has_interfaces: bool,
-    vmethods: &[InterfaceMethod],
-    constructors: &[ClassConstructor],
-    override_names: Vec<String>,
-) {
-    out.push_str(&format!("// Step {step}: Verify equivalence\n"));
-    out.push_str(&format!(
-        "print \"=== Checking: {function_name} == {cryptol_fn} (Cryptol) ===\";\n",
-    ));
-
-    let mut overrides = override_names;
-    if has_interfaces {
-        let ctor_classes: HashSet<&str> =
-            constructors.iter().map(|c| c.class_name.as_str()).collect();
-        for class in &ctor_classes {
-            let safe_class = sanitize_name(class).to_lowercase();
-            overrides.push(format!("ov_{safe_class}_ctor"));
-        }
-        for method in vmethods {
-            if method.is_override {
-                continue;
-            }
-            let stub_name = stub_function_name(method);
-            let safe_name = sanitize_name(&stub_name);
-            overrides.push(format!("ov_{safe_name}"));
-        }
-    }
-
-    let overrides_str = if overrides.len() <= 4 {
-        format!("[{}]", overrides.join(", "))
-    } else {
-        let mut s = String::from("[\n");
-        for (i, ov) in overrides.iter().enumerate() {
-            if i == 0 {
-                s.push_str(&format!("     {ov}"));
-            } else {
-                s.push_str(&format!(",\n     {ov}"));
-            }
-        }
-        s.push(']');
-        s
-    };
-
-    out.push_str(&format!(
-        "llvm_verify m \"{mangled_name}\"\n    {overrides_str}\n    false {function_name}_equiv_spec z3;\n\n",
-    ));
-    out.push_str(&format!(
-        "print \"=== VERIFIED: {function_name} == {cryptol_fn} ===\";\n",
-    ));
-}
+// Re-exported from the extracted `verify_script_close` sibling module
+// so that existing `use super::verify_script_steps::{…}` import sites
+// and the tests (`super::emit_postcondition_and_close`) keep compiling
+// without churn.
+pub(super) use super::verify_script_close::{
+    emit_postcondition_and_close, emit_verify_step, InterfaceCtx, PostconditionCtx,
+};
 
 /// Extract `N` from `llvm_array N (llvm_int 8)`.
 fn parse_array_len(saw_type: &str) -> Option<usize> {
