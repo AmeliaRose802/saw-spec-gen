@@ -25,7 +25,7 @@ function Invoke-CounterexampleProbe {
         [Parameter(Mandatory)][string]$CryDest,
         [Parameter(Mandatory)][string]$SawExe,
         [Parameter(Mandatory)][string]$CppFile,
-        [Parameter(Mandatory)][string]$ExeExt,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$ExeExt,
         [Parameter(Mandatory)][string]$Function,
         [Parameter(Mandatory)][string]$ClangExe,
         [Parameter(Mandatory)][string]$LlvmTarget,
