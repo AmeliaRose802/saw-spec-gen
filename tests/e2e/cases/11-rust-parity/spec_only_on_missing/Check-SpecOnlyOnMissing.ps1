@@ -33,7 +33,7 @@ $bcFile = Join-Path $outDir 'dummy.bc'
 & $rustc --emit=llvm-bc="$bcFile" --crate-type=lib --edition=2021 `
     --target $llvmTarget `
     -C opt-level=0 -C link-dead-code=yes -C symbol-mangling-version=v0 `
-    -C overflow-checks=off -C debug-assertions=off -C panic=abort `
+    -C overflow-checks=off -C debug-assertions=off -C panic=unwind `
     -C codegen-units=1 -C debuginfo=0 -C lto=off -C embed-bitcode=no `
     -o (Join-Path $outDir 'dummy.out') $rsFile 2>&1 | Write-Host
 

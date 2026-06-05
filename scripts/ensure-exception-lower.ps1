@@ -4,15 +4,17 @@
     the given bitcode file.
 
 .DESCRIPTION
-    Called from verify.ps1 to encapsulate:
+    Called from verify.ps1 / verify-rust.ps1 to encapsulate:
       1. Auto-install logic (download pre-built / build from source)
-      2. Step 1.25 lowering of C++ EH constructs in bitcode
+      2. Step 1.25 lowering of EH constructs in bitcode
 
-    The pass rewrites both Itanium (invoke/landingpad/__cxa_throw) and
-    MSVC SEH (catchswitch/catchpad/_CxxThrowException) constructs into
-    explicit error-flag CFG. Without this pass:
+    The pass rewrites Itanium (invoke/landingpad/__cxa_throw), MSVC SEH
+    (catchswitch/catchpad/_CxxThrowException), and Rust cleanup funclets
+    (cleanuppad/cleanupret + operand bundles) into funclet-free IR.
+    Without this pass:
       * Itanium catches are pruned (throw → partial-correctness only).
       * MSVC catches fail to load (FUNC_CODE_CATCHSWITCH unsupported).
+      * Rust cleanup funclets fail to load (FUNC_CODE_OPERAND_BUNDLE).
 
 .PARAMETER ExceptionLower
     Path to the exception-lower binary, or empty/null if not yet found.
@@ -67,15 +69,15 @@ if (-not $ExceptionLower -and $IsMsvc) {
         }
     } catch {
         Write-Host "[!] exception-lower auto-install failed: $_" -ForegroundColor Yellow
-        Write-Host "    Continuing with text-only MSVC EH stripping." -ForegroundColor Yellow
+        Write-Host "    Continuing without exception lowering." -ForegroundColor Yellow
     }
 }
 
-# ── Step 1.25: Lower C++ exception handling ───────────────────────────
+# ── Step 1.25: Lower exception handling / cleanup funclets ────────────
 if ($ExceptionLower) {
     Write-Host ""
     Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
-    Write-Host " Step 1.25: Lower C++ exception handling" -ForegroundColor Cyan
+    Write-Host " Step 1.25: Lower exception handling" -ForegroundColor Cyan
     Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
     $loweredBc = Join-Path $OutputDir "${BaseName}_lowered.bc"
     & $ExceptionLower $BcFile -o $loweredBc 2>&1 | Write-Host
@@ -94,7 +96,7 @@ if ($ExceptionLower) {
         }
     }
 } elseif ($IsMsvc) {
-    Write-Host "  note: exception-lower binary not available; C++ try/catch demos will not load." -ForegroundColor DarkYellow
+    Write-Host "  note: exception-lower binary not available; EH / cleanup funclets will not be lowered." -ForegroundColor DarkYellow
     Write-Host "        Run scripts/install-exception-lower.ps1 to install, or set" -ForegroundColor DarkYellow
     Write-Host "        SAW_SPEC_GEN_EXCEPTION_LOWER to point at an existing build." -ForegroundColor DarkYellow
 }
