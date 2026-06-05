@@ -287,5 +287,14 @@
         # (Box::new path the front-end can't model). Tracked separately; not
         # run by default to keep the suite green. To enable, add tag 'box_allocator'.
         @{ Tag = 'box_allocator'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/box_allocator';        File = 'add_one.rs'; Expected = 'UNKNOWN' }
+
+        # ── Proof markers (saw-spec-gen-dtb) ────────────────────────────────
+        # Verifies the BEGIN_PROOF / PROVED log contract end-to-end:
+        # constructs a synthetic SAW log, runs Parse-PropertyLog.ps1,
+        # and asserts the per-property result.json files match the
+        # schema-1 shape.  Toolchain-free — no SAW / clang / rustc.
+        @{ Tag = 'proof_markers'; Runner = 'custom'; Expected = 'VERIFIED';
+           Script = 'tests/e2e/cases/10-proof-markers/Check-ProofMarkers.ps1';
+           ScriptArgs = @{} }
     )
 }

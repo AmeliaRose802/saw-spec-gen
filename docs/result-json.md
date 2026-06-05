@@ -120,3 +120,15 @@ The reference consumer is `saw-spec-gen collect-results`, which walks
 a directory tree, finds every `result.json`, and emits a single
 `proof_manifest.json` for `pretty-specs --proof-status`.  It rejects
 files whose `schema_version` it doesn't recognise.
+
+## Per-property results from a single SAW invocation
+
+A single emitted `.saw` script may run multiple `llvm_verify` (or, in
+future, `prove_print`) commands.  The emitter wraps each one with the
+machine-readable `BEGIN_PROOF` / `PROVED` markers documented in
+[`proof-markers.md`](proof-markers.md).
+[`scripts/Parse-PropertyLog.ps1`](../scripts/Parse-PropertyLog.ps1)
+reads a captured SAW log and writes one schema-1 `result.json` per
+property under `<output-dir>/properties/<name>/result.json`, which
+`collect-results` then aggregates exactly as if each had come from a
+separate wrapper invocation.

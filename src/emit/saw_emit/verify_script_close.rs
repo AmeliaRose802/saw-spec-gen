@@ -128,6 +128,10 @@ pub(super) fn emit_verify_step(
     override_names: Vec<String>,
 ) {
     out.push_str(&format!("// Step {step}: Verify equivalence\n"));
+    // Machine-readable proof marker (see docs/proof-markers.md). Must
+    // precede every verification command so downstream aggregators can
+    // attribute counterexamples / warnings to a specific property.
+    out.push_str(&format!("print \"BEGIN_PROOF {function_name}\";\n"));
     out.push_str(&format!(
         "print \"=== Checking: {function_name} == {cryptol_fn} (Cryptol) ===\";\n",
     ));
@@ -174,4 +178,8 @@ pub(super) fn emit_verify_step(
     out.push_str(&format!(
         "print \"=== VERIFIED: {function_name} == {cryptol_fn} ===\";\n",
     ));
+    // Closing marker — emitted only on success, since SAW aborts the
+    // script on a failed `llvm_verify`. Absence of this line after a
+    // BEGIN_PROOF is the signal of failure.
+    out.push_str(&format!("print \"PROVED {function_name}\";\n"));
 }

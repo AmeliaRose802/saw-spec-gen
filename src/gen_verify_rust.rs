@@ -349,7 +349,9 @@ fn emit_saw_script(
     ));
     buf.push_str("};\n\n");
     buf.push_str(&format!(
-        "llvm_verify m \"{}\" [] true {}_equiv_spec z3;\n\
+        "print \"BEGIN_PROOF {function}\";\n\
+         llvm_verify m \"{}\" [] true {}_equiv_spec z3;\n\
+         print \"PROVED {function}\";\n\
          print \"VERIFIED\";\n",
         arts.mangled_name, function,
     ));
@@ -430,5 +432,88 @@ entry:
 ";
         let arts = resolve_target(ir, "get").unwrap();
         assert_eq!(arts.globals, vec!["COUNTER".to_string()]);
+    }
+
+    // -----------------------------------------------------------------
+    // BEGIN_PROOF / PROVED marker contract (saw-spec-gen-dtb)
+    // -----------------------------------------------------------------
+
+    fn unary_i32_arts() -> RustVerifyArtifacts {
+        let ir = "\
+define internal i32 @_RNvCs1234_8mycrate7add_one(i32 %x) unnamed_addr {
+entry:
+  ret i32 1
+}
+";
+        resolve_target(ir, "add_one").unwrap()
+    }
+
+    #[test]
+    fn emit_saw_script_emits_begin_proof_before_llvm_verify() {
+        let arts = unary_i32_arts();
+        let saw = emit_saw_script(
+            "add_one",
+            "add_one_spec",
+            "add_one.bc",
+            "add_one.cry",
+            &arts,
+        );
+
+        assert!(
+            saw.contains("print \"BEGIN_PROOF add_one\";"),
+            "missing BEGIN_PROOF marker:\n{saw}"
+        );
+        let begin_idx = saw
+            .find("print \"BEGIN_PROOF add_one\";")
+            .expect("BEGIN_PROOF marker missing");
+        let verify_idx = saw.find("llvm_verify").expect("llvm_verify missing");
+        assert!(
+            begin_idx < verify_idx,
+            "BEGIN_PROOF must appear before llvm_verify:\n{saw}"
+        );
+    }
+
+    #[test]
+    fn emit_saw_script_emits_proved_after_llvm_verify() {
+        let arts = unary_i32_arts();
+        let saw = emit_saw_script(
+            "add_one",
+            "add_one_spec",
+            "add_one.bc",
+            "add_one.cry",
+            &arts,
+        );
+
+        assert!(
+            saw.contains("print \"PROVED add_one\";"),
+            "missing PROVED marker:\n{saw}"
+        );
+        let verify_idx = saw.find("llvm_verify").expect("llvm_verify missing");
+        let proved_idx = saw
+            .find("print \"PROVED add_one\";")
+            .expect("PROVED marker missing");
+        assert!(
+            verify_idx < proved_idx,
+            "PROVED must appear after llvm_verify:\n{saw}"
+        );
+    }
+
+    #[test]
+    fn emit_saw_script_keeps_legacy_verified_token_for_verify_ps1() {
+        // verify.ps1 currently regex-matches the literal `VERIFIED` to
+        // produce its RESULT line; preserve that signal so the new
+        // markers are purely additive.
+        let arts = unary_i32_arts();
+        let saw = emit_saw_script(
+            "add_one",
+            "add_one_spec",
+            "add_one.bc",
+            "add_one.cry",
+            &arts,
+        );
+        assert!(
+            saw.contains("VERIFIED"),
+            "lost legacy VERIFIED token:\n{saw}"
+        );
     }
 }
