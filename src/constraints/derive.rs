@@ -78,7 +78,11 @@ fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
         // `llvm_precond {{ name <= N }}` bound.
         let buffer_len: Option<(usize, Option<String>)> = if is_indirect {
             param.annotations.iter().find_map(|a| match a {
-                Annotation::InReads(n) | Annotation::OutWrites(n) if *n > 1 => Some((*n, None)),
+                Annotation::InReads(n) | Annotation::OutWrites(n) | Annotation::InZ(n)
+                    if *n > 1 =>
+                {
+                    Some((*n, None))
+                }
                 Annotation::InReadsParam(p) | Annotation::OutWritesParam(p) => {
                     Some((DEFAULT_PARAMREF_MAX_LEN, Some(p.clone())))
                 }
@@ -164,6 +168,7 @@ fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
                     | Annotation::OutWrites(_)
                     | Annotation::InReadsParam(_)
                     | Annotation::OutWritesParam(_)
+                    | Annotation::InZ(_)
                     | Annotation::Dereferenceable(_)
             )
         });
@@ -209,6 +214,21 @@ fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
                     preconditions.push(format!(
                         "// _In_reads_({n}) -- readable buffer of {n} elements"
                     ));
+                }
+                Annotation::InZ(n) if *n > 0 => {
+                    preconditions.push(format!(
+                        "// _In_z_({n}) -- NUL-terminated string, up to {n} bytes"
+                    ));
+                    preconditions.push(
+                        "//   TODO[saw-spec-gen,saw_spec_gen-5mt]: add an explicit".to_string(),
+                    );
+                    preconditions.push(
+                        "//   `llvm_precond {{ findNul ... }}` once the Cryptol helper".to_string(),
+                    );
+                    preconditions.push(
+                        "//   `lib/cryptol/saw_strings.cry :: findNul` is imported".to_string(),
+                    );
+                    preconditions.push("//   into the spec module.".to_string());
                 }
                 Annotation::OutWrites(n) if *n > 0 => {
                     preconditions.push(format!(

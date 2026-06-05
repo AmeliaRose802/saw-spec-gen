@@ -144,6 +144,7 @@ pub fn apply_to_function(func: &mut FunctionInfo, bindings: &[LengthBinding]) ->
                         | Annotation::OutWrites(_)
                         | Annotation::InReadsParam(_)
                         | Annotation::OutWritesParam(_)
+                        | Annotation::InZ(_)
                 )
             });
             if already_sized {
