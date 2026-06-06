@@ -1,40 +1,32 @@
 # Container-layout catalog for saw-spec-gen (ArrayView rule 5,
 # saw_spec_gen-26d).
 #
-# !!! YOU SHOULD NOT NEED TO EDIT THIS FILE. !!!
+# !!! THIS FILE IS SCHEDULED FOR DELETION. !!!
 #
-# Asking users to hand-write libstdc++ ABI field paths like
-# `_M_dataplus._M_p` is the wrong long-term answer — users consume
-# `std::string`, they do not know its internals, and the layout
-# differs across libstdc++ / libc++ / MSVC STL. The right answer is
-# auto-derivation from the clang AST + LLVM type table.
+# Hand-writing libstdc++ ABI field paths like `_M_dataplus._M_p` is
+# the wrong long-term answer — users consume `std::string`, they do
+# not know its internals, and the layout differs across libstdc++ /
+# libc++ / MSVC STL. The struct-shape recognizer in this PR already
+# pairs adjacent `(T* buf, size_t len)` *function parameters*; the
+# same heuristic applied to *struct fields* derives layouts for
+# every container shape (stdlib AND project-local) directly from
+# the clang AST.
 #
-# Status of auto-derive:
-#   * saw_spec_gen-530  — derive standard-container layouts from AST
-#                         (replaces builtin_defaults entirely)
+# Once that lands, this entire user-facing layer goes away:
+#
+#   * saw_spec_gen-530  — auto-derive layouts from the AST
+#                         (replaces both this file and the built-in
+#                         defaults; covers stdlib + project-local).
 #   * saw_spec_gen-qms  — wire the catalog into the emitter's
-#                         llvm_points_to lowering
-#   * saw_spec_gen-i47  — functional STL overrides built on top
+#                         llvm_points_to lowering.
+#   * saw_spec_gen-i47  — functional STL overrides on top.
+#   * saw_spec_gen-0nf  — delete --container-layouts flag,
+#                         delete this TOML file, delete
+#                         ContainerCatalog::load_toml_*.
 #
 # Until those land, the `--container-layouts` flag is a no-op for
-# verdicts (it prints a stderr warning) and the built-in defaults in
-# src/constraints/container_layouts.rs cover `std::string` and
-# `std::vector` for libstdc++ only.
+# verdicts (it prints a stderr warning naming the issues above).
 #
-# When auto-derive ships, this file's role shrinks to "register
-# project-local container types the AST walker doesn't recognize"
-# (custom small-buffer types, flat-buffer payload structs, etc.).
-#
-# Schema (each block):
-#
-#   [[container]]
-#   name      = "qualified::Name"   # required, double-quoted
-#   data_ptr  = "field.path"        # required, double-quoted
-#   size      = "field.path"        # required, double-quoted
-#   elem_bits = 8                   # required, positive integer
-#
-# Lines starting with `#` are comments. Unknown keys are rejected so
-# typos do not silently degrade the catalog.
-
-# Empty by default. Add project-local container types below once the
-# `--container-layouts` flag is functional (see saw_spec_gen-qms).
+# DO NOT ADD ENTRIES HERE. If your project has a container type the
+# generator does not recognize, the right fix is to extend the AST
+# walker (saw_spec_gen-530), not to grow this file.

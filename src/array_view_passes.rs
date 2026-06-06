@@ -53,9 +53,14 @@ pub(crate) fn apply_struct_shape_recognizer(all_functions: &mut [FunctionInfo], 
 /// emitter — the `--container-layouts` flag is plumbed but the
 /// downstream `llvm_points_to` lowering is not wired yet. We emit a
 /// loud stderr warning whenever a user passes the flag so the no-op
-/// is not silent. Full wiring is tracked under
-/// saw_spec_gen-qms (catalog -> emitter) and saw_spec_gen-530
-/// (auto-derive layouts from the AST so users never write TOML).
+/// is not silent.
+///
+/// Long-term, the TOML surface goes away entirely: the AST walker
+/// will derive layouts for every container shape (stdlib AND
+/// project-local) by extending the struct-shape recognizer to
+/// struct fields. Tracked under saw_spec_gen-530 (auto-derive),
+/// saw_spec_gen-qms (catalog -> emitter wiring), and
+/// saw_spec_gen-0nf (delete the flag + this code path).
 pub(crate) fn load_container_catalog(path: Option<&Path>) -> ContainerCatalog {
     let mut c = ContainerCatalog::with_defaults();
     if let Some(p) = path {
@@ -70,13 +75,12 @@ pub(crate) fn load_container_catalog(path: Option<&Path>) -> ContainerCatalog {
             ),
         }
         eprintln!(
-            "warning[saw-spec-gen]: --container-layouts: catalog loaded with \
-             {} entr{} but the emitter does not consume it yet — your TOML \
-             will NOT change any verification verdict. Tracked under \
-             saw_spec_gen-qms (catalog wiring) and saw_spec_gen-530 \
-             (auto-derive from the AST). See PR #31 for context.",
-            c.len(),
-            if c.len() == 1 { "y" } else { "ies" },
+            "warning[saw-spec-gen]: --container-layouts is a no-op for \
+             verdicts in this build — the emitter does not consume the \
+             catalog yet, and the TOML surface itself is scheduled for \
+             deletion in favor of AST-driven auto-derivation. Tracked \
+             under saw_spec_gen-530 (auto-derive), saw_spec_gen-qms \
+             (wiring), and saw_spec_gen-0nf (deletion)."
         );
     }
     c
