@@ -48,6 +48,14 @@ pub(crate) fn apply_struct_shape_recognizer(all_functions: &mut [FunctionInfo], 
 
 /// Build the container-layout catalog, merging any user-supplied
 /// TOML on top of the built-in defaults.
+///
+/// **Caveat:** the returned catalog is currently not consumed by the
+/// emitter — the `--container-layouts` flag is plumbed but the
+/// downstream `llvm_points_to` lowering is not wired yet. We emit a
+/// loud stderr warning whenever a user passes the flag so the no-op
+/// is not silent. Full wiring is tracked under
+/// saw_spec_gen-qms (catalog -> emitter) and saw_spec_gen-530
+/// (auto-derive layouts from the AST so users never write TOML).
 pub(crate) fn load_container_catalog(path: Option<&Path>) -> ContainerCatalog {
     let mut c = ContainerCatalog::with_defaults();
     if let Some(p) = path {
@@ -61,6 +69,15 @@ pub(crate) fn load_container_catalog(path: Option<&Path>) -> ContainerCatalog {
                 p.display()
             ),
         }
+        eprintln!(
+            "warning[saw-spec-gen]: --container-layouts: catalog loaded with \
+             {} entr{} but the emitter does not consume it yet — your TOML \
+             will NOT change any verification verdict. Tracked under \
+             saw_spec_gen-qms (catalog wiring) and saw_spec_gen-530 \
+             (auto-derive from the AST). See PR #31 for context.",
+            c.len(),
+            if c.len() == 1 { "y" } else { "ies" },
+        );
     }
     c
 }
