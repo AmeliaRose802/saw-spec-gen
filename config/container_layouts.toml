@@ -1,0 +1,21 @@
+# Container-layout catalog for saw-spec-gen (ArrayView rule 5,
+# saw_spec_gen-26d).
+#
+# Pass this file via `saw-spec-gen gen-verify --container-layouts \
+# config/container_layouts.toml`. Built-in defaults already include
+# `std::string` and `std::vector`; entries here override or extend
+# them. See [src/constraints/container_layouts.rs] for the loader.
+#
+# Schema (each block):
+#
+#   [[container]]
+#   name      = "qualified::Name"   # required, double-quoted
+#   data_ptr  = "field.path"        # required, double-quoted
+#   size      = "field.path"        # required, double-quoted
+#   elem_bits = 8                   # required, positive integer
+#
+# Lines starting with `#` are comments. Unknown keys are rejected so
+# typos do not silently degrade the catalog.
+
+# Empty by default — the built-in catalog already covers the two
+# common libstdc++ shapes. Add project-specific containers below.

@@ -53,6 +53,8 @@ fn main() -> Result<()> {
             cryptol_arg_order,
             variant_map,
             bind_cryptol_lengths,
+            no_struct_shape_recognizer,
+            container_layouts,
         } => commands::gen_verify_cmd(
             lang,
             ast,
@@ -73,6 +75,8 @@ fn main() -> Result<()> {
             cryptol_arg_order,
             variant_map,
             bind_cryptol_lengths,
+            no_struct_shape_recognizer,
+            container_layouts,
         ),
         Commands::GenRustTraitStubs { schema, output } => {
             commands::gen_rust_trait_stubs(schema, output)

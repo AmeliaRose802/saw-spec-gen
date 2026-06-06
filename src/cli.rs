@@ -295,24 +295,32 @@ pub enum Commands {
         #[arg(long = "variant-map", value_name = "PARAM=V1:D1,V2:D2,...", num_args = 0..)]
         variant_map: Vec<String>,
 
-        /// Bind Cryptol-signature type variables to the lengths of
-        /// the matching C++/Rust pointer parameters (ArrayView rule
-        /// 1, saw_spec_gen-4po).
-        ///
-        /// When set, the generator parses the attached Cryptol
-        /// signature's binders + predicate context (e.g.
-        /// `{n}(fin n, n <= 64) => [n][8] -> ...`) and treats each
-        /// `[n][T]` parameter as if it carried `_In_reads_(MAX)` for
-        /// the variable's declared upper bound. Two pointer
-        /// parameters sharing the same `n` are both sized to the
-        /// same MAX. Open-ended variables fall back to
-        /// `DEFAULT_PARAMREF_MAX_LEN` and emit a stderr warning.
-        ///
-        /// Off by default: existing specs that rely on the 1-byte
-        /// fallback or on hand-edited `.saw` scripts keep working
-        /// unchanged.
+        /// Bind Cryptol-signature type variables to the matching
+        /// C++/Rust pointer parameter lengths (ArrayView rule 1,
+        /// saw_spec_gen-4po). Parses the spec's binders + predicate
+        /// context (e.g. `{n}(fin n, n <= 64) => [n][8] -> ...`) and
+        /// injects synthetic `_In_reads_(MAX)` annotations. Two
+        /// pointer params sharing the same `n` are both sized to
+        /// the same MAX; open-ended variables fall back to
+        /// `DEFAULT_PARAMREF_MAX_LEN` with a stderr warning. Off by
+        /// default to preserve legacy behavior.
         #[arg(long = "bind-cryptol-lengths", default_value_t = false)]
         bind_cryptol_lengths: bool,
+
+        /// Disable the struct-shape recognizer (ArrayView rule 4,
+        /// saw_spec_gen-26d). The recognizer pairs adjacent
+        /// `(T* buf, size_t len)` parameters and synthesizes
+        /// `_In_reads_(len)` on the buffer when neither carries a
+        /// size annotation. Set to keep the legacy 1-byte fallback.
+        #[arg(long = "no-struct-shape-recognizer", default_value_t = false)]
+        no_struct_shape_recognizer: bool,
+
+        /// Optional container-layout TOML catalog (ArrayView rule 5,
+        /// saw_spec_gen-26d). Merged over the built-in defaults
+        /// (`std::string`, `std::vector`). See
+        /// `config/container_layouts.toml` for the schema.
+        #[arg(long = "container-layouts", value_name = "PATH")]
+        container_layouts: Option<PathBuf>,
     },
 
     /// Generate Rust trait vtable stubs + havoc specs for opaque

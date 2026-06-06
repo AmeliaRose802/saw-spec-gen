@@ -5,6 +5,7 @@
 //! dispatches into `commands::*` defined below.
 
 // Top-level utilities that stay at the crate root.
+pub mod array_view_passes;
 pub mod buffer_overrides;
 pub mod collect_results;
 pub mod commands;
