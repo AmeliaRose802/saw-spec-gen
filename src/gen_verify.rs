@@ -62,6 +62,10 @@ pub fn run(
         &mut all_functions,
         no_struct_shape_recognizer,
     );
+    // The catalog is built (and the user warned) but no emitter pass
+    // consumes it yet. Wiring is tracked under saw_spec_gen-qms; the
+    // user-facing auto-derive replacement (so no TOML is ever needed)
+    // is saw_spec_gen-530.
     let _container_catalog = crate::array_view_passes::load_container_catalog(container_layouts);
     crate::array_view_passes::apply_cryptol_length_binding(
         &mut all_functions,

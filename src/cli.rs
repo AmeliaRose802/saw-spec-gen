@@ -299,11 +299,9 @@ pub enum Commands {
         /// C++/Rust pointer parameter lengths (ArrayView rule 1,
         /// saw_spec_gen-4po). Parses the spec's binders + predicate
         /// context (e.g. `{n}(fin n, n <= 64) => [n][8] -> ...`) and
-        /// injects synthetic `_In_reads_(MAX)` annotations. Two
-        /// pointer params sharing the same `n` are both sized to
-        /// the same MAX; open-ended variables fall back to
-        /// `DEFAULT_PARAMREF_MAX_LEN` with a stderr warning. Off by
-        /// default to preserve legacy behavior.
+        /// injects synthetic `_In_reads_(MAX)` annotations. Open-
+        /// ended variables fall back to `DEFAULT_PARAMREF_MAX_LEN`
+        /// with a stderr warning.
         #[arg(long = "bind-cryptol-lengths", default_value_t = false)]
         bind_cryptol_lengths: bool,
 
@@ -311,14 +309,15 @@ pub enum Commands {
         /// saw_spec_gen-26d). The recognizer pairs adjacent
         /// `(T* buf, size_t len)` parameters and synthesizes
         /// `_In_reads_(len)` on the buffer when neither carries a
-        /// size annotation. Set to keep the legacy 1-byte fallback.
+        /// size annotation.
         #[arg(long = "no-struct-shape-recognizer", default_value_t = false)]
         no_struct_shape_recognizer: bool,
 
         /// Optional container-layout TOML catalog (ArrayView rule 5,
-        /// saw_spec_gen-26d). Merged over the built-in defaults
-        /// (`std::string`, `std::vector`). See
-        /// `config/container_layouts.toml` for the schema.
+        /// saw_spec_gen-26d). Merged over the built-in defaults.
+        /// **No-op today:** the catalog is parsed but the emitter
+        /// does not consume it yet (prints a stderr warning).
+        /// Tracked under saw_spec_gen-qms / saw_spec_gen-530.
         #[arg(long = "container-layouts", value_name = "PATH")]
         container_layouts: Option<PathBuf>,
     },

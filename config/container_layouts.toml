@@ -1,10 +1,29 @@
 # Container-layout catalog for saw-spec-gen (ArrayView rule 5,
 # saw_spec_gen-26d).
 #
-# Pass this file via `saw-spec-gen gen-verify --container-layouts \
-# config/container_layouts.toml`. Built-in defaults already include
-# `std::string` and `std::vector`; entries here override or extend
-# them. See [src/constraints/container_layouts.rs] for the loader.
+# !!! YOU SHOULD NOT NEED TO EDIT THIS FILE. !!!
+#
+# Asking users to hand-write libstdc++ ABI field paths like
+# `_M_dataplus._M_p` is the wrong long-term answer — users consume
+# `std::string`, they do not know its internals, and the layout
+# differs across libstdc++ / libc++ / MSVC STL. The right answer is
+# auto-derivation from the clang AST + LLVM type table.
+#
+# Status of auto-derive:
+#   * saw_spec_gen-530  — derive standard-container layouts from AST
+#                         (replaces builtin_defaults entirely)
+#   * saw_spec_gen-qms  — wire the catalog into the emitter's
+#                         llvm_points_to lowering
+#   * saw_spec_gen-i47  — functional STL overrides built on top
+#
+# Until those land, the `--container-layouts` flag is a no-op for
+# verdicts (it prints a stderr warning) and the built-in defaults in
+# src/constraints/container_layouts.rs cover `std::string` and
+# `std::vector` for libstdc++ only.
+#
+# When auto-derive ships, this file's role shrinks to "register
+# project-local container types the AST walker doesn't recognize"
+# (custom small-buffer types, flat-buffer payload structs, etc.).
 #
 # Schema (each block):
 #
@@ -17,5 +36,5 @@
 # Lines starting with `#` are comments. Unknown keys are rejected so
 # typos do not silently degrade the catalog.
 
-# Empty by default — the built-in catalog already covers the two
-# common libstdc++ shapes. Add project-specific containers below.
+# Empty by default. Add project-local container types below once the
+# `--container-layouts` flag is functional (see saw_spec_gen-qms).
