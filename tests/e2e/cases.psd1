@@ -270,6 +270,13 @@
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/tuple_get';              File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/vector_back_havoc';      File = 'add_one_gap_disproved.cpp';  Expected = 'DISPROVED' }
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/vector_back_havoc';      File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
+        # std::string mirror of vector_back_havoc: exercises the
+        # `St12basic_string` / `St7__cxx1112basic_string` substring
+        # patterns in the jpp override registry. Both variants are
+        # DISPROVED: the gap case can't couple resize(N) with size(),
+        # the wrong case writes the wrong length on purpose.
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/string_size_havoc';      File = 'add_one_gap_disproved.cpp';  Expected = 'DISPROVED' }
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/string_size_havoc';      File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/unique_ptr_deref_havoc'; File = 'add_one_gap_disproved.cpp';  Expected = 'DISPROVED' }
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/unique_ptr_deref_havoc'; File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
 
