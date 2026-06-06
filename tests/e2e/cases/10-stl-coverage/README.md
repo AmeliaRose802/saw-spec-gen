@@ -75,6 +75,7 @@ SAW_SPEC_GEN_NO_SYSTEM_RECURSION=1 SAW_SPEC_GEN_NO_STL_OVERRIDES=1 \
 | `pair_first/`              | `std::pair<u32, u32>{a, b}.first`              | **VERIFIED**  | Pair constructor body is plain `getelementptr` + `store`/`load`. |
 | `tuple_get/`               | `std::tuple<u32, u32>{a, b}` + `std::get<I>`   | **VERIFIED**  | Same as `pair_first`, with variadic-template scaffolding. |
 | `vector_back_havoc/`       | `std::vector::push_back` + `back()`            | **DISPROVED** | `jpp` forces `vector::{ctor,push_back,back,dtor}` to havoc — `back()` returns a fresh symbolic `u32`, so the equivalence is unprovable. The original symptom was an UNKNOWN/Crucible panic. |
+| `string_size_havoc/`       | `std::string::resize` + `size()`               | **DISPROVED** | `jpp` matches both `St12basic_string` and `St7__cxx1112basic_string`, forcing the (n, char) ctor, `resize`, `size`, and dtor to havoc — `size()` returns a fresh symbolic `size_t`, so the equivalence is unprovable. Same compositional gap as `vector_back_havoc/`. |
 | `unique_ptr_deref_havoc/`  | `std::make_unique<u32>(v)` + `*p`              | **DISPROVED** | Same shape as above, via `unique_ptr` family patterns. |
 
 The `*_havoc/` cases are intentionally retained as DISPROVED
