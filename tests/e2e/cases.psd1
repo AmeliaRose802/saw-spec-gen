@@ -175,6 +175,14 @@
         #    the allocation. ─────────────────────────────────────────────
         @{ Tag = 'in_z_macro'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/in_z_macro'; File = 'count_digits_z_verified.cpp'; Cry = 'count_digits_z_spec.cry'; CryptolFn = 'count_digits_z_spec'; Function = 'count_digits_z'; Expected = 'VERIFIED' }
 
+        # ── ArrayView rule 4 (saw_spec_gen-26d): struct-shape recognizer
+        #    auto-pairs `(T* buf, size_t len)` parameters. With the
+        #    recognizer (default): buf is sized to its length sibling
+        #    → VERIFIED. With `--no-struct-shape-recognizer`: legacy
+        #    1-byte fallback → DISPROVED. ─────────────────────────────────
+        @{ Tag = 'struct_shape'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/struct_shape_recognizer'; File = 'sum_first_byte_verified.cpp'; Cry = 'sum_first_byte_spec.cry'; CryptolFn = 'sum_first_byte_spec'; Function = 'sum_first_byte'; Expected = 'VERIFIED' }
+        @{ Tag = 'struct_shape'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/struct_shape_recognizer'; File = 'sum_first_byte_verified.cpp'; Cry = 'sum_first_byte_spec.cry'; CryptolFn = 'sum_first_byte_spec'; Function = 'sum_first_byte'; Expected = 'DISPROVED'; ExtraSpecGenArgs = @('--no-struct-shape-recognizer') }
+
         # ── Bitcode-driven extern override tests ────────────────────────────
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/bump';                    File = 'bump_verified.cpp';          Cry = 'bump_spec.cry';          CryptolFn = 'bump_spec';          Function = 'bump';          Expected = 'VERIFIED'  }
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/use_helper';              File = 'use_helper_verified.cpp';    Cry = 'use_helper_spec.cry';    CryptolFn = 'use_helper_spec';    Function = 'use_helper';    Expected = 'VERIFIED'  }

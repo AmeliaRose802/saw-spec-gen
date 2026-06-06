@@ -32,6 +32,8 @@ pub fn run(
     spec_only_on_missing: bool,
     buffer_overrides: &crate::buffer_overrides::BufferOverrides,
     bind_cryptol_lengths: bool,
+    no_struct_shape_recognizer: bool,
+    container_layouts: Option<&Path>,
 ) -> Result<()> {
     if ast.is_empty() {
         anyhow::bail!("At least one --ast file is required");
@@ -51,53 +53,23 @@ pub fn run(
     let mut all_functions = clang_ast::extract_functions(&parsed_ast, None)?;
     eprintln!("Found {} functions", all_functions.len());
 
-    // ArrayView rule 1 (saw_spec_gen-4po): bind Cryptol type
-    // variables in the spec for the *target* function to its
-    // C++/Rust pointer parameter lengths. We do this BEFORE any
-    // `derive_constraints` call so synthetic `_In_reads_(N)`
-    // annotations flow through the existing pipeline unchanged.
-    if bind_cryptol_lengths {
-        match crate::parsers::cryptol_poly_sig::parse_poly_signature(cryptol_spec, cryptol_fn) {
-            Some(poly_sig) => {
-                if let Some(fi) = all_functions.iter_mut().find(|f| f.name == function) {
-                    let bindings = crate::constraints::length_binding::bind_lengths(&poly_sig, fi);
-                    if bindings.is_empty() {
-                        eprintln!(
-                            "warning[saw-spec-gen]: --bind-cryptol-lengths: no bindings \
-                             for `{function}` (Cryptol arity {} vs C/Rust arity {}); \
-                             leaving annotations unchanged.",
-                            poly_sig.params.len(),
-                            fi.params.len(),
-                        );
-                    } else {
-                        let warnings =
-                            crate::constraints::length_binding::apply_to_function(fi, &bindings);
-                        eprintln!(
-                            "info[saw-spec-gen]: --bind-cryptol-lengths: injected \
-                             {} length binding(s) for `{function}` from Cryptol \
-                             signature `{cryptol_fn}`.",
-                            bindings.len()
-                        );
-                        for w in &warnings {
-                            eprintln!("{w}");
-                        }
-                    }
-                } else {
-                    eprintln!(
-                        "warning[saw-spec-gen]: --bind-cryptol-lengths: target \
-                         function `{function}` not found in AST; nothing to bind."
-                    );
-                }
-            }
-            None => {
-                eprintln!(
-                    "warning[saw-spec-gen]: --bind-cryptol-lengths: could not parse \
-                     Cryptol signature for `{cryptol_fn}`; falling back to the \
-                     untyped derivation path."
-                );
-            }
-        }
-    }
+    // ArrayView pre-derive passes (saw_spec_gen-rng umbrella).
+    // Order matters: struct-shape recognizer first so the binding
+    // pass can respect its output, then the container catalog
+    // (diagnostic-only for the scaffold), then the Cryptol length
+    // binding for the target function. See `src/array_view_passes.rs`.
+    crate::array_view_passes::apply_struct_shape_recognizer(
+        &mut all_functions,
+        no_struct_shape_recognizer,
+    );
+    let _container_catalog = crate::array_view_passes::load_container_catalog(container_layouts);
+    crate::array_view_passes::apply_cryptol_length_binding(
+        &mut all_functions,
+        bind_cryptol_lengths,
+        cryptol_spec,
+        cryptol_fn,
+        function,
+    );
 
     // Optional LLVM IR: struct-size table + per-param `dereferenceable(N)`.
     // MSVC-clang fully qualifies struct symbols, so without the IR we can't

@@ -293,6 +293,8 @@ pub fn gen_verify_cmd(
     cryptol_arg_order: Vec<String>,
     variant_map: Vec<String>,
     bind_cryptol_lengths: bool,
+    no_struct_shape_recognizer: bool,
+    container_layouts: Option<PathBuf>,
 ) -> Result<()> {
     // Auto-detect language: Rust when --llvm-ir is provided without --ast
     let effective_lang = match lang.as_deref() {
@@ -358,6 +360,8 @@ pub fn gen_verify_cmd(
         spec_only_on_missing,
         &buffer_overrides,
         bind_cryptol_lengths,
+        no_struct_shape_recognizer,
+        container_layouts.as_deref(),
     )
 }
 

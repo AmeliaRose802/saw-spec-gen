@@ -1,0 +1,11 @@
+// Cryptol spec for the struct-shape-recognizer e2e test
+// (saw_spec_gen-26d).
+//
+// The recognizer annotates `buf` with `_In_reads_(len)`, so the
+// emitter allocates `DEFAULT_PARAMREF_MAX_LEN` bytes for the
+// pointer. The Cryptol spec just returns the first byte (as u32)
+// when len > 0, else 0.
+
+sum_first_byte_spec : [16][8] -> [64] -> [32]
+sum_first_byte_spec buf len =
+  if len == 0 then 0 else (0 # (buf @ 0))
