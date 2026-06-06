@@ -242,6 +242,20 @@ pub fn emit_saw_script(
         }
     }
 
+    if let Some(pre_fn) = overrides.cryptol_fn_pre() {
+        let pre_args = overrides
+            .cryptol_call_args(pre_fn)
+            .unwrap_or_else(|| cry_args.clone());
+        let args_str = pre_args.join(" ");
+        if args_str.is_empty() {
+            buf.push_str(&format!("    llvm_precond {{{{ {pre_fn} }}}};\n"));
+        } else {
+            buf.push_str(&format!(
+                "    llvm_precond {{{{ {pre_fn} {args_str} }}}};\n"
+            ));
+        }
+    }
+
     // llvm_execute_func
     let exec_str = exec_args.join(", ");
     buf.push_str(&format!("    llvm_execute_func [{exec_str}];\n"));

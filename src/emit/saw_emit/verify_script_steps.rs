@@ -271,12 +271,12 @@ pub(super) fn emit_equiv_spec_body(
         // into a typed byte-array buffer of the user-declared size.
         // This is what makes pointer-to-buffer C++ APIs verifiable
         // without a hand-written SAW spec.
-        let is_in_buf = buffer_overrides.in_buffer_sizes.contains_key(&param.name);
-        let is_out_buf = buffer_overrides.out_buffer_sizes.contains_key(&param.name);
+        let is_in_buf = buffer_overrides.has_in_buffer_size(&param.name);
+        let is_out_buf = buffer_overrides.is_out_buffer(&param.name);
         if is_in_buf || is_out_buf {
             let saw_ty = buffer_overrides
                 .override_saw_type(&param.name)
-                .expect("buffer override saw_type present");
+                .unwrap_or_else(|| param.saw_type.clone());
             let alloc_fn = if is_out_buf {
                 "llvm_alloc"
             } else {
@@ -439,6 +439,18 @@ pub(super) fn emit_equiv_spec_body(
     }
     if !buffer_overrides.max_len_preconds.is_empty() {
         out.push('\n');
+    }
+
+    if let Some(pre_fn) = buffer_overrides.cryptol_fn_pre() {
+        let args = buffer_overrides
+            .cryptol_call_args(pre_fn)
+            .unwrap_or_else(|| cryptol_args.clone());
+        let call = if args.is_empty() {
+            pre_fn.to_string()
+        } else {
+            format!("{} {}", pre_fn, args.join(" "))
+        };
+        out.push_str(&format!("    llvm_precond {{{{ {call} }}}};\n\n"));
     }
 
     for global in all_globals {
