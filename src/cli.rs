@@ -325,9 +325,9 @@ pub enum Commands {
 
         /// Optional container-layout TOML catalog (ArrayView rule 5,
         /// saw_spec_gen-26d). Merged over the built-in defaults.
-        /// **No-op today:** the catalog is parsed but the emitter
-        /// does not consume it yet (prints a stderr warning).
-        /// Tracked under saw_spec_gen-qms / saw_spec_gen-530.
+        /// **No-op today + scheduled for deletion** in favor of AST-
+        /// driven auto-derivation (saw_spec_gen-530, -qms, -0nf).
+        /// Passing this flag prints a stderr warning.
         #[arg(long = "container-layouts", value_name = "PATH")]
         container_layouts: Option<PathBuf>,
     },
