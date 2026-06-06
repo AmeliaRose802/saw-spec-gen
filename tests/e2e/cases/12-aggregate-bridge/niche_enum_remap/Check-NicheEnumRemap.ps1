@@ -1,9 +1,10 @@
 <#
 .SYNOPSIS
-    Custom e2e test: verify that --variant-map return=... emits a
-    two-variant if/then/else narrowing adapter in the generated SAW
-    script. When a Cryptol spec returns Bit (True/False) but the Rust
-    impl returns u8 (discriminant 0/1), the adapter bridges them.
+    E2E test: verify that gen-verify-rust composes --variant-map with
+    the VariantRemap bridge for niche-packed enum returns.
+    The Cryptol spec returns [8] with 3 variants; Rust returns u8
+    with only 2 reachable variants. The VariantRemap bridge emits
+    the discriminant remap in the SAW postcondition.
 #>
 param()
 $ErrorActionPreference = "Stop"
@@ -21,42 +22,43 @@ $rustc      = $tools.Rustc
 $llvmDis    = $tools.LlvmDis
 $llvmTarget = $tools.LlvmTarget
 
-$rsFile  = Join-Path $caseDir 'check_positive_verified.rs'
-$cryFile = Join-Path $caseDir 'check_positive_spec.cry'
-$outDir  = Join-Path $caseDir 'out_return_narrowing'
+$rsFile  = Join-Path $caseDir 'activate_verified.rs'
+$cryFile = Join-Path $caseDir 'activate_spec.cry'
+$outDir  = Join-Path $caseDir 'out_niche_enum'
 
 if (Test-Path $outDir) { Remove-Item -Recurse -Force $outDir }
 New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 
-# ── Compile Rust → bitcode ────────────────────────────────────────────────────
-$bcFile = Join-Path $outDir 'check_positive_verified.bc'
+# ── Compile Rust → bitcode ───────────────────────────────────────────
+$bcFile = Join-Path $outDir 'activate_verified.bc'
 & $rustc --emit=llvm-bc="$bcFile" --crate-type=lib --edition=2021 `
     --target $llvmTarget `
     -C opt-level=0 -C link-dead-code=yes -C symbol-mangling-version=v0 `
     -C overflow-checks=off -C debug-assertions=off -C panic=unwind `
     -C codegen-units=1 -C debuginfo=0 -C lto=off -C embed-bitcode=no `
-    -o (Join-Path $outDir 'check_positive.out') $rsFile 2>&1 | Write-Host
+    -o (Join-Path $outDir 'activate.out') $rsFile 2>&1 | Write-Host
 
-$llFile = Join-Path $outDir 'check_positive_verified.ll'
+$llFile = Join-Path $outDir 'activate_verified.ll'
 & $llvmDis $bcFile -o $llFile 2>&1 | Write-Host
 
-# ── Call gen-verify-rust with --variant-map on return ─────────────────────────
+# ── Call gen-verify-rust with --variant-map on both param and return ──
 & $specGen gen-verify-rust `
     --llvm-ir      $llFile `
     --bitcode      $bcFile `
     --cryptol-spec $cryFile `
-    --cryptol-fn   check_positive_spec `
-    --function     check_positive `
+    --cryptol-fn   activate_spec `
+    --function     activate `
     --output       $outDir `
-    --variant-map  'return=Ok:0,Err:1' 2>&1 | Write-Host
+    --variant-map  'return=Success:0,AlreadyActive:1' `
+    --variant-map  'x0=Success:1,AlreadyActive:2' 2>&1 | Write-Host
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "gen-verify-rust with return variant-map failed"
+    Write-Error "gen-verify-rust with variant-map failed"
     Write-Host "RESULT: DISPROVED"
     exit 1
 }
 
-# ── Check the generated SAW script contains if/then/else adapter ─────────────
+# ── Verify generated SAW script contains VariantRemap adapter ────────
 $sawScript = Join-Path $outDir 'verify_rust.saw'
 if (-not (Test-Path $sawScript)) {
     Write-Error "verify_rust.saw not generated"
@@ -65,7 +67,9 @@ if (-not (Test-Path $sawScript)) {
 }
 
 $sawText = Get-Content $sawScript -Raw
-if ($sawText -notmatch 'if.*check_positive_spec') {
+
+# Check for the VariantRemap bridge in the return assertion
+if ($sawText -notmatch 'if.*activate_spec') {
     Write-Error "Missing VariantRemap return adapter in SAW script"
     Write-Host "SAW script content:"
     Write-Host $sawText
@@ -73,17 +77,27 @@ if ($sawText -notmatch 'if.*check_positive_spec') {
     exit 1
 }
 
+# Check for param membership precondition
+if ($sawText -notmatch 'x0 == \(1 : \[32\]\).*\\\/.*x0 == \(2 : \[32\]\)') {
+    Write-Error "Missing variant-map membership precondition for x0"
+    Write-Host "SAW script content:"
+    Write-Host $sawText
+    Write-Host "RESULT: DISPROVED"
+    exit 1
+}
+
+# Check for return discriminant values
 if ($sawText -notmatch 'then \(0 : \[8\]\)') {
-    Write-Error "Missing 'then (0 : [8])' in return adapter"
+    Write-Error "Missing return discriminant 0 (Success)"
     Write-Host "RESULT: DISPROVED"
     exit 1
 }
 
 if ($sawText -notmatch 'else \(1 : \[8\]\)') {
-    Write-Error "Missing 'else (1 : [8])' in return adapter"
+    Write-Error "Missing return discriminant 1 (AlreadyActive)"
     Write-Host "RESULT: DISPROVED"
     exit 1
 }
 
-Write-Host "Return narrowing adapter found in SAW script"
+Write-Host "VariantRemap + variant-map composition found in SAW script"
 Write-Host "RESULT: VERIFIED"

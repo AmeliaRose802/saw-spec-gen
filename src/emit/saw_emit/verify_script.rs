@@ -171,6 +171,7 @@ pub fn emit_verification_script(
         sub_callee_specs,
         return_type: &target_fn.return_type,
         is_sret: target_spec.return_constraint.is_sret,
+        return_bridge: None,
     };
     emit_postcondition_and_close(
         &mut out,

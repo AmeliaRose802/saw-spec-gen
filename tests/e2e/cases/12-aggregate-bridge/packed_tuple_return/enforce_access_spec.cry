@@ -1,0 +1,8 @@
+// Cryptol spec for enforce_access — returns a tuple (Bit, Bit).
+// C++ packs this into i16 little-endian; Rust returns { i1, i1 }.
+// The PackInt / StructValue bridges handle the ABI mismatch.
+enforce_access_spec : [8] -> [8] -> (Bit, Bit)
+enforce_access_spec mode decision = (allowed, logged)
+  where
+    allowed = decision == 1
+    logged  = mode == 1 \/ decision == 0

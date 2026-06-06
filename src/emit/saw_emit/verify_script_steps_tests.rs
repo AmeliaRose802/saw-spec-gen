@@ -74,6 +74,7 @@ fn emit_postcondition_wraps_bool_return() {
             sub_callee_specs: &[],
             return_type: &TypeInfo::Bool,
             is_sret: false,
+            return_bridge: None,
         },
         &BufferOverrides::default(),
     );
@@ -99,6 +100,7 @@ fn emit_postcondition_does_not_wrap_int_return() {
             sub_callee_specs: &[],
             return_type: &TypeInfo::SignedInt(32),
             is_sret: false,
+            return_bridge: None,
         },
         &BufferOverrides::default(),
     );
@@ -132,6 +134,7 @@ fn emit_postcondition_uses_points_to_for_sret_return() {
                 fields: vec![],
             },
             is_sret: true,
+            return_bridge: None,
         },
         &BufferOverrides::default(),
     );
@@ -307,6 +310,7 @@ fn emit_sret_prestate_threads_prebytes_into_cryptol_call() {
                 fields: vec![],
             },
             is_sret: true,
+            return_bridge: None,
         },
         &BufferOverrides::default(),
     );
