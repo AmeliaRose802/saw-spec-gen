@@ -292,6 +292,7 @@ pub fn gen_verify_cmd(
     max_len_precond: Vec<String>,
     cryptol_arg_order: Vec<String>,
     variant_map: Vec<String>,
+    is_async: bool,
 ) -> Result<()> {
     // Auto-detect language: Rust when --llvm-ir is provided without --ast
     let effective_lang = match lang.as_deref() {
@@ -328,6 +329,7 @@ pub fn gen_verify_cmd(
             spec_only_on_missing,
             &overrides,
             &vmap,
+            is_async,
         );
     }
 
@@ -387,6 +389,7 @@ pub fn gen_verify_rust_cmd(
     max_len_precond: Vec<String>,
     cryptol_arg_order: Vec<String>,
     variant_map: Vec<String>,
+    is_async: bool,
 ) -> Result<()> {
     let overrides = crate::buffer_overrides::BufferOverrides::from_cli(
         &in_buffer_size,
@@ -407,6 +410,7 @@ pub fn gen_verify_rust_cmd(
         spec_only_on_missing,
         &overrides,
         &vmap,
+        is_async,
     )
 }
 

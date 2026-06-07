@@ -217,6 +217,7 @@ entry:
         true,
         &BufferOverrides::default(),
         &crate::gen_verify_rust_emit::VariantMap::default(),
+        false, // is_async
     );
     assert!(
         result.is_ok(),
