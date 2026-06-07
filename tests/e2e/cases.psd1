@@ -328,5 +328,25 @@
         @{ Tag = 'rust_parity'; Runner = 'custom'; Expected = 'VERIFIED';
            Script = 'tests/e2e/cases/11-rust-parity/unified_gen_verify/Check-UnifiedGenVerify.ps1';
            ScriptArgs = @{} }
+
+        # ── 12-aggregate-bridge ──────────────────────────────────────────────
+        # Aggregate/struct ABI bridge tests. Each validates that the
+        # generated SAW script contains the correct bridge construct
+        # for non-scalar returns.
+
+        # packed tuple return: StructValue bridge for { i1, i1 } aggregate
+        @{ Tag = 'aggregate_bridge'; Runner = 'custom'; Expected = 'VERIFIED';
+           Script = 'tests/e2e/cases/12-aggregate-bridge/packed_tuple_return/Check-PackedTupleReturn.ps1';
+           ScriptArgs = @{} }
+
+        # sret struct: sret byte-buffer allocation + llvm_points_to
+        @{ Tag = 'aggregate_bridge'; Runner = 'custom'; Expected = 'VERIFIED';
+           Script = 'tests/e2e/cases/12-aggregate-bridge/sret_preserved/Check-SretPreserved.ps1';
+           ScriptArgs = @{} }
+
+        # niche-packed enum: VariantRemap bridge + variant-map composition
+        @{ Tag = 'aggregate_bridge'; Runner = 'custom'; Expected = 'VERIFIED';
+           Script = 'tests/e2e/cases/12-aggregate-bridge/niche_enum_remap/Check-NicheEnumRemap.ps1';
+           ScriptArgs = @{} }
     )
 }

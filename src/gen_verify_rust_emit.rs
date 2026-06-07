@@ -6,7 +6,7 @@
 
 use crate::buffer_overrides::BufferOverrides;
 use crate::constraints::TypeInfo;
-use crate::saw_emit::cryptol_bridge::cryptol_arg_for;
+use crate::saw_emit::cryptol_bridge::{cryptol_arg_for, AbiReturnBridge};
 use std::collections::HashMap;
 
 /// A single named variant with its discriminant value.
@@ -283,43 +283,24 @@ fn emit_return_assertion(
 ) {
     let cry_call = build_cryptol_call(cryptol_fn, cry_args, &arts.params);
 
-    // If a variant-map entry exists for "return", emit a narrowing
-    // adapter that wraps the Cryptol result: for each reachable
-    // variant, map Cryptol value → discriminant.
+    // If a variant-map entry exists for "return", use VariantRemap
+    // bridge to compose discriminant mapping with any width bridge
+    // needed for niche-packed enums.
     if let Some(variants) = variant_map.entries.get("return") {
         let ret_bits = arts.return_bits();
-        if variants.len() == 2 {
-            // Two-variant case: the Cryptol fn returns Bit (True/False)
-            // Emit: if cry_fn ... then disc0 else disc1
-            let d0 = variants[0].discriminant;
-            let d1 = variants[1].discriminant;
-            buf.push_str(&format!(
-                "    llvm_return (llvm_term {{{{ \
-                 if {cry_call} then ({d0} : [{ret_bits}]) \
-                 else ({d1} : [{ret_bits}]) }}}});\n"
-            ));
-        } else {
-            // General case: emit a membership postcondition on the
-            // return value. The Cryptol fn is expected to return the
-            // discriminant directly; we just assert it's in range.
-            buf.push_str(&format!(
-                "    ret <- llvm_fresh_var \"ret\" (llvm_int {ret_bits});\n\
-                 \x20   llvm_return (llvm_term ret);\n"
-            ));
-            let clauses: Vec<String> = variants
-                .iter()
-                .map(|v| {
-                    format!(
-                        "ret == ({d} : [{bits}])",
-                        d = v.discriminant,
-                        bits = ret_bits
-                    )
-                })
-                .collect();
-            let joined = clauses.join(" \\/ ");
-            buf.push_str(&format!("    llvm_postcond {{{{ {joined} }}}};\n"));
-            buf.push_str(&format!("    llvm_postcond {{{{ ret == {cry_call} }}}};\n"));
-        }
+        let variant_pairs: Vec<(u64, u64)> = variants
+            .iter()
+            .map(|v| (v.discriminant, v.discriminant))
+            .collect();
+        let bridge = AbiReturnBridge::VariantRemap {
+            variants: variant_pairs,
+            abi_bits: ret_bits,
+            inner: None,
+        };
+        let wrapped = bridge.wrap(&cry_call);
+        buf.push_str(&format!(
+            "    llvm_return (llvm_term {{{{ {wrapped} }}}});\n"
+        ));
         return;
     }
 
@@ -336,12 +317,10 @@ fn emit_return_assertion(
             ));
         }
         RustReturnKind::Aggregate { field_bits } => {
-            // For aggregate returns like { i1, i1 }, emit individual
-            // field extractions with llvm_struct_value.
-            buf.push_str(&format!(
-                "    llvm_return (llvm_term {{{{ {cry_call} }}}});\n"
-            ));
-            let _ = field_bits; // SAW infers struct shape from Cryptol type
+            let bridge = AbiReturnBridge::StructValue {
+                field_bits: field_bits.clone(),
+            };
+            buf.push_str(&bridge.emit_saw_return(&cry_call));
         }
     }
 }
