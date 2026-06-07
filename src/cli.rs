@@ -304,12 +304,6 @@ pub enum Commands {
         /// for a narrowing adapter on the return type.
         #[arg(long = "variant-map", value_name = "PARAM=V1:D1,V2:D2,...", num_args = 0..)]
         variant_map: Vec<String>,
-
-        /// Target the coroutine resume (`_RNC…`) instead of the constructor
-        /// shim (Rust path only). Emits a `mir_verify` script; pass the
-        /// `.linked-mir.json` as `--bitcode`.
-        #[arg(long = "async", default_value_t = false)]
-        is_async: bool,
     },
 
     /// Generate Rust trait vtable stubs + havoc specs for opaque
@@ -346,8 +340,10 @@ pub enum Commands {
     /// * `verify_rust.meta.json` — mangled name, arg bit widths,
     ///   globals; consumed by `verify-rust.ps1`.
     ///
-    /// With `--async`, targets the coroutine resume body and emits a
-    /// `mir_verify` script instead.
+    /// `async fn` is detected automatically: when the IR contains a
+    /// `_RNC`-prefixed coroutine resume symbol for `--function`, the
+    /// command targets the resume body and emits a `mir_verify` script
+    /// instead. Pass `.linked-mir.json` as `--bitcode` in that case.
     ///
     /// Usage: saw-spec-gen gen-verify-rust \
     ///          --llvm-ir add_one.ll --bitcode add_one.bc \
@@ -360,7 +356,7 @@ pub enum Commands {
         llvm_ir: PathBuf,
 
         /// Path to the LLVM bitcode (`.bc`) the SAW script will
-        /// `llvm_load_module` (or `.linked-mir.json` for `--async`).
+        /// `llvm_load_module` (or `.linked-mir.json` for async fns).
         #[arg(long)]
         bitcode: PathBuf,
 
@@ -423,12 +419,6 @@ pub enum Commands {
         /// the return value. Pass once per parameter.
         #[arg(long = "variant-map", value_name = "PARAM=V1:D1,V2:D2,...", num_args = 0..)]
         variant_map: Vec<String>,
-
-        /// Target the coroutine resume (`_RNC…`) instead of the constructor
-        /// shim. Emits a `mir_verify` script; pass `.linked-mir.json` as
-        /// `--bitcode`.
-        #[arg(long = "async", default_value_t = false)]
-        is_async: bool,
     },
 
     /// Strip system-header decls from a clang AST dump.

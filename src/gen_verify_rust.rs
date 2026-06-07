@@ -3,8 +3,8 @@
 //! Produces a SAW verification script + meta sidecar that lets
 //! `verify-rust.ps1` prove a Rust function matches a hand-written
 //! Cryptol spec. Supports sret, aggregate returns, range preconditions,
-//! buffer overrides, `--spec-only-on-missing`, and `--async` (coroutine
-//! resume verification via `mir_verify`).
+//! buffer overrides, `--spec-only-on-missing`, and automatic async
+//! detection (coroutine resume verification via `mir_verify`).
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::json;
@@ -22,9 +22,11 @@ use crate::parsers::llvm_ir::extract_functions;
 /// Run the `gen-verify-rust` subcommand. Writes `verify_rust.saw` and
 /// `verify_rust.meta.json` into `output`, and copies the Cryptol spec.
 ///
-/// When `is_async` is `true` the command targets the coroutine resume
-/// (`_RNC…`) and emits `mir_verify`; `bitcode` should then be the
-/// `.linked-mir.json` from `cargo-saw-build` / `mir-json --link-mir`.
+/// Automatically detects whether `function` is an `async fn` by scanning
+/// the IR for a `_RNC`-prefixed coroutine resume symbol. When one is found
+/// the command targets the resume body and emits a `mir_verify` script;
+/// `bitcode` should then be the `.linked-mir.json` from `cargo-saw-build`
+/// / `mir-json --link-mir`.
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     llvm_ir: &Path,
@@ -36,7 +38,6 @@ pub fn run(
     spec_only_on_missing: bool,
     overrides: &BufferOverrides,
     variant_map: &gen_verify_rust_emit::VariantMap,
-    is_async: bool,
 ) -> Result<()> {
     if overrides.has_auto_out_buffers() {
         bail!(
@@ -69,7 +70,7 @@ pub fn run(
         .to_string_lossy()
         .into_owned();
 
-    if is_async {
+    if has_resume_symbol(&ir, function) {
         return run_async(
             &ir,
             function,
@@ -141,7 +142,7 @@ pub fn run(
     Ok(())
 }
 
-/// `--async` handler: resolves coroutine resume, emits `mir_verify` script.
+/// Async handler: resolves coroutine resume, emits `mir_verify` script.
 fn run_async(
     ir: &str,
     function: &str,
@@ -215,6 +216,17 @@ fn run_async(
     println!("  → wrote {}", saw_path.display());
     println!("  → wrote {}", meta_path.display());
     Ok(())
+}
+
+/// Returns `true` when the IR contains at least one `_RNC`-prefixed function
+/// (coroutine resume closure) whose mangled name includes `<len><function>`.
+/// Used to auto-detect `async fn` without requiring an explicit flag.
+fn has_resume_symbol(ir: &str, function: &str) -> bool {
+    let needle = format!("{}{}", function.len(), function);
+    ir.lines().any(|line| {
+        let t = line.trim();
+        t.starts_with("define ") && t.contains("@_RNC") && t.contains(&needle)
+    })
 }
 
 /// A candidate target function with its resolved type information.

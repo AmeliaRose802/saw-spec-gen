@@ -53,7 +53,6 @@ fn main() -> Result<()> {
             max_len_precond,
             cryptol_arg_order,
             variant_map,
-            is_async,
         } => commands::gen_verify_cmd(
             lang,
             ast,
@@ -74,7 +73,6 @@ fn main() -> Result<()> {
             max_len_precond,
             cryptol_arg_order,
             variant_map,
-            is_async,
         ),
         Commands::GenRustTraitStubs { schema, output } => {
             commands::gen_rust_trait_stubs(schema, output)
@@ -94,7 +92,6 @@ fn main() -> Result<()> {
             max_len_precond,
             cryptol_arg_order,
             variant_map,
-            is_async,
         } => commands::gen_verify_rust_cmd(
             llvm_ir,
             bitcode,
@@ -110,7 +107,6 @@ fn main() -> Result<()> {
             max_len_precond,
             cryptol_arg_order,
             variant_map,
-            is_async,
         ),
         Commands::FilterAst {
             input,
