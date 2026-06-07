@@ -1,0 +1,32 @@
+// SAW-side Cryptol helpers for string-oriented specs.
+//
+// `findNul` returns the index of the first 0x00 byte in a buffer of
+// `n` bytes. When no NUL is present (the buffer is not a valid C
+// string for any prefix length), the function returns `n`. Callers
+// that need a "the buffer IS a C string" precondition can write
+//
+//     llvm_precond {{ findNul s < `n }}
+//
+// where `n is the buffer's Cryptol-side length. The companion
+// SAL macro `_In_z_(N)` (see `tests/e2e/cases/02-havoc-coverage/
+// saw_sal.h`) allocates an N-byte buffer; today saw-spec-gen emits
+// a TODO note pointing at this helper but does not yet auto-emit
+// the precondition itself (bd issue saw_spec_gen-5mt).
+//
+// Pure Cryptol, no dependencies. Linear in `n`.
+
+module SawStrings where
+
+findNul : {n} (fin n) => [n][8] -> [width n]
+findNul s = go 0 s
+  where
+    go : {k} (fin k) => [width n] -> [k][8] -> [width n]
+    go acc xs =
+      if (`(k) : [width n]) == 0 then `(n)
+      else (if (xs @ 0) == 0 then acc else go (acc + 1) (drop`{1} xs))
+
+// `hasNul`: true iff some byte in `s` is 0x00. Equivalent to
+// `findNul s < `n`, but written branchlessly for use in
+// llvm_precond / postcond contexts where a Bit is required.
+hasNul : {n} (fin n) => [n][8] -> Bit
+hasNul s = any (\b -> b == 0) s

@@ -156,6 +156,55 @@
         @{ Tag = 'strings'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/count_digits'; File = 'count_digits_cstr_verified.cpp';  Cry = 'count_digits_spec.cry'; CryptolFn = 'count_digits_spec'; Function = 'count_digits'; Expected = 'VERIFIED'  }
         @{ Tag = 'strings'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/count_digits'; File = 'count_digits_cstr_disproved.cpp'; Cry = 'count_digits_spec.cry'; CryptolFn = 'count_digits_spec'; Function = 'count_digits'; Expected = 'DISPROVED' }
 
+        # ── ArrayView rule 1 (saw_spec_gen-4po): bind Cryptol type
+        #    variable to C++ pointer length via `--bind-cryptol-lengths`.
+        #    The Cryptol spec carries `{n}(fin n, n <= 8) => [n][8] -> [32]`.
+        #    Without the flag: 1-byte fallback alloc → reads at offset 1..7
+        #    fall outside the allocation → DISPROVED.
+        #    With the flag: `n <= 8` is harvested as the buffer length →
+        #    8-byte alloc → VERIFIED. ──────────────────────────────────────
+        @{ Tag = 'cryptol_len_bind'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/cryptol_len_bind'; File = 'count_bytes_bind_verified.cpp'; Cry = 'count_bytes_spec.cry'; CryptolFn = 'count_bytes_spec'; Function = 'count_bytes'; Expected = 'VERIFIED';  ExtraSpecGenArgs = @('--bind-cryptol-lengths') }
+        # Same source, no flag: 1-byte fallback alloc, reads at i>=1 fall
+        # outside the allocation → DISPROVED (allocation-bound failure).
+        @{ Tag = 'cryptol_len_bind'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/cryptol_len_bind'; File = 'count_bytes_bind_verified.cpp'; Cry = 'count_bytes_spec.cry'; CryptolFn = 'count_bytes_spec'; Function = 'count_bytes'; Expected = 'DISPROVED' }
+        # Deliberate value bug (widens digit range to include '@'). The
+        # flag still allocates 8 bytes, so reads succeed; the proof fails
+        # because the symbolic solver finds a witness — DISPROVED for
+        # the *right* reason (real arithmetic bug).
+        @{ Tag = 'cryptol_len_bind'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/cryptol_len_bind'; File = 'count_bytes_bind_disproved.cpp'; Cry = 'count_bytes_spec.cry'; CryptolFn = 'count_bytes_spec'; Function = 'count_bytes'; Expected = 'DISPROVED'; ExtraSpecGenArgs = @('--bind-cryptol-lengths') }
+
+        # ── ArrayView rule 2 (saw_spec_gen-5mt): `_In_z_(N)` SAL macro
+        #    for null-terminated input strings. The macro allocates an
+        #    N-byte buffer (same shape as `_In_reads_(N)`) so reads in
+        #    the bounded loop succeed. A future revision will auto-emit
+        #    a `findNul` Cryptol precondition (helper lives in
+        #    lib/cryptol/saw_strings.cry); today the macro only handles
+        #    the allocation. ─────────────────────────────────────────────
+        @{ Tag = 'in_z_macro'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/in_z_macro'; File = 'count_digits_z_verified.cpp'; Cry = 'count_digits_z_spec.cry'; CryptolFn = 'count_digits_z_spec'; Function = 'count_digits_z'; Expected = 'VERIFIED' }
+        # Deliberate value bug (counts non-digits). The _In_z_(8) macro
+        # still allocates 8 bytes, so reads succeed; the proof fails on
+        # the value, not the allocation — DISPROVED for the *right*
+        # reason (real arithmetic bug).
+        @{ Tag = 'in_z_macro'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/in_z_macro'; File = 'count_digits_z_disproved.cpp'; Cry = 'count_digits_z_spec.cry'; CryptolFn = 'count_digits_z_spec'; Function = 'count_digits_z'; Expected = 'DISPROVED' }
+
+        # ── ArrayView rule 4 (saw_spec_gen-26d): struct-shape recognizer
+        #    auto-pairs `(T* buf, size_t len)` parameters. With the
+        #    recognizer (default): buf is sized to its length sibling
+        #    → VERIFIED. With `--no-struct-shape-recognizer`: legacy
+        #    1-byte fallback → DISPROVED. ─────────────────────────────────
+        @{ Tag = 'struct_shape'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/struct_shape_recognizer'; File = 'sum_first_byte_verified.cpp'; Cry = 'sum_first_byte_spec.cry'; CryptolFn = 'sum_first_byte_spec'; Function = 'sum_first_byte'; Expected = 'VERIFIED' }
+        # Same source, recognizer disabled: 1-byte fallback alloc keeps
+        # buf[0] in-bounds but the precondition the recognizer would
+        # have emitted (`len <= MAX`) is gone, so the proof fails on
+        # the unbounded len case → DISPROVED (recognizer regression
+        # witness).
+        @{ Tag = 'struct_shape'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/struct_shape_recognizer'; File = 'sum_first_byte_verified.cpp'; Cry = 'sum_first_byte_spec.cry'; CryptolFn = 'sum_first_byte_spec'; Function = 'sum_first_byte'; Expected = 'DISPROVED'; ExtraSpecGenArgs = @('--no-struct-shape-recognizer') }
+        # Deliberate value bug (returns buf[0] + 1). The recognizer
+        # (default) still sizes buf to its length sibling, so reads
+        # succeed; the proof fails on the value — DISPROVED for the
+        # *right* reason (real arithmetic bug).
+        @{ Tag = 'struct_shape'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/struct_shape_recognizer'; File = 'sum_first_byte_disproved.cpp'; Cry = 'sum_first_byte_spec.cry'; CryptolFn = 'sum_first_byte_spec'; Function = 'sum_first_byte'; Expected = 'DISPROVED' }
+
         # ── Bitcode-driven extern override tests ────────────────────────────
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/bump';                    File = 'bump_verified.cpp';          Cry = 'bump_spec.cry';          CryptolFn = 'bump_spec';          Function = 'bump';          Expected = 'VERIFIED'  }
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/use_helper';              File = 'use_helper_verified.cpp';    Cry = 'use_helper_spec.cry';    CryptolFn = 'use_helper_spec';    Function = 'use_helper';    Expected = 'VERIFIED'  }
@@ -241,6 +290,13 @@
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/tuple_get';              File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/vector_back_havoc';      File = 'add_one_gap_disproved.cpp';  Expected = 'DISPROVED' }
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/vector_back_havoc';      File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
+        # std::string mirror of vector_back_havoc: exercises the
+        # `St12basic_string` / `St7__cxx1112basic_string` substring
+        # patterns in the jpp override registry. Both variants are
+        # DISPROVED: the gap case can't couple resize(N) with size(),
+        # the wrong case writes the wrong length on purpose.
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/string_size_havoc';      File = 'add_one_gap_disproved.cpp';  Expected = 'DISPROVED' }
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/string_size_havoc';      File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/unique_ptr_deref_havoc'; File = 'add_one_gap_disproved.cpp';  Expected = 'DISPROVED' }
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/unique_ptr_deref_havoc'; File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
 

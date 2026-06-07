@@ -1,0 +1,14 @@
+// Cryptol spec for the ArrayView rule 1 (saw_spec_gen-4po) e2e test.
+//
+// `count_bytes_spec` is *length-polymorphic* in `n` with an upper
+// bound of 8. saw-spec-gen's `--bind-cryptol-lengths` flag must read
+// this binder + predicate context and allocate an 8-byte buffer for
+// the C++ `const uint8_t* s` parameter behind the scenes (no SAL
+// annotation needed on the C++ side).
+//
+// The body counts ASCII digit bytes — exactly the same definition
+// the matching count_digits spec uses, but length-polymorphic.
+
+count_bytes_spec : {n}(fin n, n <= 8) => [n][8] -> [32]
+count_bytes_spec s =
+  sum [ if (b >= 0x30 /\ b <= 0x39) then 1 else 0 | b <- s ]

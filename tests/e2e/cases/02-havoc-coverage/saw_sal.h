@@ -56,6 +56,9 @@
 #ifdef _Out_writes_bytes_
 #undef _Out_writes_bytes_
 #endif
+#ifdef _In_z_
+#undef _In_z_
+#endif
 
 #define _In_         __attribute__((annotate("_In_")))
 #define _In_opt_     __attribute__((annotate("_In_opt_")))
@@ -71,5 +74,33 @@
 #define _In_reads_bytes_(n)   __attribute__((annotate("_In_reads_bytes_(" #n ")")))
 #define _Out_writes_(n)       __attribute__((annotate("_Out_writes_(" #n ")")))
 #define _Out_writes_bytes_(n) __attribute__((annotate("_Out_writes_bytes_(" #n ")")))
+
+// `_In_z_(MAX)` — null-terminated input string with a maximum
+// element count `MAX`. saw-spec-gen allocates a `MAX`-byte buffer
+// (same shape as `_In_reads_(MAX)`) and emits a TODO note pointing
+// to the `findNul` Cryptol helper in `lib/cryptol/saw_strings.cry`
+// for callers that need to encode the terminator semantically. See
+// bd issue saw_spec_gen-5mt for the rule's full scope.
+#define _In_z_(n)             __attribute__((annotate("_In_z_(" #n ")")))
+
+// `SAW_BUF(buf, len)` and `SAW_MAX_LEN(len, max)` — placeholder
+// macros for cross-parameter buffer-length annotations. The current
+// release recognizes them at the lexer level (so existing source
+// keeps compiling) but does NOT yet propagate them through the
+// derive pipeline: they survive as `Annotation::Custom(...)` tags.
+// The full pair-annotation lowering is tracked under bd issue
+// saw_spec_gen-5mt and saw_spec_gen-26d (container layouts).
+//
+// Recommended migration: use `_In_reads_(len)` for the buffer
+// parameter and a Cryptol precondition `len <= max` for the bound,
+// or attach `--bind-cryptol-lengths` to derive both from the spec.
+#ifdef SAW_BUF
+#undef SAW_BUF
+#endif
+#define SAW_BUF(buf, len)     __attribute__((annotate("SAW_BUF(" #buf "," #len ")")))
+#ifdef SAW_MAX_LEN
+#undef SAW_MAX_LEN
+#endif
+#define SAW_MAX_LEN(len, max) __attribute__((annotate("SAW_MAX_LEN(" #len "," #max ")")))
 
 #endif // SAW_SAL_H_INCLUDED

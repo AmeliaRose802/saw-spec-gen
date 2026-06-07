@@ -17,8 +17,12 @@
 //! For backward compatibility everything is re-exported flat at
 //! `crate::constraints::*`.
 
+pub mod container_layouts;
 pub mod derive;
+pub mod length_binding;
+pub mod length_companion;
 pub mod saw_type;
+pub mod struct_shape_recognizer;
 pub mod types;
 pub mod value_clauses;
 
