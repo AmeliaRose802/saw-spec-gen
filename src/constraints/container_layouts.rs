@@ -129,6 +129,21 @@ impl ContainerCatalog {
         self.by_name.get(name)
     }
 
+    /// Insert (or replace) a single layout. Used by the AST auto-derive
+    /// path in [`super::container_layouts_derive::derive_catalog_from_structs`]
+    /// and by the optional TOML loader.
+    pub fn insert(&mut self, layout: ContainerLayout) {
+        self.by_name.insert(layout.name.clone(), layout);
+    }
+
+    /// Merge every entry from `other` into `self`. Later entries
+    /// override earlier ones with the same name.
+    pub fn extend_from(&mut self, other: ContainerCatalog) {
+        for (_, layout) in other.by_name {
+            self.insert(layout);
+        }
+    }
+
     /// Total layout count (for diagnostics).
     pub fn len(&self) -> usize {
         self.by_name.len()

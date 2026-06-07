@@ -54,8 +54,12 @@
 //! ```
 
 use crate::constraints::{GlobalVarInfo, TypeInfo};
+use crate::parsers::llvm_ir::struct_defs;
 use crate::transform::extern_override_scan::{self, BrokenReason, OverrideTarget};
 
+use super::bitcode_overrides_functional::{
+    emit_shared_ghost_decl, needs_vector_ghost, try_emit_functional, FunctionalLayouts,
+};
 use super::names::sanitize_name;
 
 /// Result of running the emitter: a SAWScript snippet to splice into
@@ -121,7 +125,12 @@ pub fn scan_and_emit(
         .filter(|g| global_width_bits(&g.ty).is_some())
         .cloned()
         .collect();
-    let emitted = emit_overrides(&targets, already_covered, &mutable_globals);
+    // Pre-discover container layouts so the functional STL emitter can
+    // dispatch on canonical method names. This is cheap (one IR scan)
+    // and shared across every target in this script.
+    let struct_table = struct_defs(&ir_text);
+    let layouts = FunctionalLayouts::discover(&struct_table);
+    let emitted = emit_overrides(&targets, already_covered, &mutable_globals, &layouts);
     if !emitted.is_empty() {
         eprintln!(
             "Bitcode override scan: emitting {} extern override(s)",
@@ -134,11 +143,15 @@ pub fn scan_and_emit(
 /// Emit overrides for `targets`, skipping any whose symbol is already
 /// covered by an AST-derived override (whose name we get from
 /// `already_covered`). The skip-set avoids duplicate `ov_NAME` bindings
-/// which SAW rejects at script parse time.
+/// which SAW rejects at script parse time. `layouts` carries the
+/// discovered per-container layouts (currently only basic_string);
+/// recognized STL methods get a functional override instead of the
+/// default adversarial-havoc spec.
 pub fn emit_overrides(
     targets: &[OverrideTarget],
     already_covered: &[String],
     mutable_globals: &[GlobalVarInfo],
+    layouts: &FunctionalLayouts,
 ) -> EmittedBitcodeOverrides {
     let mut out = String::new();
     let mut names = Vec::new();
@@ -158,16 +171,35 @@ pub fn emit_overrides(
          // intrinsics that Crucible-LLVM cannot symbolically execute.\n",
     );
 
+    // Vector functional overrides share a single SAW ghost variable.
+    // It must be declared exactly once, before any spec that
+    // references it. Pre-scan the target list and emit the
+    // declaration at the top of the snippet when needed.
+    if needs_vector_ghost(targets.iter().map(|t| t.symbol.as_str())) {
+        emit_shared_ghost_decl(&mut out);
+    }
+
     for t in targets {
         if already_covered.iter().any(|n| n == &t.symbol) {
             continue;
         }
         let safe = sanitize_name(&t.symbol);
         let ov_name = format!("ov_{safe}");
-        // Deduplicate by safe ID — two distinct symbols might sanitize
-        // to the same identifier (very rare in practice, but cheap to
-        // defend against). First wins.
         if !seen_unsafe_ids.insert(ov_name.clone()) {
+            continue;
+        }
+        // STL functional path: regardless of the BrokenReason
+        // (DeclareOnly for libstdc++ template headers, StlOverride
+        // for user-instantiated STL bodies, UsesVarargsIntrinsic for
+        // some I/O wrappers), if the mangled name matches a curated
+        // functional model, emit a points-to-edit / ghost-coupled
+        // spec rather than the default havoc. The two-state coupling
+        // (e.g. `resize(n); size() == n`, `push_back(v); back() ==
+        // v`) is what flips the `gap_disproved` cases. The
+        // classifier is conservative — anything it doesn't
+        // recognize falls through to `emit_one` below.
+        if try_emit_functional(&mut out, &t.symbol, &safe, &ov_name, layouts) {
+            names.push(ov_name);
             continue;
         }
         emit_one(&mut out, t, &safe, &ov_name, mutable_globals);
