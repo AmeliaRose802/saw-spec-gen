@@ -27,6 +27,8 @@ at `<output-dir>/cpp/result.json` and `<output-dir>/rust/result.json`.
 | `schema_version` | string                                            | yes      | `"1"` for this revision; consumers must reject unknown values. |
 | `side`           | `"cpp" \| "rust" \| "equiv"`                      | yes      | Which wrapper produced the file. |
 | `function`       | string                                            | yes      | Implementation function name (unmangled). |
+| `cpp_function`   | string                                            | no       | `side="equiv"` only: C++ symbol name passed to `verify.ps1`. |
+| `rust_function`  | string                                            | no       | `side="equiv"` only: Rust symbol name passed to `verify-rust.ps1`. |
 | `cryptol_fn`     | string                                            | yes      | Cryptol spec function checked against. |
 | `verdict`        | `"VERIFIED" \| "DISPROVED" \| "UNKNOWN" \| "EQUIVALENT" \| "NOT EQUIVALENT"` | yes | `EQUIVALENT` / `NOT EQUIVALENT` are only emitted by `side="equiv"`. |
 | `counterexample` | array of `{name, value, bits?}`                   | yes      | Empty `[]` for `VERIFIED`/`UNKNOWN`/`EQUIVALENT`.  `name` and `value` are strings; optional `bits` is an integer (LLVM bit width). |
