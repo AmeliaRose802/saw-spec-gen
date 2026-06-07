@@ -82,12 +82,12 @@ if ($PSBoundParameters.ContainsKey('Function') -and
     $RustFunction -ne $Function) {
     throw "-Function ('$Function') and -RustFunction ('$RustFunction') conflict. Use one shared name, or omit -Function."
 }
+if (-not $Function -and ((-not $CppFunction) -or (-not $RustFunction))) {
+    throw "Provide -Function, or provide both -CppFunction and -RustFunction."
+}
 
 if (-not $CppFunction)  { $CppFunction  = $Function }
 if (-not $RustFunction) { $RustFunction = $Function }
-if (-not $CppFunction -or -not $RustFunction) {
-    throw "Provide -Function, or provide both -CppFunction and -RustFunction."
-}
 
 if (-not $OutputDir) {
     $OutputDir = Join-Path (Split-Path $CppFile) "out_equiv_${cppBase}"
@@ -222,7 +222,7 @@ function Write-EquivResultJson([string]$verdict) {
     } elseif ($rustResult -and $rustResult.verdict -eq 'DISPROVED' -and $rustResult.counterexample) {
         $cex = @($rustResult.counterexample)
     }
-    $functionDisplayValue = if ($CppFunction -eq $RustFunction) { $CppFunction } else { "$CppFunction | $RustFunction" }
+    $functionDisplayValue = if ($CppFunction -eq $RustFunction) { $CppFunction } else { "$CppFunction vs $RustFunction" }
     Write-VerifyResult `
         -OutputDir      $OutputDir `
         -Side           'equiv' `
