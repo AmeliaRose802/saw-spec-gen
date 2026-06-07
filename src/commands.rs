@@ -288,6 +288,7 @@ pub fn gen_verify_cmd(
     in_buffer_size: Vec<String>,
     out_buffer_param: Vec<String>,
     cryptol_fn_out: Vec<String>,
+    cryptol_fn_pre: Vec<String>,
     max_len_precond: Vec<String>,
     cryptol_arg_order: Vec<String>,
     variant_map: Vec<String>,
@@ -314,6 +315,7 @@ pub fn gen_verify_cmd(
             &cryptol_fn_out,
             &max_len_precond,
             &cryptol_arg_order,
+            &cryptol_fn_pre,
         )?;
         let vmap = crate::gen_verify_rust_emit::VariantMap::parse_all(&variant_map)?;
         return gen_verify_rust::run(
@@ -339,6 +341,7 @@ pub fn gen_verify_cmd(
         &cryptol_fn_out,
         &max_len_precond,
         &cryptol_arg_order,
+        &cryptol_fn_pre,
     )?;
     gen_verify::run(
         &ast,
@@ -380,6 +383,7 @@ pub fn gen_verify_rust_cmd(
     in_buffer_size: Vec<String>,
     out_buffer_param: Vec<String>,
     cryptol_fn_out: Vec<String>,
+    cryptol_fn_pre: Vec<String>,
     max_len_precond: Vec<String>,
     cryptol_arg_order: Vec<String>,
     variant_map: Vec<String>,
@@ -390,6 +394,7 @@ pub fn gen_verify_rust_cmd(
         &cryptol_fn_out,
         &max_len_precond,
         &cryptol_arg_order,
+        &cryptol_fn_pre,
     )?;
     let vmap = crate::gen_verify_rust_emit::VariantMap::parse_all(&variant_map)?;
     gen_verify_rust::run(

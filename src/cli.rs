@@ -243,8 +243,10 @@ pub enum Commands {
         ///      `llvm_points_to <NAME>_ptr (llvm_term {{ FN ... }})`
         ///      after `llvm_execute_func`.
         ///
-        /// Format: `NAME=BYTES`. Pass once per parameter.
-        #[arg(long = "out-buffer-param", value_name = "NAME=BYTES", num_args = 0..)]
+        /// Format: `NAME=BYTES` or `NAME=auto`. `auto` keeps the
+        /// inferred pointee type and only marks the parameter as a
+        /// writable pre/post state region.
+        #[arg(long = "out-buffer-param", value_name = "NAME=BYTES|auto", num_args = 0..)]
         out_buffer_param: Vec<String>,
 
         /// Bind a Cryptol function to the post-call contents of an
@@ -257,6 +259,14 @@ pub enum Commands {
         /// Format: `OUT_PARAM=FN`. Pass once per out-buffer.
         #[arg(long = "cryptol-fn-out", value_name = "OUT_PARAM=FN", num_args = 0..)]
         cryptol_fn_out: Vec<String>,
+
+        /// Optional Cryptol pre-state predicate emitted as
+        /// `llvm_precond {{ FN ... }}` immediately before
+        /// `llvm_execute_func`.
+        ///
+        /// Format: `FN`. Pass at most once.
+        #[arg(long = "cryptol-fn-pre", value_name = "FN", num_args = 0..=1)]
+        cryptol_fn_pre: Vec<String>,
 
         /// Emit an `llvm_precond {{ NAME <= VAL }}` constraint just
         /// before `llvm_execute_func`. Use to bound scalar length
@@ -374,13 +384,19 @@ pub enum Commands {
         #[arg(long = "in-buffer-size", value_name = "NAME=BYTES", num_args = 0..)]
         in_buffer_size: Vec<String>,
 
-        /// Writable output buffer override. Format: `NAME=BYTES`.
-        #[arg(long = "out-buffer-param", value_name = "NAME=BYTES", num_args = 0..)]
+        /// Writable output buffer override. Format: `NAME=BYTES` or `NAME=auto`.
+        #[arg(long = "out-buffer-param", value_name = "NAME=BYTES|auto", num_args = 0..)]
         out_buffer_param: Vec<String>,
 
         /// Cryptol fn for out-buffer postcondition. Format: `OUT_PARAM=FN`.
         #[arg(long = "cryptol-fn-out", value_name = "OUT_PARAM=FN", num_args = 0..)]
         cryptol_fn_out: Vec<String>,
+
+        /// Optional Cryptol pre-state predicate emitted as
+        /// `llvm_precond {{ FN ... }}` immediately before
+        /// `llvm_execute_func`.
+        #[arg(long = "cryptol-fn-pre", value_name = "FN", num_args = 0..=1)]
+        cryptol_fn_pre: Vec<String>,
 
         /// Emit `llvm_precond {{ NAME <= VAL }}`. Format: `NAME=VAL`.
         #[arg(long = "max-len-precond", value_name = "NAME=VAL", num_args = 0..)]

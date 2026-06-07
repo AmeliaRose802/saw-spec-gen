@@ -32,6 +32,11 @@ pub fn run(
     overrides: &BufferOverrides,
     variant_map: &gen_verify_rust_emit::VariantMap,
 ) -> Result<()> {
+    if overrides.has_auto_out_buffers() {
+        bail!(
+            "--out-buffer-param NAME=auto is currently supported only on the C++ gen-verify path"
+        );
+    }
     fs::create_dir_all(output)
         .with_context(|| format!("creating output dir {}", output.display()))?;
 

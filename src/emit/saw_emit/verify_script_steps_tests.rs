@@ -8,6 +8,9 @@ use super::*;
 use crate::buffer_overrides::BufferOverrides;
 use crate::emit::saw_emit::cryptol_bridge::cryptol_return_for;
 
+#[path = "verify_script_steps_stateful_tests.rs"]
+mod stateful_tests;
+
 #[test]
 fn cryptol_arg_for_wraps_bool_with_index_zero() {
     let arg = cryptol_arg_for("dateValid", &TypeInfo::Bool);

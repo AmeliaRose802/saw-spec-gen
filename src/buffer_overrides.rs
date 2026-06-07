@@ -2,8 +2,9 @@
 //!
 //! Exposed via the `gen-verify` CLI flags:
 //!   --in-buffer-size   NAME=BYTES
-//!   --out-buffer-param NAME=BYTES
+//!   --out-buffer-param NAME=BYTES|auto
 //!   --cryptol-fn-out   OUT_PARAM=FN
+//!   --cryptol-fn-pre   PRE_FN
 //!   --max-len-precond  NAME=VAL
 //!   --cryptol-arg-order FN=arg1,arg2,...
 //!
@@ -16,7 +17,7 @@
 //! these flags let `gen-verify` emit the same spec automatically.
 
 use anyhow::{anyhow, bail, Context, Result};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// One position in an explicit Cryptol-side argument list, derived
 /// from a `--cryptol-arg-order FN=arg1,arg2,...` value.
@@ -46,6 +47,12 @@ pub struct BufferOverrides {
     ///   - binds a fresh `NAME_pre` to its pre-call contents
     ///   - post-asserts the new contents via `--cryptol-fn-out NAME=FN`
     pub out_buffer_sizes: HashMap<String, usize>,
+    /// `--out-buffer-param NAME=auto` — treat pointer param NAME as an
+    /// out-buffer but keep its inferred SAW pointee type (no byte-size
+    /// override). Useful for stateful `this` members where we want
+    /// pre/post heap assertions over the object layout, not a raw byte
+    /// array cast.
+    pub out_buffer_auto: HashSet<String>,
 
     /// `--cryptol-fn-out NAME=FN` — Cryptol function modelling the
     /// post-call contents of out-buffer NAME.
@@ -59,6 +66,10 @@ pub struct BufferOverrides {
     /// order when the model takes a subset / reorder / pre-state of
     /// the C++ parameter list.
     pub cryptol_arg_orders: HashMap<String, Vec<CryArg>>,
+    /// Optional Cryptol predicate emitted as an `llvm_precond` just
+    /// before `llvm_execute_func`. This is a lightweight "model_pre"
+    /// hook for stateful specs.
+    pub cryptol_fn_pre: Option<String>,
 }
 
 impl BufferOverrides {
@@ -68,6 +79,7 @@ impl BufferOverrides {
         cryptol_fn_out: &[String],
         max_len_precond: &[String],
         cryptol_arg_order: &[String],
+        cryptol_fn_pre: &[String],
     ) -> Result<Self> {
         let mut me = BufferOverrides::default();
         for s in in_buffer_size {
@@ -79,10 +91,14 @@ impl BufferOverrides {
         }
         for s in out_buffer_param {
             let (k, v) = split_name_eq(s, "--out-buffer-param")?;
-            let bytes: usize = v.parse().with_context(|| {
-                format!("--out-buffer-param {s}: expected NAME=<unsigned integer>")
-            })?;
-            me.out_buffer_sizes.insert(k.to_string(), bytes);
+            if v.eq_ignore_ascii_case("auto") {
+                me.out_buffer_auto.insert(k.to_string());
+            } else {
+                let bytes: usize = v.parse().with_context(|| {
+                    format!("--out-buffer-param {s}: expected NAME=<unsigned integer> or NAME=auto")
+                })?;
+                me.out_buffer_sizes.insert(k.to_string(), bytes);
+            }
         }
         for s in cryptol_fn_out {
             let (k, v) = split_name_eq(s, "--cryptol-fn-out")?;
@@ -105,11 +121,16 @@ impl BufferOverrides {
                 .collect();
             me.cryptol_arg_orders.insert(fn_name.to_string(), parsed);
         }
+        match cryptol_fn_pre {
+            [] => {}
+            [one] => me.cryptol_fn_pre = Some(one.trim().to_string()),
+            _ => bail!("--cryptol-fn-pre expects at most one function name"),
+        }
         // Cross-validate: every --cryptol-fn-out NAME must have a
         // matching --out-buffer-param NAME (otherwise there's no
         // allocated pointer to post-assert against).
         for (name, fn_) in &me.cryptol_fn_out {
-            if !me.out_buffer_sizes.contains_key(name) {
+            if !me.is_out_buffer(name) {
                 bail!("--cryptol-fn-out {name}={fn_}: no matching --out-buffer-param {name}=...");
             }
         }
@@ -121,7 +142,7 @@ impl BufferOverrides {
     /// to make the "this is the pre-call state, not the final value"
     /// intent obvious at every use site.
     pub fn value_var_for(&self, param_name: &str) -> String {
-        if self.out_buffer_sizes.contains_key(param_name) {
+        if self.is_out_buffer(param_name) {
             format!("{param_name}_pre")
         } else {
             param_name.to_string()
@@ -160,7 +181,7 @@ impl BufferOverrides {
 
     /// Whether `param_name` is declared as an out-buffer.
     pub fn is_out_buffer(&self, param_name: &str) -> bool {
-        self.out_buffer_sizes.contains_key(param_name)
+        self.out_buffer_sizes.contains_key(param_name) || self.out_buffer_auto.contains(param_name)
     }
 
     /// Iterator over `(out_param_name, cryptol_fn)` pairs from
@@ -180,13 +201,27 @@ impl BufferOverrides {
         &self.max_len_preconds
     }
 
+    pub fn cryptol_fn_pre(&self) -> Option<&str> {
+        self.cryptol_fn_pre.as_deref()
+    }
+
+    pub fn has_in_buffer_size(&self, param_name: &str) -> bool {
+        self.in_buffer_sizes.contains_key(param_name)
+    }
+
+    pub fn has_auto_out_buffers(&self) -> bool {
+        !self.out_buffer_auto.is_empty()
+    }
+
     /// Whether any overrides are configured.
     pub fn is_empty(&self) -> bool {
         self.in_buffer_sizes.is_empty()
             && self.out_buffer_sizes.is_empty()
+            && self.out_buffer_auto.is_empty()
             && self.cryptol_fn_out.is_empty()
             && self.max_len_preconds.is_empty()
             && self.cryptol_arg_orders.is_empty()
+            && self.cryptol_fn_pre.is_none()
     }
 }
 
@@ -212,19 +247,22 @@ mod tests {
     fn parses_in_and_out_buffers() {
         let ov = BufferOverrides::from_cli(
             &["m=4".into(), "b=4".into()],
-            &["out=10".into()],
+            &["out=10".into(), "this=auto".into()],
             &["out=canonicalize_lp_post".into()],
             &["nm=4".into(), "nb=4".into()],
             &[
                 "canonicalize_lp_ret=nm,nb".into(),
                 "canonicalize_lp_post=nm,m,nb,b,@pre.out".into(),
             ],
+            &["canonicalize_lp_pre".into()],
         )
         .unwrap();
 
         assert_eq!(ov.in_buffer_sizes["m"], 4);
         assert_eq!(ov.out_buffer_sizes["out"], 10);
+        assert!(ov.out_buffer_auto.contains("this"));
         assert_eq!(ov.cryptol_fn_out["out"], "canonicalize_lp_post");
+        assert_eq!(ov.cryptol_fn_pre(), Some("canonicalize_lp_pre"));
         assert_eq!(
             ov.max_len_preconds,
             vec![("nm".into(), 4), ("nb".into(), 4)]
@@ -251,28 +289,43 @@ mod tests {
 
     #[test]
     fn cryptol_fn_out_requires_matching_out_buffer_param() {
-        let err = BufferOverrides::from_cli(&[], &[], &["out=foo".into()], &[], &[]).unwrap_err();
+        let err =
+            BufferOverrides::from_cli(&[], &[], &["out=foo".into()], &[], &[], &[]).unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("--out-buffer-param"), "msg = {msg}");
     }
 
     #[test]
     fn rejects_malformed_value() {
-        let err = BufferOverrides::from_cli(&["m=nine".into()], &[], &[], &[], &[]).unwrap_err();
+        let err =
+            BufferOverrides::from_cli(&["m=nine".into()], &[], &[], &[], &[], &[]).unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("--in-buffer-size"), "msg = {msg}");
     }
 
     #[test]
     fn empty_when_no_flags() {
-        let ov = BufferOverrides::from_cli(&[], &[], &[], &[], &[]).unwrap();
+        let ov = BufferOverrides::from_cli(&[], &[], &[], &[], &[], &[]).unwrap();
         assert!(ov.in_buffer_sizes.is_empty());
         assert!(ov.out_buffer_sizes.is_empty());
+        assert!(ov.out_buffer_auto.is_empty());
         assert!(ov.cryptol_fn_out.is_empty());
         assert!(ov.max_len_preconds.is_empty());
         assert!(ov.cryptol_arg_orders.is_empty());
+        assert!(ov.cryptol_fn_pre.is_none());
         assert_eq!(ov.cryptol_call_args("anything"), None);
         assert_eq!(ov.override_saw_type("anything"), None);
         assert_eq!(ov.value_var_for("m"), "m");
+    }
+
+    #[test]
+    fn rejects_multiple_cryptol_fn_pre_flags() {
+        let err =
+            BufferOverrides::from_cli(&[], &[], &[], &[], &[], &["pre_a".into(), "pre_b".into()])
+                .unwrap_err();
+        assert!(
+            format!("{err:#}").contains("--cryptol-fn-pre"),
+            "msg = {err:#}"
+        );
     }
 }
