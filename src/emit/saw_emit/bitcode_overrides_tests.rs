@@ -52,7 +52,7 @@ fn variadic_printf_uses_only_fixed_args_in_execute_func() {
         true,
         BrokenReason::UsesVarargsIntrinsic,
     );
-    let out = emit_overrides(&[t], &[], &[]);
+    let out = emit_overrides(&[t], &[], &[], &Default::default());
 
     assert!(out
         .snippet
@@ -75,7 +75,7 @@ fn declare_only_ucrt_extern_gets_full_signature() {
         false,
         BrokenReason::DeclareOnly,
     );
-    let out = emit_overrides(&[t], &[], &[]);
+    let out = emit_overrides(&[t], &[], &[], &Default::default());
     assert!(out
         .snippet
         .contains("p0 <- llvm_fresh_var \"p0\" (llvm_int 64);"));
@@ -95,7 +95,7 @@ fn declare_only_ucrt_extern_gets_full_signature() {
 #[test]
 fn void_return_omits_llvm_return() {
     let t = target("free", &["ptr"], "void", false, BrokenReason::DeclareOnly);
-    let out = emit_overrides(&[t], &[], &[]);
+    let out = emit_overrides(&[t], &[], &[], &Default::default());
     assert!(out.snippet.contains("llvm_execute_func [p0];"));
     assert!(
         !out.snippet.contains("llvm_return"),
@@ -112,7 +112,7 @@ fn pointer_return_uses_fresh_pointer_not_fresh_var() {
         false,
         BrokenReason::DeclareOnly,
     );
-    let out = emit_overrides(&[t], &[], &[]);
+    let out = emit_overrides(&[t], &[], &[], &Default::default());
     assert!(out
         .snippet
         .contains("rv <- llvm_fresh_pointer (llvm_int 8);"));
@@ -127,14 +127,14 @@ fn pointer_return_uses_fresh_pointer_not_fresh_var() {
 fn already_covered_symbols_are_skipped() {
     let t = target("printf", &["ptr"], "i32", true, BrokenReason::DeclareOnly);
     // Caller already emits an AST-derived spec for printf.
-    let out = emit_overrides(&[t], &["printf".to_string()], &[]);
+    let out = emit_overrides(&[t], &["printf".to_string()], &[], &Default::default());
     assert!(out.is_empty(), "AST-derived spec takes precedence");
     assert!(!out.snippet.contains("ov_printf"));
 }
 
 #[test]
 fn empty_input_produces_empty_output() {
-    let out = emit_overrides(&[], &[], &[]);
+    let out = emit_overrides(&[], &[], &[], &Default::default());
     assert!(out.is_empty());
     assert!(out.snippet.is_empty());
 }
@@ -151,7 +151,7 @@ fn mangled_symbols_sanitize_safely() {
         false,
         BrokenReason::DeclareOnly,
     );
-    let out = emit_overrides(&[t], &[], &[]);
+    let out = emit_overrides(&[t], &[], &[], &Default::default());
     assert!(
         out.snippet.contains("\"?bar@@YAHXZ\""),
         "raw mangled name preserved inside the assume_spec target string"
@@ -184,7 +184,7 @@ fn pointer_params_get_adversarial_post_clobber() {
         true,
         BrokenReason::UsesVarargsIntrinsic,
     );
-    let out = emit_overrides(&[t], &[], &[]);
+    let out = emit_overrides(&[t], &[], &[], &Default::default());
 
     // Both ptr params have post-clobber pairs.
     assert!(
@@ -237,7 +237,7 @@ fn int_only_params_get_no_clobber() {
         false,
         BrokenReason::DeclareOnly,
     );
-    let out = emit_overrides(&[t], &[], &[]);
+    let out = emit_overrides(&[t], &[], &[], &Default::default());
     assert!(
         !out.snippet.contains("llvm_points_to_at_type"),
         "non-ptr override must not emit any pointee clobber; snippet was:\n{}",
@@ -280,7 +280,7 @@ fn globals_get_adversarial_post_clobber() {
             init_value: None,
         },
     ];
-    let out = emit_overrides(&[t], &[], &globals);
+    let out = emit_overrides(&[t], &[], &globals, &Default::default());
 
     // Fresh + points-to pair for each global.
     assert!(
@@ -330,7 +330,7 @@ fn no_globals_means_no_global_clobber_emitted() {
         true,
         BrokenReason::UsesVarargsIntrinsic,
     );
-    let out = emit_overrides(&[t], &[], &[]);
+    let out = emit_overrides(&[t], &[], &[], &Default::default());
     assert!(
         !out.snippet.contains("llvm_global"),
         "empty globals slice must emit zero `llvm_global` references; snippet was:\n{}",
@@ -367,7 +367,7 @@ fn target_writes_no_globals_means_no_global_clobber() {
         ty: TypeInfo::SignedInt(32),
         init_value: Some("7".to_string()),
     }];
-    let out = emit_overrides(&[t], &[], &globals);
+    let out = emit_overrides(&[t], &[], &globals, &Default::default());
     assert!(
         !out.snippet.contains("super_important"),
         "printf-style override (empty globals_written) must not clobber \
@@ -404,7 +404,7 @@ fn declare_only_extern_clobbers_globals_in_written_set() {
         ty: TypeInfo::SignedInt(32),
         init_value: None,
     }];
-    let out = emit_overrides(&[t], &[], &globals);
+    let out = emit_overrides(&[t], &[], &globals, &Default::default());
     assert!(
         out.snippet.contains("user_state"),
         "declare-only extern with globals_written must havoc those globals; \

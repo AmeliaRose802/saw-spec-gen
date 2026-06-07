@@ -18,6 +18,7 @@
 //! `crate::constraints::*`.
 
 pub mod container_layouts;
+pub mod container_layouts_derive;
 pub mod derive;
 pub mod length_binding;
 pub mod length_companion;
