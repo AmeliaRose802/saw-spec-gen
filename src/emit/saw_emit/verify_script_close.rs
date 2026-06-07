@@ -1,7 +1,7 @@
 //! Postcondition + verification-step emitters extracted from
 //! [`super::verify_script_steps`] to stay under the 500-NWS limit.
 
-use super::cryptol_bridge::cryptol_return_for;
+use super::cryptol_bridge::{cryptol_return_for, AbiReturnBridge};
 use super::names::{sanitize_name, stub_function_name};
 use crate::buffer_overrides::BufferOverrides;
 use crate::clang_ast::{ClassConstructor, InterfaceMethod};
@@ -14,6 +14,9 @@ pub(super) struct PostconditionCtx<'a> {
     pub sub_callee_specs: &'a [SpecConstraint],
     pub return_type: &'a TypeInfo,
     pub is_sret: bool,
+    /// Optional aggregate return bridge. When set, overrides the
+    /// default scalar bridge for the return assertion.
+    pub return_bridge: Option<&'a AbiReturnBridge>,
 }
 
 pub(super) fn emit_postcondition_and_close(
@@ -67,6 +70,15 @@ pub(super) fn emit_postcondition_and_close(
     };
     let cryptol_return = cryptol_return_for(&cryptol_call, ctx.return_type);
     let is_void_return = matches!(ctx.return_type, TypeInfo::Void);
+
+    // If an aggregate return bridge was supplied, use it instead of
+    // the default scalar bridge.
+    if let Some(bridge) = ctx.return_bridge {
+        out.push_str(&bridge.emit_saw_return(&cryptol_call));
+        out.push_str("};\n\n");
+        return;
+    }
+
     if ctx.is_sret {
         if ctx.sub_callee_specs.is_empty() {
             out.push_str("    // Postcondition (sret): *result_ptr == Cryptol spec\n");

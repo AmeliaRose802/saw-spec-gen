@@ -1,0 +1,6 @@
+// Cryptol spec for activate — returns an 8-bit discriminant.
+// The variant-map bridges Rust i1 (2 variants) → spec [8] (3 variants).
+activate_spec : [32] -> [8]
+activate_spec key = if key == 0 then 2  // IoFailure
+                     | key == 1 then 0  // Success
+                    else 1              // AlreadyActive

@@ -288,10 +288,10 @@ entry:
         &BufferOverrides::default(),
         &vmap,
     );
-    // Two-variant return: should emit if/then/else adapter
+    // Two-variant return: should emit VariantRemap bridge adapter
     assert!(
-        saw.contains("if check_spec"),
-        "missing if/then/else adapter:\n{saw}"
+        saw.contains("if (check_spec x0) == (0 : [8])"),
+        "missing VariantRemap condition:\n{saw}"
     );
     assert!(
         saw.contains("then (0 : [8])"),

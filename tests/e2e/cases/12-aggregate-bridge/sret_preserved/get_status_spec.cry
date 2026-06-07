@@ -1,0 +1,6 @@
+// Cryptol spec for get_status — returns a 4-byte status struct.
+// The function writes all bytes (no preserved prestate ranges).
+get_status_spec : [8] -> [8] -> [4][8]
+get_status_spec enabled active = [enabled, active, result, 0x00]
+  where
+    result = if enabled == 1 /\ active == 1 then 0x01 else 0x00

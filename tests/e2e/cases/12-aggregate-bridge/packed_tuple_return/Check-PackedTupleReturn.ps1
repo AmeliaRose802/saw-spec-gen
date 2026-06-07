@@ -1,11 +1,7 @@
 <#
 .SYNOPSIS
-    Custom e2e test: verify that --variant-map emits the correct
-    membership precondition in the generated SAW script.
-
-    The Rust fn is_success(u8) -> u8 works for any u8 input, but
-    we restrict verification to status ∈ {0, 1} via --variant-map.
-    The generated script must contain the membership precondition.
+    E2E test: verify that gen-verify-rust emits llvm_struct_value for
+    aggregate { i1, i1 } returns, bridging a Cryptol (Bit, Bit) tuple.
 #>
 param()
 $ErrorActionPreference = "Stop"
@@ -23,42 +19,41 @@ $rustc      = $tools.Rustc
 $llvmDis    = $tools.LlvmDis
 $llvmTarget = $tools.LlvmTarget
 
-$rsFile  = Join-Path $caseDir 'is_success_verified.rs'
-$cryFile = Join-Path $caseDir 'is_success_spec.cry'
-$outDir  = Join-Path $caseDir 'out_variant_map'
+$rsFile  = Join-Path $caseDir 'enforce_access_verified.rs'
+$cryFile = Join-Path $caseDir 'enforce_access_spec.cry'
+$outDir  = Join-Path $caseDir 'out_packed_tuple'
 
 if (Test-Path $outDir) { Remove-Item -Recurse -Force $outDir }
 New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 
-# ── Compile Rust → bitcode ────────────────────────────────────────────────────
-$bcFile = Join-Path $outDir 'is_success_verified.bc'
+# ── Compile Rust → bitcode ───────────────────────────────────────────
+$bcFile = Join-Path $outDir 'enforce_access_verified.bc'
 & $rustc --emit=llvm-bc="$bcFile" --crate-type=lib --edition=2021 `
     --target $llvmTarget `
     -C opt-level=0 -C link-dead-code=yes -C symbol-mangling-version=v0 `
     -C overflow-checks=off -C debug-assertions=off -C panic=unwind `
     -C codegen-units=1 -C debuginfo=0 -C lto=off -C embed-bitcode=no `
-    -o (Join-Path $outDir 'is_success.out') $rsFile 2>&1 | Write-Host
+    -o (Join-Path $outDir 'enforce_access.out') $rsFile 2>&1 | Write-Host
 
-$llFile = Join-Path $outDir 'is_success_verified.ll'
+$llFile = Join-Path $outDir 'enforce_access_verified.ll'
 & $llvmDis $bcFile -o $llFile 2>&1 | Write-Host
 
-# ── Call gen-verify-rust with --variant-map ────────────────────────────────────
+# ── Call gen-verify-rust ─────────────────────────────────────────────
 & $specGen gen-verify-rust `
     --llvm-ir      $llFile `
     --bitcode      $bcFile `
     --cryptol-spec $cryFile `
-    --cryptol-fn   is_success_spec `
-    --function     is_success `
-    --output       $outDir `
-    --variant-map  'x0=Success:0,Failure:1' 2>&1 | Write-Host
+    --cryptol-fn   enforce_access_spec `
+    --function     enforce_access `
+    --output       $outDir 2>&1 | Write-Host
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "gen-verify-rust with --variant-map failed"
+    Write-Error "gen-verify-rust failed"
     Write-Host "RESULT: DISPROVED"
     exit 1
 }
 
-# ── Check the generated SAW script contains membership precondition ──────────
+# ── Verify generated SAW script uses llvm_struct_value ───────────────
 $sawScript = Join-Path $outDir 'verify_rust.saw'
 if (-not (Test-Path $sawScript)) {
     Write-Error "verify_rust.saw not generated"
@@ -67,13 +62,21 @@ if (-not (Test-Path $sawScript)) {
 }
 
 $sawText = Get-Content $sawScript -Raw
-if ($sawText -notmatch 'x0 == \(0 : \[8\]\) \\\/ x0 == \(1 : \[8\]\)') {
-    Write-Error "Missing variant membership precondition in SAW script"
+
+if ($sawText -notmatch 'llvm_struct_value') {
+    Write-Error "Missing llvm_struct_value for aggregate return"
     Write-Host "SAW script content:"
     Write-Host $sawText
     Write-Host "RESULT: DISPROVED"
     exit 1
 }
 
-Write-Host "Variant membership precondition found in SAW script"
+# Check that field accessors .0 and .1 are present
+if ($sawText -notmatch '\.0' -or $sawText -notmatch '\.1') {
+    Write-Error "Missing field accessor .0 or .1 in aggregate return"
+    Write-Host "RESULT: DISPROVED"
+    exit 1
+}
+
+Write-Host "StructValue bridge found in generated SAW script"
 Write-Host "RESULT: VERIFIED"

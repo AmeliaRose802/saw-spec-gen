@@ -257,8 +257,6 @@
         #    Expected verdicts captured from baseline runs.
         @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/rust_adversarial/cell_interior_mutation';  File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
         @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/rust_adversarial/cross_fn_global';         File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
-        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/rust_adversarial/drop_noinline';           File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
-        @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/rust_adversarial/drop_side_effect';        File = 'add_one_verified.rs';  Expected = 'VERIFIED'  }
         @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/rust_adversarial/raw_pointer_aliasing';    File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
         @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/rust_adversarial/symbol_collision';        File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
         @{ Tag = 'rust_adversarial'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/rust_adversarial/unreachable_unchecked';   File = 'add_one_disproved.rs'; Expected = 'DISPROVED' }
@@ -357,6 +355,14 @@
         # Toolchain-light: need rustc + llvm-dis but NOT SAW (script
         # generation only). These verify the gen-verify-rust CLI surface.
 
+        # ── Rust cleanup funclet tests: exercise the exception-lower pass
+        #    on Rust bitcode compiled with -C panic=unwind. Each has a Drop
+        #    impl that produces cleanuppad/cleanupret funclets which must
+        #    be lowered before SAW can parse the module.
+        @{ Tag = 'rust_cleanup'; Runner = 'rust'; Dir = 'tests/e2e/cases/11-rust-parity/drop_noinline';    File = 'add_one_verified.rs'; Expected = 'VERIFIED' }
+        @{ Tag = 'rust_cleanup'; Runner = 'rust'; Dir = 'tests/e2e/cases/11-rust-parity/drop_side_effect'; File = 'add_one_verified.rs'; Expected = 'VERIFIED' }
+        @{ Tag = 'rust_cleanup'; Runner = 'rust'; Dir = 'tests/e2e/cases/11-rust-parity/cleanup_unwind';   File = 'add_one_verified.rs'; Expected = 'VERIFIED' }
+
         # spec-only-on-missing: gen-verify-rust soft-exits when the target
         # function has no matching symbol in the LLVM IR.
         @{ Tag = 'rust_parity'; Runner = 'custom'; Expected = 'VERIFIED';
@@ -377,6 +383,26 @@
         # to gen-verify-rust.
         @{ Tag = 'rust_parity'; Runner = 'custom'; Expected = 'VERIFIED';
            Script = 'tests/e2e/cases/11-rust-parity/unified_gen_verify/Check-UnifiedGenVerify.ps1';
+           ScriptArgs = @{} }
+
+        # ── 12-aggregate-bridge ──────────────────────────────────────────────
+        # Aggregate/struct ABI bridge tests. Each validates that the
+        # generated SAW script contains the correct bridge construct
+        # for non-scalar returns.
+
+        # packed tuple return: StructValue bridge for { i1, i1 } aggregate
+        @{ Tag = 'aggregate_bridge'; Runner = 'custom'; Expected = 'VERIFIED';
+           Script = 'tests/e2e/cases/12-aggregate-bridge/packed_tuple_return/Check-PackedTupleReturn.ps1';
+           ScriptArgs = @{} }
+
+        # sret struct: sret byte-buffer allocation + llvm_points_to
+        @{ Tag = 'aggregate_bridge'; Runner = 'custom'; Expected = 'VERIFIED';
+           Script = 'tests/e2e/cases/12-aggregate-bridge/sret_preserved/Check-SretPreserved.ps1';
+           ScriptArgs = @{} }
+
+        # niche-packed enum: VariantRemap bridge + variant-map composition
+        @{ Tag = 'aggregate_bridge'; Runner = 'custom'; Expected = 'VERIFIED';
+           Script = 'tests/e2e/cases/12-aggregate-bridge/niche_enum_remap/Check-NicheEnumRemap.ps1';
            ScriptArgs = @{} }
     )
 }

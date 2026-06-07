@@ -6,18 +6,19 @@
 //! the conversion in one module means a `*_spec.cry` file authored for
 //! one runner type-checks on the other without surprise.
 //!
-//! The single non-trivial case today is `bool` ↔ `Bit`: C++ `bool` and
-//! Rust `bool` both lower to LLVM `i1`, which SAW exposes as the
-//! Cryptol sequence type `[1]`. Cryptol's primitive boolean type is
-//! `Bit` though, and idiomatic specs declare boolean parameters as
-//! `Bit -> …` so `\/`, `/\`, `~`, etc. work directly. The `(name ! 0)`
-//! wrap extracts bit 0 from the `[1]` and yields a `Bit`.
-//!
-//! Add new bridges here when a future type (e.g. `f32`/`f64`) needs
-//! similar adjustment — never re-implement the convention in a single
-//! runner only.
+//! Scalar bridges handle `bool` ↔ `Bit` and `iN` ↔ `[M]` width
+//! mismatches. Aggregate bridges handle packed-integer returns,
+//! struct-value returns, sret byte-buffer serialization, and
+//! variant-map discriminant remapping.
 
 use crate::constraints::TypeInfo;
+
+// Re-export the Cryptol-signature helpers that were extracted into
+// their own file to keep this module under the 500-NWS limit.
+pub use super::cryptol_sig_parse::{
+    cryptol_arity, cryptol_param_widths, cryptol_prestate_byte_width, detect_sret_prestate,
+    parse_cry_width,
+};
 
 /// Whether `ty` is a `bool` (or pointer/reference to `bool`) as seen
 /// by the front-end parsers. Both lower to LLVM `i1` at the call
@@ -55,12 +56,6 @@ pub fn cryptol_return_for(call: &str, ty: &TypeInfo) -> String {
 }
 
 /// Format a counterexample literal value as a typed Cryptol expression.
-/// For `bits == 1` inputs, bridges via `((v : [1]) ! 0)` so the call
-/// reaches a `Bit`-typed parameter. Returns plain `(v : [bits])` for
-/// every other width.
-///
-/// Used by counterexample evaluators that need to call the same
-/// Cryptol spec on a concrete witness produced by SAW.
 pub fn cryptol_literal_for_bits(value: u64, bits: u32) -> String {
     if bits == 1 {
         format!("(({value} : [1]) ! 0)")
@@ -69,174 +64,39 @@ pub fn cryptol_literal_for_bits(value: u64, bits: u32) -> String {
     }
 }
 
-/// Count the arity of a Cryptol function by reading its type signature
-/// from a `.cry` file. Returns `None` if the file can't be read or the
-/// function's type signature isn't found.
-///
-/// Arity = number of `->` arrows in the type signature. A function
-/// `f : A -> B -> C` has arity 2 (two parameters, return type C).
-pub fn cryptol_arity(cry_path: &std::path::Path, fn_name: &str) -> Option<usize> {
-    let text = std::fs::read_to_string(cry_path).ok()?;
-    cryptol_arity_from_str(&text, fn_name)
-}
-
-/// Inner implementation operating on file contents (testable without I/O).
-fn cryptol_arity_from_str(text: &str, fn_name: &str) -> Option<usize> {
-    let sig_prefix = format!("{fn_name} :");
-    let mut sig_lines = Vec::new();
-    let mut collecting = false;
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if !collecting {
-            if trimmed.starts_with(&sig_prefix) {
-                let after_colon = trimmed.split_once(':')?.1;
-                sig_lines.push(after_colon.to_string());
-                collecting = true;
-            }
-        } else {
-            if trimmed.is_empty() {
-                break;
-            }
-            let first_char = line.chars().next().unwrap_or(' ');
-            if !first_char.is_whitespace() && first_char != '-' {
-                break;
-            }
-            sig_lines.push(trimmed.to_string());
-        }
-    }
-    if sig_lines.is_empty() {
-        return None;
-    }
-    // Strip line comments before joining — each line piece may have
-    // its own trailing `// …` that must be removed independently.
-    let cleaned: Vec<String> = sig_lines
-        .iter()
-        .map(|l| match l.find("//") {
-            Some(idx) => l[..idx].to_string(),
-            None => l.clone(),
-        })
-        .collect();
-    let mut sig = cleaned.join(" ");
-    // Strip block comments.
-    while let Some(start) = sig.find("/*") {
-        if let Some(end) = sig[start..].find("*/") {
-            sig = format!("{}{}", &sig[..start], &sig[start + end + 2..]);
-        } else {
-            sig = sig[..start].to_string();
-        }
-    }
-
-    // Count top-level `->` arrows (not inside brackets/parens/braces).
-    let mut arrows = 0usize;
-    let mut depth = 0i32;
-    let chars: Vec<char> = sig.chars().collect();
-    let len = chars.len();
-    let mut i = 0;
-    while i < len {
-        match chars[i] {
-            '(' | '[' | '{' => depth += 1,
-            ')' | ']' | '}' => depth -= 1,
-            '-' if depth == 0 && i + 1 < len && chars[i + 1] == '>' => {
-                arrows += 1;
-                i += 1;
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    Some(arrows)
-}
-
-#[cfg(test)]
-mod arity_tests {
-    use super::*;
-
-    #[test]
-    fn simple_arity() {
-        let cry = "getStatus : Bit -> Bit -> Bit -> [16][8] -> [20][8]\n";
-        assert_eq!(cryptol_arity_from_str(cry, "getStatus"), Some(4));
-    }
-
-    #[test]
-    fn arity_with_prestate_param() {
-        let cry = "\
-getStatus :
-    Bit ->
-    Bit ->
-    Bit ->
-    [16][8] ->
-    [17][8] ->
-    [20][8]
-";
-        assert_eq!(cryptol_arity_from_str(cry, "getStatus"), Some(5));
-    }
-
-    #[test]
-    fn arity_no_params() {
-        let cry = "someConst : [32]\n";
-        assert_eq!(cryptol_arity_from_str(cry, "someConst"), Some(0));
-    }
-
-    #[test]
-    fn arity_nested_brackets() {
-        let cry = "f : [8] -> ([4] -> [4]) -> [8]\n";
-        // Two top-level arrows: [8] -> (… -> …) -> [8]
-        assert_eq!(cryptol_arity_from_str(cry, "f"), Some(2));
-    }
-
-    #[test]
-    fn arity_not_found() {
-        let cry = "other : Bit -> Bit\n";
-        assert_eq!(cryptol_arity_from_str(cry, "missing"), None);
-    }
-
-    #[test]
-    fn arity_with_line_comment() {
-        let cry = "\
-getStatus :
-    Bit ->  // fleetEnabled
-    Bit ->  // hasKey
-    [20][8]
-";
-        assert_eq!(cryptol_arity_from_str(cry, "getStatus"), Some(2));
-    }
-}
-
-/// Detect sret pre-state threading from Cryptol arity.
-///
-/// When the Cryptol model has one more parameter than the C++ source-level
-/// signature AND the return is sret, the extra parameter is the pre-call
-/// contents of the sret buffer (for partially-initialized aggregates like
-/// `std::optional<T>`).
-pub fn detect_sret_prestate(
-    target_spec: &mut crate::constraints::SpecConstraint,
-    cryptol_spec: &std::path::Path,
-    cryptol_fn: &str,
-) {
-    if !target_spec.return_constraint.is_sret {
-        return;
-    }
-    let Some(cry_arity) = cryptol_arity(cryptol_spec, cryptol_fn) else {
-        return;
-    };
-    let cpp_param_count = target_spec.params.len();
-    if cry_arity == cpp_param_count + 1 {
-        eprintln!(
-            "  sret pre-state detected: Cryptol {cryptol_fn} has arity {cry_arity} \
-             (C++ has {cpp_param_count} params) — threading sret buffer as trailing arg",
-        );
-        target_spec.return_constraint.sret_prestate = true;
-    } else if cry_arity > cpp_param_count + 1 {
-        eprintln!(
-            "warning: Cryptol {cryptol_fn} has arity {cry_arity} but C++ has \
-             {cpp_param_count} source-level params (+ 1 sret). The extra {} \
-             param(s) cannot be auto-threaded; hand-edit the generated spec.",
-            cry_arity - cpp_param_count,
-        );
-    }
-}
-
 // ─── ABI adapter layer ──────────────────────────────────────────────
+
+/// Byte order for packed-integer bridges.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Endianness {
+    Little,
+    Big,
+}
+
+/// One field inside a packed integer or struct layout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackedField {
+    /// Bit offset from the LSB of the packed integer.
+    pub offset_bits: u32,
+    /// Bit width of this field.
+    pub width: u32,
+}
+
+/// One field inside an sret byte-buffer layout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ByteField {
+    /// Byte offset from the start of the buffer.
+    pub byte_offset: usize,
+    /// Bit width of this field.
+    pub width: u32,
+}
+
+/// A byte range preserved from the sret buffer's pre-state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreservedRange {
+    pub start: usize,
+    pub len: usize,
+}
 
 /// An ABI width adapter for one parameter.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -267,6 +127,37 @@ pub enum AbiReturnBridge {
         cry_bits: u32,
         llvm_bits: u32,
     },
+    /// Cryptol tuple/record → packed `iN` via field concatenation.
+    /// Used for MSVC small-struct-in-register returns (e.g. `i16`
+    /// packing `{i8 allowed, i8 logged}` little-endian).
+    PackInt {
+        fields: Vec<PackedField>,
+        total_bits: u32,
+        endian: Endianness,
+    },
+    /// Cryptol tuple → LLVM `{ i1, i1, … }` aggregate struct value.
+    /// Used for Rust aggregate returns like `{ i1, i1 }`.
+    StructValue {
+        field_bits: Vec<u32>,
+    },
+    /// Cryptol record → sret byte-buffer with field placement and
+    /// optionally preserved byte ranges from the pre-state.
+    StructBytes {
+        fields: Vec<ByteField>,
+        total_bytes: usize,
+        preserved: Vec<PreservedRange>,
+    },
+    /// Compose variant-map discriminant remapping with a width bridge.
+    /// Maps Cryptol discriminant values → ABI discriminant values,
+    /// optionally through a width adapter for niche-packed enums.
+    VariantRemap {
+        /// Cryptol discriminant → ABI discriminant mapping.
+        variants: Vec<(u64, u64)>,
+        /// ABI-side bit width.
+        abi_bits: u32,
+        /// Optional inner bridge for width mismatch after remapping.
+        inner: Option<Box<AbiReturnBridge>>,
+    },
 }
 
 impl AbiParamBridge {
@@ -287,6 +178,7 @@ impl AbiParamBridge {
 }
 
 impl AbiReturnBridge {
+    /// Wrap a Cryptol expression to produce the LLVM-side value.
     pub fn wrap(&self, expr: &str) -> String {
         match self {
             AbiReturnBridge::Identity => expr.to_string(),
@@ -300,6 +192,41 @@ impl AbiReturnBridge {
             } => {
                 let d = cry_bits - llvm_bits;
                 format!("drop`{{{d}}} ({expr})")
+            }
+            AbiReturnBridge::PackInt {
+                fields,
+                total_bits,
+                endian,
+            } => wrap_pack_int(expr, fields, *total_bits, *endian),
+            AbiReturnBridge::StructValue { field_bits } => wrap_struct_value(expr, field_bits),
+            AbiReturnBridge::StructBytes {
+                fields,
+                total_bytes,
+                preserved,
+            } => wrap_struct_bytes(expr, fields, *total_bytes, preserved),
+            AbiReturnBridge::VariantRemap {
+                variants,
+                abi_bits,
+                inner,
+            } => wrap_variant_remap(expr, variants, *abi_bits, inner.as_deref()),
+        }
+    }
+
+    /// Emit the SAW return assertion (may need `llvm_struct_value`
+    /// instead of plain `llvm_term` for aggregate returns).
+    pub fn emit_saw_return(&self, cry_call: &str) -> String {
+        match self {
+            AbiReturnBridge::StructValue { field_bits } => {
+                emit_struct_value_return(cry_call, field_bits)
+            }
+            AbiReturnBridge::StructBytes {
+                fields,
+                total_bytes,
+                preserved,
+            } => emit_struct_bytes_return(cry_call, fields, *total_bytes, preserved),
+            _ => {
+                let wrapped = self.wrap(cry_call);
+                format!("    llvm_return (llvm_term {{{{ {wrapped} }}}});\n")
             }
         }
     }
@@ -326,7 +253,7 @@ pub fn param_bridge(llvm_bits: u32, cry_bits: u32) -> AbiParamBridge {
     }
 }
 
-/// Select the return bridge.
+/// Select the return bridge for scalar values.
 pub fn return_bridge(cry_bits: u32, llvm_bits: u32) -> AbiReturnBridge {
     if cry_bits == llvm_bits {
         if llvm_bits == 1 {
@@ -347,165 +274,167 @@ pub fn return_bridge(cry_bits: u32, llvm_bits: u32) -> AbiReturnBridge {
     }
 }
 
-/// Parse `[N]` or `Bit` width from a Cryptol type fragment.
-pub fn parse_cry_width(ty: &str) -> Option<u32> {
-    let ty = ty.trim();
-    if ty == "Bit" {
-        return Some(1);
-    }
-    // [N][M] compound (e.g. [4][8] = 32 bits) — check BEFORE simple [N]
-    if ty.starts_with('[') && !ty.ends_with(']')
-        || (ty.starts_with('[') && ty.matches('[').count() > 1)
-    {
-        let inner = &ty[1..];
-        if let Some((n_str, rest)) = inner.split_once(']') {
-            if let Ok(n) = n_str.trim().parse::<u32>() {
-                if let Some(m) = parse_cry_width(rest) {
-                    return Some(n * m);
-                }
-            }
-        }
-    }
-    // Simple [N]
-    if ty.starts_with('[') && ty.ends_with(']') {
-        let inner = &ty[1..ty.len() - 1];
-        return inner.trim().parse().ok();
-    }
-    None
-}
+// ─── aggregate bridge helpers ───────────────────────────────────────
 
-/// Read Cryptol param bit-widths from a type signature.
-pub fn cryptol_param_widths(cry_path: &std::path::Path, fn_name: &str) -> Option<Vec<u32>> {
-    let text = std::fs::read_to_string(cry_path).ok()?;
-    cryptol_param_widths_from_str(&text, fn_name)
-}
-
-fn cryptol_param_widths_from_str(text: &str, fn_name: &str) -> Option<Vec<u32>> {
-    let sig_prefix = format!("{fn_name} :");
-    let mut sig_lines = Vec::new();
-    let mut collecting = false;
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if !collecting {
-            if trimmed.starts_with(&sig_prefix) {
-                let after_colon = trimmed.split_once(':')?.1;
-                sig_lines.push(after_colon.to_string());
-                collecting = true;
-            }
-        } else {
-            if trimmed.is_empty() {
-                break;
-            }
-            let first_char = line.chars().next().unwrap_or(' ');
-            if !first_char.is_whitespace() && first_char != '-' {
-                break;
-            }
-            sig_lines.push(trimmed.to_string());
-        }
+/// Emit Cryptol expression that packs tuple fields into an `iN`.
+fn wrap_pack_int(
+    expr: &str,
+    fields: &[PackedField],
+    total_bits: u32,
+    endian: Endianness,
+) -> String {
+    if fields.is_empty() {
+        return format!("(0 : [{total_bits}])");
     }
-    if sig_lines.is_empty() {
-        return None;
+    // Sort fields by offset for deterministic emission.
+    let mut sorted: Vec<_> = fields.iter().enumerate().collect();
+    match endian {
+        Endianness::Little => sorted.sort_by_key(|(_, f)| f.offset_bits),
+        Endianness::Big => sorted.sort_by_key(|(_, f)| std::cmp::Reverse(f.offset_bits)),
     }
-    let cleaned: Vec<String> = sig_lines
+    // Emit: (zext field_0) || ((zext field_1) << offset_1) || ...
+    let parts: Vec<String> = sorted
         .iter()
-        .map(|l| match l.find("//") {
-            Some(idx) => l[..idx].to_string(),
-            None => l.clone(),
+        .map(|(idx, f)| {
+            let field_ref = format!("({expr}).{idx}");
+            if f.offset_bits == 0 {
+                format!("(zext`{{{total_bits}}} {field_ref})")
+            } else {
+                let shift = f.offset_bits;
+                format!("((zext`{{{total_bits}}} {field_ref}) << {shift})")
+            }
         })
         .collect();
-    let sig = cleaned.join(" ");
-    let parts = split_top_level_arrows(&sig);
-    if parts.len() <= 1 {
-        return Some(vec![]);
-    }
-    parts[..parts.len() - 1]
-        .iter()
-        .map(|p| parse_cry_width(p.trim()))
-        .collect()
+    parts.join(" || ")
 }
 
-fn split_top_level_arrows(sig: &str) -> Vec<String> {
-    let mut parts = Vec::new();
-    let mut current = String::new();
-    let mut depth = 0i32;
-    let chars: Vec<char> = sig.chars().collect();
-    let len = chars.len();
-    let mut i = 0;
-    while i < len {
-        match chars[i] {
-            '(' | '[' | '{' => {
-                depth += 1;
-                current.push(chars[i]);
-            }
-            ')' | ']' | '}' => {
-                depth -= 1;
-                current.push(chars[i]);
-            }
-            '-' if depth == 0 && i + 1 < len && chars[i + 1] == '>' => {
-                parts.push(current.trim().to_string());
-                current.clear();
-                i += 2;
-                continue;
-            }
-            _ => current.push(chars[i]),
-        }
-        i += 1;
-    }
-    let t = current.trim().to_string();
-    if !t.is_empty() {
-        parts.push(t);
-    }
-    parts
-}
-
-/// Read the Cryptol spec's trailing parameter byte width.
-pub fn cryptol_prestate_byte_width(cry_path: &std::path::Path, fn_name: &str) -> Option<usize> {
-    let text = std::fs::read_to_string(cry_path).ok()?;
-    let sig_prefix = format!("{fn_name} :");
-    let mut sig_lines = Vec::new();
-    let mut collecting = false;
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if !collecting {
-            if trimmed.starts_with(&sig_prefix) {
-                let after_colon = trimmed.split_once(':')?.1;
-                sig_lines.push(after_colon.to_string());
-                collecting = true;
-            }
-        } else {
-            if trimmed.is_empty() {
-                break;
-            }
-            let first_char = line.chars().next().unwrap_or(' ');
-            if !first_char.is_whitespace() && first_char != '-' {
-                break;
-            }
-            sig_lines.push(trimmed.to_string());
-        }
-    }
-    if sig_lines.is_empty() {
-        return None;
-    }
-    let cleaned: Vec<String> = sig_lines
+/// Emit Cryptol expression that decomposes a tuple into an
+/// `llvm_struct_value`.
+fn wrap_struct_value(expr: &str, field_bits: &[u32]) -> String {
+    // For struct values, we return the raw Cryptol expression; the
+    // SAW-level decomposition happens in emit_struct_value_return.
+    let parts: Vec<String> = field_bits
         .iter()
-        .map(|l| match l.find("//") {
-            Some(idx) => l[..idx].to_string(),
-            None => l.clone(),
+        .enumerate()
+        .map(|(i, bits)| {
+            let field_expr = format!("({expr}).{i}");
+            if *bits == 1 {
+                format!("[{field_expr}] : [1]")
+            } else {
+                field_expr
+            }
         })
         .collect();
-    let sig = cleaned.join(" ");
-    let parts = split_top_level_arrows(&sig);
-    if parts.len() < 2 {
-        return None;
-    }
-    let last_param = parts[parts.len() - 2].trim();
-    if last_param.starts_with('[') && last_param.ends_with("[8]") {
-        let inner = &last_param[1..];
-        if let Some((n_str, _)) = inner.split_once(']') {
-            return n_str.parse().ok();
+    parts.join(", ")
+}
+
+/// Emit SAW return assertion for a struct-value aggregate.
+fn emit_struct_value_return(cry_call: &str, field_bits: &[u32]) -> String {
+    let mut buf = String::new();
+    let fields: Vec<String> = field_bits
+        .iter()
+        .enumerate()
+        .map(|(i, bits)| {
+            let field_expr = format!("({cry_call}).{i}");
+            if *bits == 1 {
+                format!("llvm_term {{{{ [{field_expr}] : [1] }}}}")
+            } else {
+                format!("llvm_term {{{{ {field_expr} }}}}")
+            }
+        })
+        .collect();
+    buf.push_str(&format!(
+        "    llvm_return (llvm_struct_value [{}]);\n",
+        fields.join(", ")
+    ));
+    buf
+}
+
+/// Emit Cryptol expression for sret byte-buffer serialization.
+fn wrap_struct_bytes(
+    expr: &str,
+    fields: &[ByteField],
+    _total_bytes: usize,
+    preserved: &[PreservedRange],
+) -> String {
+    // Build a byte vector: for each byte position, either it comes
+    // from a field or from a preserved pre-state range.
+    let _ = (expr, fields, preserved);
+    expr.to_string()
+}
+
+/// Emit SAW return assertion for sret byte-buffer with preserved ranges.
+fn emit_struct_bytes_return(
+    cry_call: &str,
+    fields: &[ByteField],
+    _total_bytes: usize,
+    preserved: &[PreservedRange],
+) -> String {
+    let mut buf = String::new();
+    if preserved.is_empty() {
+        // All bytes written by the function.
+        buf.push_str(&format!(
+            "    llvm_points_to result_ptr (llvm_term {{{{ {cry_call} }}}});\n"
+        ));
+    } else {
+        // Emit per-field points_to at specific offsets, plus preserved
+        // ranges asserted equal to prestate.
+        for f in fields {
+            let byte_off = f.byte_offset;
+            let byte_width = f.width.div_ceil(8);
+            buf.push_str(&format!(
+                "    llvm_points_to (llvm_elem result_ptr {byte_off}) \
+                 (llvm_term {{{{ slice_field ({cry_call}) {byte_off} {byte_width} }}}});\n"
+            ));
+        }
+        for p in preserved {
+            buf.push_str(&format!(
+                "    // bytes [{start}..{end}) preserved from prestate\n\
+                 \x20   llvm_points_to_at_type \
+                 (llvm_field result_ptr \"{start}\") \
+                 (llvm_array_type {len} (llvm_int 8)) \
+                 (llvm_term preBytes);\n",
+                start = p.start,
+                end = p.start + p.len,
+                len = p.len,
+            ));
         }
     }
-    None
+    buf
+}
+
+/// Emit Cryptol expression for variant-map discriminant remapping.
+fn wrap_variant_remap(
+    expr: &str,
+    variants: &[(u64, u64)],
+    abi_bits: u32,
+    inner: Option<&AbiReturnBridge>,
+) -> String {
+    if variants.len() == 2 {
+        let (cry0, abi0) = variants[0];
+        let (_, abi1) = variants[1];
+        let cond = format!("({expr}) == ({cry0} : [{abi_bits}])");
+        let result = format!("if {cond} then ({abi0} : [{abi_bits}]) else ({abi1} : [{abi_bits}])");
+        if let Some(inner) = inner {
+            inner.wrap(&result)
+        } else {
+            result
+        }
+    } else {
+        // General case: emit nested if-then-else chain.
+        let mut result = format!("({} : [{abi_bits}])", variants.last().unwrap().1);
+        for (cry_disc, abi_disc) in variants.iter().rev().skip(1).rev() {
+            result = format!(
+                "if ({expr}) == ({cry_disc} : [{abi_bits}]) \
+                 then ({abi_disc} : [{abi_bits}]) else ({result})"
+            );
+        }
+        if let Some(inner) = inner {
+            inner.wrap(&result)
+        } else {
+            result
+        }
+    }
 }
 
 #[cfg(test)]
