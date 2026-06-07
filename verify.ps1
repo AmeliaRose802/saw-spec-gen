@@ -158,6 +158,18 @@ $bcFile   = Join-Path $OutputDir "$baseName.bc"
 $llFile   = Join-Path $OutputDir "$baseName.ll"
 $astFile  = Join-Path $OutputDir "${baseName}_ast.json"
 
+# ── Shared-artifact cache (compile + AST dump + filter) ───────────────────────
+# Steps 1-2.5 don't depend on which Cryptol function we verify, so cache them
+# across the per-function calls pretty-specs/pipeline.ps1 makes. See
+# scripts/ast-cache.ps1 for the full rationale and cache-key derivation.
+. (Join-Path $ScriptRoot 'scripts/ast-cache.ps1')
+$cacheCtx = Get-AstCacheContext -CppFile $CppFile -IncludeDirs $IncludeDirs `
+    -UserClangFlags $userClangFlags -LlvmTarget $llvmTarget -OutputDir $OutputDir `
+    -BaseName $baseName -BcFile $bcFile -LlFile $llFile -AstFile $astFile
+$llFile = $cacheCtx.LlFile
+
+if (-not $cacheCtx.Hit) {
+
 # ── Step 1: Compile C++ → LLVM bitcode ────────────────────────────────────────
 Write-Host ""
 Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Cyan
@@ -244,6 +256,11 @@ if ($astSizeMb -gt 10) {
     $astSizeMbAfter = [math]::Round((Get-Item $astFile).Length / 1MB, 1)
     Write-Host "  → $astFile (${astSizeMbAfter} MB after filter, was ${astSizeMb} MB)" -ForegroundColor Green
 }
+
+# ── Populate shared cache so the next function reuses these artifacts ──────────
+Save-AstCache -Ctx $cacheCtx -BcFile $bcFile -LlFile $llFile -AstFile $astFile
+
+}  # end: if (-not cache hit) — Steps 1-2.5 produce cacheable, function-independent artifacts
 
 # ── Step 3: Generate specs + verify.saw ────────────────────────────────────────
 Write-Host ""
