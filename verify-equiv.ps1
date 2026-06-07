@@ -72,6 +72,17 @@ $CryptolSpec = Resolve-Path $CryptolSpec
 $ScriptRoot  = $PSScriptRoot
 $cppBase     = [System.IO.Path]::GetFileNameWithoutExtension($CppFile)
 
+if ($PSBoundParameters.ContainsKey('Function') -and
+    $PSBoundParameters.ContainsKey('CppFunction') -and
+    $CppFunction -ne $Function) {
+    throw "-Function ('$Function') and -CppFunction ('$CppFunction') conflict. Use one shared name, or omit -Function."
+}
+if ($PSBoundParameters.ContainsKey('Function') -and
+    $PSBoundParameters.ContainsKey('RustFunction') -and
+    $RustFunction -ne $Function) {
+    throw "-Function ('$Function') and -RustFunction ('$RustFunction') conflict. Use one shared name, or omit -Function."
+}
+
 if (-not $CppFunction)  { $CppFunction  = $Function }
 if (-not $RustFunction) { $RustFunction = $Function }
 if (-not $CppFunction -or -not $RustFunction) {
@@ -211,11 +222,11 @@ function Write-EquivResultJson([string]$verdict) {
     } elseif ($rustResult -and $rustResult.verdict -eq 'DISPROVED' -and $rustResult.counterexample) {
         $cex = @($rustResult.counterexample)
     }
-    $equivFunction = if ($CppFunction -eq $RustFunction) { $CppFunction } else { "$CppFunction | $RustFunction" }
+    $functionDisplayValue = if ($CppFunction -eq $RustFunction) { $CppFunction } else { "$CppFunction | $RustFunction" }
     Write-VerifyResult `
         -OutputDir      $OutputDir `
         -Side           'equiv' `
-        -Function       $equivFunction `
+        -Function       $functionDisplayValue `
         -CryptolFn      $CryptolFn `
         -Verdict        $verdict `
         -Counterexample $cex `
