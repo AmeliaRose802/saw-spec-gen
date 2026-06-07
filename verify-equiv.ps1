@@ -33,7 +33,13 @@
     Name of the Cryptol function to check both sides against.
 
 .PARAMETER Function
-    Name of the C++/Rust function (must be the same identifier on both sides).
+    Shared function name used for both sides (back-compat shortcut).
+
+.PARAMETER CppFunction
+    Name of the C++ function. Defaults to -Function when omitted.
+
+.PARAMETER RustFunction
+    Name of the Rust function. Defaults to -Function when omitted.
 
 .PARAMETER OutputDir
     Optional output directory; default: out_equiv_<cpp_basename>/ next to .cpp.
@@ -52,7 +58,9 @@ param(
     [Parameter(Mandatory)][string]$RustFile,
     [Parameter(Mandatory)][string]$CryptolSpec,
     [Parameter(Mandatory)][string]$CryptolFn,
-    [Parameter(Mandatory)][string]$Function,
+    [string]$Function,
+    [string]$CppFunction,
+    [string]$RustFunction,
     [string]$OutputDir
 )
 
@@ -63,6 +71,23 @@ $RustFile    = Resolve-Path $RustFile
 $CryptolSpec = Resolve-Path $CryptolSpec
 $ScriptRoot  = $PSScriptRoot
 $cppBase     = [System.IO.Path]::GetFileNameWithoutExtension($CppFile)
+
+if ($PSBoundParameters.ContainsKey('Function') -and
+    $PSBoundParameters.ContainsKey('CppFunction') -and
+    $CppFunction -ne $Function) {
+    throw "-Function ('$Function') and -CppFunction ('$CppFunction') conflict. Use one shared name, or omit -Function."
+}
+if ($PSBoundParameters.ContainsKey('Function') -and
+    $PSBoundParameters.ContainsKey('RustFunction') -and
+    $RustFunction -ne $Function) {
+    throw "-Function ('$Function') and -RustFunction ('$RustFunction') conflict. Use one shared name, or omit -Function."
+}
+if (-not $Function -and ((-not $CppFunction) -or (-not $RustFunction))) {
+    throw "Provide -Function, or provide both -CppFunction and -RustFunction."
+}
+
+if (-not $CppFunction)  { $CppFunction  = $Function }
+if (-not $RustFunction) { $RustFunction = $Function }
 
 if (-not $OutputDir) {
     $OutputDir = Join-Path (Split-Path $CppFile) "out_equiv_${cppBase}"
@@ -79,14 +104,14 @@ $rustOutDir = Join-Path $OutputDir "rust"
 # ════════════════════════════════════════════════════════════════════════════════
 Write-Host ""
 Write-Host "████████████████████████████████████████████████████████" -ForegroundColor Magenta
-Write-Host "  C++ side: prove $Function (C++)  ≡  $CryptolFn (Cryptol)" -ForegroundColor Magenta
+Write-Host "  C++ side: prove $CppFunction (C++)  ≡  $CryptolFn (Cryptol)" -ForegroundColor Magenta
 Write-Host "████████████████████████████████████████████████████████" -ForegroundColor Magenta
 
 & (Join-Path $ScriptRoot "verify.ps1") `
     -CppFile     $CppFile `
     -CryptolSpec $CryptolSpec `
     -CryptolFn   $CryptolFn `
-    -Function    $Function `
+    -Function    $CppFunction `
     -OutputDir   $cppOutDir
 $cppExit = $LASTEXITCODE
 
@@ -95,14 +120,14 @@ $cppExit = $LASTEXITCODE
 # ════════════════════════════════════════════════════════════════════════════════
 Write-Host ""
 Write-Host "████████████████████████████████████████████████████████" -ForegroundColor Magenta
-Write-Host "  Rust side: prove $Function (Rust) ≡  $CryptolFn (Cryptol)" -ForegroundColor Magenta
+Write-Host "  Rust side: prove $RustFunction (Rust) ≡  $CryptolFn (Cryptol)" -ForegroundColor Magenta
 Write-Host "████████████████████████████████████████████████████████" -ForegroundColor Magenta
 
 & (Join-Path $ScriptRoot "verify-rust.ps1") `
     -RustFile    $RustFile `
     -CryptolSpec $CryptolSpec `
     -CryptolFn   $CryptolFn `
-    -Function    $Function `
+    -Function    $RustFunction `
     -OutputDir   $rustOutDir
 $rustExit = $LASTEXITCODE
 
@@ -144,7 +169,8 @@ $cppOk  = ($cppVerdict  -eq "VERIFIED")
 $rustOk = ($rustVerdict -eq "VERIFIED")
 
 Write-Host ""
-Write-Host "  Function:      $Function" -ForegroundColor White
+Write-Host "  C++ function:  $CppFunction" -ForegroundColor White
+Write-Host "  Rust function: $RustFunction" -ForegroundColor White
 Write-Host "  Cryptol spec:  $CryptolFn" -ForegroundColor White
 Write-Host ""
 
@@ -196,15 +222,24 @@ function Write-EquivResultJson([string]$verdict) {
     } elseif ($rustResult -and $rustResult.verdict -eq 'DISPROVED' -and $rustResult.counterexample) {
         $cex = @($rustResult.counterexample)
     }
+    $functionDisplayValue = if ($CppFunction -eq $RustFunction) { $CppFunction } else { "$CppFunction vs $RustFunction" }
     Write-VerifyResult `
         -OutputDir      $OutputDir `
         -Side           'equiv' `
-        -Function       $Function `
+        -Function       $functionDisplayValue `
         -CryptolFn      $CryptolFn `
         -Verdict        $verdict `
         -Counterexample $cex `
         -Solver         'z3' `
         -ImplFile       ((Split-Path -Leaf $CppFile) + ' | ' + (Split-Path -Leaf $RustFile))
+
+    $equivResultPath = Join-Path $OutputDir 'result.json'
+    if (Test-Path $equivResultPath) {
+        $equivPayload = Get-Content $equivResultPath -Raw | ConvertFrom-Json
+        $equivPayload | Add-Member -NotePropertyName 'cpp_function'  -NotePropertyValue $CppFunction  -Force
+        $equivPayload | Add-Member -NotePropertyName 'rust_function' -NotePropertyValue $RustFunction -Force
+        $equivPayload | ConvertTo-Json -Depth 6 | Set-Content -Path $equivResultPath -Encoding utf8
+    }
 }
 
 if ($cppOk -and $rustOk) {
