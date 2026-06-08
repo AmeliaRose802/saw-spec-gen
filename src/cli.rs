@@ -338,8 +338,12 @@ pub enum Commands {
     ///
     /// * `verify_rust.saw` — runnable SAW script
     /// * `verify_rust.meta.json` — mangled name, arg bit widths,
-    ///   globals; consumed by `verify-rust.ps1` for counterexample
-    ///   pretty-printing.
+    ///   globals; consumed by `verify-rust.ps1`.
+    ///
+    /// `async fn` is detected automatically: when the IR contains a
+    /// `_RNC`-prefixed coroutine resume symbol for `--function`, the
+    /// command targets the resume body and emits a `mir_verify` script
+    /// instead. Pass `.linked-mir.json` as `--bitcode` in that case.
     ///
     /// Usage: saw-spec-gen gen-verify-rust \
     ///          --llvm-ir add_one.ll --bitcode add_one.bc \
@@ -352,7 +356,7 @@ pub enum Commands {
         llvm_ir: PathBuf,
 
         /// Path to the LLVM bitcode (`.bc`) the SAW script will
-        /// `llvm_load_module`.
+        /// `llvm_load_module` (or `.linked-mir.json` for async fns).
         #[arg(long)]
         bitcode: PathBuf,
 

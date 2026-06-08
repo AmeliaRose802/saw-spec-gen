@@ -2,8 +2,9 @@
 //!
 //! Produces a SAW verification script + meta sidecar that lets
 //! `verify-rust.ps1` prove a Rust function matches a hand-written
-//! Cryptol spec. Now supports sret, aggregate returns, range
-//! preconditions, buffer overrides, and `--spec-only-on-missing`.
+//! Cryptol spec. Supports sret, aggregate returns, range preconditions,
+//! buffer overrides, `--spec-only-on-missing`, and automatic async
+//! detection (coroutine resume verification via `mir_verify`).
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::json;
@@ -14,12 +15,18 @@ use std::path::Path;
 use crate::buffer_overrides::BufferOverrides;
 use crate::constraints::TypeInfo;
 use crate::gen_verify_helpers::emit_spec_only_result;
+use crate::gen_verify_rust_async;
 use crate::gen_verify_rust_emit::{self, RustReturnKind, RustVerifyArtifacts, RustVerifyParam};
 use crate::parsers::llvm_ir::extract_functions;
 
-/// Run the `gen-verify-rust` subcommand. Writes `verify_rust.saw`
-/// and `verify_rust.meta.json` into `output`, and copies the Cryptol
-/// spec next to them.
+/// Run the `gen-verify-rust` subcommand. Writes `verify_rust.saw` and
+/// `verify_rust.meta.json` into `output`, and copies the Cryptol spec.
+///
+/// Automatically detects whether `function` is an `async fn` by scanning
+/// the IR for a `_RNC`-prefixed coroutine resume symbol. When one is found
+/// the command targets the resume body and emits a `mir_verify` script;
+/// `bitcode` should then be the `.linked-mir.json` from `cargo-saw-build`
+/// / `mir-json --link-mir`.
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     llvm_ir: &Path,
@@ -43,14 +50,6 @@ pub fn run(
     let ir =
         fs::read_to_string(llvm_ir).with_context(|| format!("reading {}", llvm_ir.display()))?;
 
-    let arts = match resolve_target(&ir, function) {
-        Ok(a) => a,
-        Err(e) if spec_only_on_missing => {
-            return emit_spec_only_result(output, cryptol_fn, function, &format!("{e:#}"));
-        }
-        Err(e) => return Err(e),
-    };
-
     let cry_name = cryptol_spec
         .file_name()
         .ok_or_else(|| anyhow!("--cryptol-spec has no file name"))?
@@ -70,6 +69,26 @@ pub fn run(
         .ok_or_else(|| anyhow!("--bitcode has no file name"))?
         .to_string_lossy()
         .into_owned();
+
+    if has_resume_symbol(&ir, function) {
+        return run_async(
+            &ir,
+            function,
+            cryptol_fn,
+            &bc_name,
+            &cry_name,
+            output,
+            spec_only_on_missing,
+        );
+    }
+
+    let arts = match resolve_target(&ir, function) {
+        Ok(a) => a,
+        Err(e) if spec_only_on_missing => {
+            return emit_spec_only_result(output, cryptol_fn, function, &format!("{e:#}"));
+        }
+        Err(e) => return Err(e),
+    };
 
     let saw_path = output.join("verify_rust.saw");
     let saw_text = gen_verify_rust_emit::emit_saw_script(
@@ -103,7 +122,6 @@ pub fn run(
     meta_text.push('\n');
     fs::write(&meta_path, meta_text).with_context(|| format!("writing {}", meta_path.display()))?;
 
-    // Friendly stdout summary mirroring the old PowerShell trace.
     println!("  → mangled symbol: {}", arts.mangled_name);
     let sig = arts
         .params
@@ -124,6 +142,93 @@ pub fn run(
     Ok(())
 }
 
+/// Async handler: resolves coroutine resume, emits `mir_verify` script.
+fn run_async(
+    ir: &str,
+    function: &str,
+    cryptol_fn: &str,
+    mir_module: &str,
+    cry_name: &str,
+    output: &Path,
+    spec_only_on_missing: bool,
+) -> Result<()> {
+    let constructor = match resolve_target(ir, function) {
+        Ok(a) => a,
+        Err(e) if spec_only_on_missing => {
+            return emit_spec_only_result(output, cryptol_fn, function, &format!("{e:#}"));
+        }
+        Err(e) => return Err(e),
+    };
+
+    let return_bits = constructor.return_bits();
+    let resume_info = match gen_verify_rust_async::resolve_resume_symbol(
+        ir,
+        function,
+        constructor.params,
+        return_bits,
+    ) {
+        Ok(i) => i,
+        Err(e) if spec_only_on_missing => {
+            return emit_spec_only_result(output, cryptol_fn, function, &format!("{e:#}"));
+        }
+        Err(e) => return Err(e),
+    };
+
+    let saw_path = output.join("verify_rust.saw");
+    let saw_text = gen_verify_rust_async::emit_async_mir_saw_script(
+        function,
+        cryptol_fn,
+        mir_module,
+        cry_name,
+        &resume_info,
+    );
+    fs::write(&saw_path, &saw_text).with_context(|| format!("writing {}", saw_path.display()))?;
+
+    let meta_path = output.join("verify_rust.meta.json");
+    let meta = json!({
+        "schema_version": 1,
+        "function": function,
+        "cryptol_fn": cryptol_fn,
+        "async": true,
+        "resume_symbol": resume_info.resume_symbol,
+        "params": resume_info.original_params.iter().map(|p| json!({
+            "index": p.index,
+            "name": p.name,
+            "bits": p.bits,
+            "llvm_type": p.llvm_type,
+        })).collect::<Vec<_>>(),
+        "return_bits": resume_info.return_bits,
+        "sub_await_stubs": resume_info.sub_await_stubs,
+    });
+    let mut meta_text = serde_json::to_string_pretty(&meta)?;
+    meta_text.push('\n');
+    fs::write(&meta_path, &meta_text)
+        .with_context(|| format!("writing {}", meta_path.display()))?;
+
+    println!("  → async mode: targeting coroutine resume");
+    println!("  → resume symbol: {}", resume_info.resume_symbol);
+    if !resume_info.sub_await_stubs.is_empty() {
+        println!(
+            "  → {} .await sub-poll stub(s) detected",
+            resume_info.sub_await_stubs.len()
+        );
+    }
+    println!("  → wrote {}", saw_path.display());
+    println!("  → wrote {}", meta_path.display());
+    Ok(())
+}
+
+/// Returns `true` when the IR contains at least one `_RNC`-prefixed function
+/// (coroutine resume closure) whose mangled name includes `<len><function>`.
+/// Used to auto-detect `async fn` without requiring an explicit flag.
+fn has_resume_symbol(ir: &str, function: &str) -> bool {
+    let needle = format!("{}{}", function.len(), function);
+    ir.lines().any(|line| {
+        let t = line.trim();
+        t.starts_with("define ") && t.contains("@_RNC") && t.contains(&needle)
+    })
+}
+
 /// A candidate target function with its resolved type information.
 struct ResolvedCandidate {
     name: String,
@@ -132,15 +237,9 @@ struct ResolvedCandidate {
     return_llvm_type: String,
 }
 
-/// Walk the IR text and resolve the mangled symbol whose source name
-/// is `function`, plus its full signature + the module's mutable
-/// globals.
-///
-/// 1. Pull every `define …` line via [`extract_functions`].
-/// 2. Keep those whose mangled symbol ends with `<len><function>`.
-/// 3. Accept functions with integer params and scalar, sret, or
-///    aggregate return types. Reject ptr/void-only shims.
-/// 4. Pick the shortest remaining symbol; bail on a tie.
+/// Walk the IR text and resolve the mangled symbol for `function`.
+/// Accepts integer-param functions with scalar/sret/aggregate return;
+/// rejects ptr-only shims. Picks shortest match; bails on a tie.
 fn resolve_target(ir: &str, function: &str) -> Result<RustVerifyArtifacts> {
     let funcs = extract_functions(ir, None).context("parsing LLVM IR functions")?;
     let suffix = format!("{}{}", function.len(), function);
@@ -159,7 +258,6 @@ fn resolve_target(ir: &str, function: &str) -> Result<RustVerifyArtifacts> {
         );
     }
 
-    // Parse range attributes from raw IR lines for each candidate.
     let range_map = parse_range_attrs(ir, &suffix);
 
     let mut candidates: Vec<ResolvedCandidate> = Vec::new();
@@ -211,15 +309,12 @@ fn resolve_target(ir: &str, function: &str) -> Result<RustVerifyArtifacts> {
     })
 }
 
-/// Try to build a [`ResolvedCandidate`] from a parsed function.
-/// Returns `None` if the signature is incompatible (e.g. ptr-only
-/// drop glue, void without sret).
+/// Build a [`ResolvedCandidate`]; returns `None` for incompatible signatures.
 fn try_resolve_candidate(
     f: &crate::constraints::FunctionInfo,
     range_map: &std::collections::HashMap<String, Vec<Option<(u64, u64)>>>,
 ) -> Option<ResolvedCandidate> {
     let ranges = range_map.get(&f.name);
-    // Collect params — must all be integer-typed
     let mut params = Vec::new();
     for (i, p) in f.params.iter().enumerate() {
         let bits = type_int_bits(&p.ty)?;
@@ -232,7 +327,6 @@ fn try_resolve_candidate(
             range,
         });
     }
-    // Determine return kind
     let return_kind = classify_return(&f.return_type)?;
     let return_llvm_type = format_return_llvm_type(&return_kind);
     Some(ResolvedCandidate {
@@ -254,13 +348,11 @@ fn classify_return(ty: &TypeInfo) -> Option<RustReturnKind> {
             size_bytes,
             fields,
         } => {
-            // Try aggregate (all fields are iN)
             let field_bits: Option<Vec<u32>> =
                 fields.iter().map(|(_, ft)| type_int_bits(ft)).collect();
             if let Some(fb) = field_bits {
                 return Some(RustReturnKind::Aggregate { field_bits: fb });
             }
-            // Fallback: sret with known size
             if let Some(sz) = size_bytes {
                 if *sz > 0 {
                     return Some(RustReturnKind::Sret {
@@ -290,8 +382,7 @@ fn format_return_llvm_type(kind: &RustReturnKind) -> String {
     }
 }
 
-/// Width in bits of an `iN`-shaped [`TypeInfo`], or `None` for any
-/// other type.
+/// Width in bits of an `iN`-shaped [`TypeInfo`], or `None`.
 fn type_int_bits(t: &TypeInfo) -> Option<u32> {
     match t {
         TypeInfo::Bool => Some(1),
@@ -300,9 +391,7 @@ fn type_int_bits(t: &TypeInfo) -> Option<u32> {
     }
 }
 
-/// Parse `range(lo, hi)` parameter attributes from IR define lines
-/// for functions matching `suffix`. Returns a map from mangled name
-/// to per-param optional range bounds.
+/// Parse `range(lo, hi)` attributes from IR define lines matching `suffix`.
 fn parse_range_attrs(
     ir: &str,
     suffix: &str,
@@ -322,8 +411,7 @@ fn parse_range_attrs(
         let name = &trimmed[at_pos + 1..at_pos + paren_pos];
         if !name.ends_with(suffix) {
             continue;
-        }
-        // Find matching close paren (respecting nesting).
+        };
         let open = at_pos + paren_pos;
         let Some(close) = find_matching_close(trimmed, open) else {
             continue;
