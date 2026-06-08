@@ -21,8 +21,10 @@
 //!    `[K][T]` parameter that has no existing size annotation.
 
 use crate::constraints::container_layouts::ContainerCatalog;
-use crate::constraints::{length_binding, struct_shape_recognizer, FunctionInfo};
+use crate::constraints::container_layouts_derive::derive_catalog_from_structs;
+use crate::constraints::{length_binding, struct_shape_recognizer, FunctionInfo, TypeInfo};
 use crate::parsers::cryptol_poly_sig;
+use std::collections::HashMap;
 use std::path::Path;
 
 /// Apply the struct-shape recognizer to every function unless the
@@ -46,23 +48,36 @@ pub(crate) fn apply_struct_shape_recognizer(all_functions: &mut [FunctionInfo], 
     }
 }
 
-/// Build the container-layout catalog, merging any user-supplied
-/// TOML on top of the built-in defaults.
+/// Build the container-layout catalog by merging three sources, in
+/// order of increasing priority:
 ///
-/// **Caveat:** the returned catalog is currently not consumed by the
-/// emitter — the `--container-layouts` flag is plumbed but the
-/// downstream `llvm_points_to` lowering is not wired yet. We emit a
-/// loud stderr warning whenever a user passes the flag so the no-op
-/// is not silent.
+///   1. Built-in defaults ([`ContainerCatalog::with_defaults`]).
+///   2. AST-derived layouts for every record the clang AST describes
+///      that matches the `{data_ptr, size, [capacity]}` shape. This
+///      is the saw_spec_gen-26d / 530 auto-derive path and obviates
+///      the user-supplied TOML for stdlib and most project-local
+///      container types. Skipped when `ast_structs` is empty.
+///   3. The user TOML file (if `path` is `Some`).
 ///
-/// Long-term, the TOML surface goes away entirely: the AST walker
-/// will derive layouts for every container shape (stdlib AND
-/// project-local) by extending the struct-shape recognizer to
-/// struct fields. Tracked under saw_spec_gen-530 (auto-derive),
-/// saw_spec_gen-qms (catalog -> emitter wiring), and
-/// saw_spec_gen-0nf (delete the flag + this code path).
-pub(crate) fn load_container_catalog(path: Option<&Path>) -> ContainerCatalog {
+/// The catalog is consumed by the functional STL override emitter
+/// (saw_spec_gen-i47 / qms) which uses it to confirm a recognized
+/// container shape before emitting a points-to-edit override.
+pub(crate) fn load_container_catalog(
+    path: Option<&Path>,
+    ast_structs: &HashMap<String, Vec<(String, TypeInfo)>>,
+) -> ContainerCatalog {
     let mut c = ContainerCatalog::with_defaults();
+    if !ast_structs.is_empty() {
+        let derived = derive_catalog_from_structs(ast_structs);
+        let n = derived.len();
+        c.extend_from(derived);
+        if n > 0 {
+            eprintln!(
+                "info[saw-spec-gen]: container-layout auto-derive added {n} \
+                 layout(s) from the clang AST (saw_spec_gen-26d)."
+            );
+        }
+    }
     if let Some(p) = path {
         match c.load_toml_file(p) {
             Ok(n) => eprintln!(
@@ -75,12 +90,11 @@ pub(crate) fn load_container_catalog(path: Option<&Path>) -> ContainerCatalog {
             ),
         }
         eprintln!(
-            "warning[saw-spec-gen]: --container-layouts is a no-op for \
-             verdicts in this build — the emitter does not consume the \
-             catalog yet, and the TOML surface itself is scheduled for \
-             deletion in favor of AST-driven auto-derivation. Tracked \
-             under saw_spec_gen-530 (auto-derive), saw_spec_gen-qms \
-             (wiring), and saw_spec_gen-0nf (deletion)."
+            "warning[saw-spec-gen]: --container-layouts is increasingly \
+             redundant — the AST auto-derive (saw_spec_gen-26d/530) now \
+             covers stdlib + most project-local container shapes. The \
+             TOML surface itself is scheduled for deletion under \
+             saw_spec_gen-0nf."
         );
     }
     c

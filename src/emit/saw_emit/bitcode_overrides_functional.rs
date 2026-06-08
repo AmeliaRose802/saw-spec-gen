@@ -19,6 +19,7 @@
 
 use std::collections::HashMap;
 
+use crate::constraints::container_layouts::ContainerCatalog;
 use crate::parsers::llvm_ir::IrStructDef;
 
 use super::bitcode_overrides_functional_string::{
@@ -147,11 +148,28 @@ pub struct FunctionalLayouts {
 
 impl FunctionalLayouts {
     /// Run every supported container's layout-discovery routine
-    /// against the IR struct table. Cheap (one pass).
-    pub fn discover(struct_defs: &HashMap<String, IrStructDef>) -> Self {
-        Self {
-            string: discover_string_layout(struct_defs),
-        }
+    /// against the IR struct table, gated by the AST-derived
+    /// container catalog (saw_spec_gen-qms): we only emit functional
+    /// overrides for containers whose shape the catalog independently
+    /// confirms from the clang AST. This keeps the catalog \u2014 not
+    /// hand-rolled IR string matching \u2014 the source of truth for
+    /// which container types we model functionally.
+    pub fn discover(
+        struct_defs: &HashMap<String, IrStructDef>,
+        catalog: &ContainerCatalog,
+    ) -> Self {
+        // `basic_string` is the only IR-introspected container today.
+        // The catalog seeds defaults for `std::string` so the lookup
+        // succeeds out-of-the-box; AST auto-derive also contributes
+        // `std::__cxx11::basic_string` for libstdc++ targets.
+        let string = if catalog.lookup("std::string").is_some()
+            || catalog.lookup("std::__cxx11::basic_string").is_some()
+        {
+            discover_string_layout(struct_defs)
+        } else {
+            None
+        };
+        Self { string }
     }
 }
 

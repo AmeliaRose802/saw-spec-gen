@@ -114,9 +114,29 @@ pub fn emit_string_override(
             ));
         }
         StlMethod::BasicStringData => {
-            out.push_str("    d <- llvm_fresh_pointer (llvm_int 8);\n");
-            out.push_str("    llvm_points_to (llvm_elem s 0) d;\n");
+            // SSO handling (saw_spec_gen-xzg). libstdc++ basic_string
+            // is short-string-optimized: for strings <= 15 chars
+            // `data()` returns a pointer into the embedded
+            // `_M_local_buf` (field 2 of the struct); for longer
+            // strings it returns the heap pointer stashed in
+            // `_M_dataplus._M_p` (field 0). The two branches return
+            // pointers backed by storage in completely different
+            // fields, and the discriminator is a length comparison
+            // against 15.
+            //
+            // We use the *model-agnostic* option (a) from xzg:
+            // ignore the pre-state of `s` entirely and return a
+            // fresh symbolic byte pointer. This over-approximates
+            // both SSO branches uniformly \u2014 any read through the
+            // returned pointer sees fully symbolic bytes \u2014 and
+            // avoids any cross-coupling with the `resize` / size
+            // overrides (which only write field 1). Crucially, the
+            // override has no `llvm_points_to` precondition on the
+            // string's fields, so it never fails structural matching
+            // when called against a string the caller initialized
+            // only via `resize`.
             out.push_str("    llvm_execute_func [s];\n");
+            out.push_str("    d <- llvm_fresh_pointer (llvm_int 8);\n");
             out.push_str("    llvm_return d;\n");
         }
         // Vector-family variants are handled by the vector emitter.
@@ -224,5 +244,39 @@ mod tests {
             .find("llvm_points_to (llvm_elem s 1) (llvm_term n)")
             .expect("has write");
         assert!(write_pos > exec_pos, "write must come after execute");
+    }
+
+    #[test]
+    fn emit_data_is_model_agnostic_no_prestate_points_to() {
+        // saw_spec_gen-xzg: the data() override must NOT impose a
+        // pre-state `llvm_points_to` on the string's data-pointer
+        // field, otherwise SAW's structural matcher fails for any
+        // string that was only `resize`d (which only touches the
+        // size field). The override returns a fresh symbolic byte
+        // pointer to over-approximate both SSO branches uniformly.
+        let (alias, _) = def_basic_string();
+        let layout = StringLayout {
+            alias,
+            size_field_index: 1,
+        };
+        let mut out = String::new();
+        emit_string_override(
+            &mut out,
+            StlMethod::BasicStringData,
+            &layout,
+            "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE4dataEv",
+            "ov_data_safe",
+            "ov_data",
+        );
+        // No pre-state assertion on field 0 (or any field):
+        let exec_pos = out.find("llvm_execute_func").expect("has execute");
+        let pre_slice = &out[..exec_pos];
+        assert!(
+            !pre_slice.contains("llvm_points_to"),
+            "data() pre-state must be empty for option (a); got:\n{out}",
+        );
+        // Returns a fresh symbolic byte pointer:
+        assert!(out.contains("llvm_fresh_pointer (llvm_int 8)"));
+        assert!(out.contains("llvm_return d"));
     }
 }
