@@ -12,7 +12,7 @@ use crate::gen_verify_callgraph::collect_external_call_specs;
 use crate::spec_rewrite::{apply_alias_rewrites, collect_type_sizes};
 use crate::transform::crucible_safety::SafetyAnalyzer;
 use crate::type_resolve::resolve_spec_types_quiet;
-use crate::{alias_fallbacks_ir, clang_ast, constraints, llvm_ir, saw_emit};
+use crate::{alias_fallbacks_ir, clang_ast, constraints, inventory, llvm_ir, saw_emit};
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -452,6 +452,20 @@ pub fn run(
         dump_fallback_diagnostics(&fallbacks);
     }
     apply_alias_rewrites(output, &ir_struct_sizes, &fallbacks);
+
+    let source_file = inventory::resolve_cpp_source_file(&parsed_ast, function, &target_mangled);
+    inventory::emit_fragment(
+        output,
+        function,
+        "cpp",
+        Some(target_mangled.clone()),
+        source_file,
+        cryptol_fn,
+        inventory::build_models_note(
+            !buffer_overrides.max_len_preconds_ordered().is_empty(),
+            false,
+        ),
+    )?;
 
     eprintln!("Generated verification script in {}", output.display());
     eprintln!("Run with: saw {}/verify.saw", output.display());

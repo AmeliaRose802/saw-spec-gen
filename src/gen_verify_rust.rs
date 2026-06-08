@@ -15,6 +15,7 @@ use crate::buffer_overrides::BufferOverrides;
 use crate::constraints::TypeInfo;
 use crate::gen_verify_helpers::emit_spec_only_result;
 use crate::gen_verify_rust_emit::{self, RustReturnKind, RustVerifyArtifacts, RustVerifyParam};
+use crate::inventory;
 use crate::parsers::llvm_ir::extract_functions;
 
 /// Run the `gen-verify-rust` subcommand. Writes `verify_rust.saw`
@@ -102,6 +103,19 @@ pub fn run(
     let mut meta_text = serde_json::to_string_pretty(&meta)?;
     meta_text.push('\n');
     fs::write(&meta_path, meta_text).with_context(|| format!("writing {}", meta_path.display()))?;
+
+    inventory::emit_fragment(
+        output,
+        function,
+        "rust",
+        Some(arts.mangled_name.clone()),
+        None,
+        cryptol_fn,
+        inventory::build_models_note(
+            !overrides.max_len_preconds_ordered().is_empty(),
+            variant_map.entries.contains_key("return"),
+        ),
+    )?;
 
     // Friendly stdout summary mirroring the old PowerShell trace.
     println!("  → mangled symbol: {}", arts.mangled_name);

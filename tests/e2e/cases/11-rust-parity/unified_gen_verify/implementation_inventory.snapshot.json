@@ -1,0 +1,10 @@
+{
+  "functions": [
+    {
+      "name": "add_one",
+      "lang": "rust",
+      "symbol": "<resolved>",
+      "models": "add_one_spec"
+    }
+  ]
+}
