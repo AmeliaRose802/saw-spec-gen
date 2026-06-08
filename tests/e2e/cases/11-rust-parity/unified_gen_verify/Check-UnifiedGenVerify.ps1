@@ -93,5 +93,51 @@ if ($saw1 -ne $saw2) {
     exit 1
 }
 
+# ── Aggregate inventory sidecar + snapshot check ───────────────────────────────
+$inventoryPath = Join-Path $outDir1 'implementation_inventory.json'
+& $specGen aggregate-inventory $outDir1 --output $inventoryPath 2>&1 | Write-Host
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "aggregate-inventory failed"
+    Write-Host "RESULT: DISPROVED"
+    exit 1
+}
+
+if (-not (Test-Path $inventoryPath)) {
+    Write-Error "aggregate-inventory did not emit $inventoryPath"
+    Write-Host "RESULT: DISPROVED"
+    exit 1
+}
+
+$inventory = Get-Content $inventoryPath -Raw | ConvertFrom-Json
+if (-not $inventory.functions -or $inventory.functions.Count -ne 1) {
+    Write-Error "expected 1 inventory function entry; got $($inventory.functions.Count)"
+    Write-Host "RESULT: DISPROVED"
+    exit 1
+}
+if (-not $inventory.functions[0].symbol) {
+    Write-Error "inventory symbol is missing/empty"
+    Write-Host "RESULT: DISPROVED"
+    exit 1
+}
+
+$normalized = [ordered]@{
+    functions = @(
+        [ordered]@{
+            name   = [string]$inventory.functions[0].name
+            lang   = [string]$inventory.functions[0].lang
+            symbol = '<resolved>'
+            models = [string]$inventory.functions[0].models
+        }
+    )
+}
+$snapshotPath = Join-Path $caseDir 'implementation_inventory.snapshot.json'
+$expectedJson = ((Get-Content $snapshotPath -Raw | ConvertFrom-Json) | ConvertTo-Json -Depth 8 -Compress)
+$actualJson   = ($normalized | ConvertTo-Json -Depth 8 -Compress)
+if ($actualJson -ne $expectedJson) {
+    Write-Error "implementation_inventory snapshot mismatch.`nexpected: $expectedJson`nactual:   $actualJson"
+    Write-Host "RESULT: DISPROVED"
+    exit 1
+}
+
 Write-Host "Unified and legacy gen-verify produce identical SAW scripts."
 Write-Host "RESULT: VERIFIED"

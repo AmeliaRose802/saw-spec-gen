@@ -15,6 +15,7 @@ pub mod gen_verify_callgraph;
 pub mod gen_verify_helpers;
 pub mod gen_verify_rust;
 pub mod gen_verify_rust_emit;
+pub mod inventory;
 pub mod mangle;
 
 // Grouped subsystems. Each is a folder under `src/` with its own

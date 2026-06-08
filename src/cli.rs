@@ -518,6 +518,17 @@ pub enum Commands {
         format: String,
     },
 
+    /// Aggregate `inventory.json` fragments into one
+    /// `implementation_inventory.json` sidecar.
+    AggregateInventory {
+        /// Directory to scan recursively for `inventory.json` files.
+        verify_out_dir: PathBuf,
+
+        /// Output inventory path.
+        #[arg(long, default_value = "implementation_inventory.json")]
+        output: PathBuf,
+    },
+
     /// Serialize per-function parameter / return type information and
     /// referenced struct layouts to a single `types.json` document.
     ///

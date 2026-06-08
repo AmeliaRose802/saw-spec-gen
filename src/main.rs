@@ -127,6 +127,10 @@ fn main() -> Result<()> {
             let fmt = saw_spec_gen::collect_results::ManifestFormat::parse(&format)?;
             saw_spec_gen::collect_results::run(&root, &output, cryptol_fn_map.as_deref(), fmt)
         }
+        Commands::AggregateInventory {
+            verify_out_dir,
+            output,
+        } => saw_spec_gen::inventory::aggregate_inventory(&verify_out_dir, &output),
         Commands::DumpTypes {
             ast,
             mir,

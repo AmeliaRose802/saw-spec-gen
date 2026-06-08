@@ -404,6 +404,17 @@ function Write-ResultJson($verdict, $cex, $expected, $actual) {
     Write-VerifyResult @payloadArgs
 }
 
+function Update-ImplementationInventory {
+    $inventoryRoot = Split-Path -Parent $OutputDir
+    $inventoryOut  = Join-Path $inventoryRoot 'implementation_inventory.json'
+    & $specGen aggregate-inventory $inventoryRoot --output $inventoryOut 2>&1 | Write-Host
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Failed to aggregate implementation inventory at $inventoryOut"
+    } elseif (Test-Path $inventoryOut) {
+        Write-Host "  → $inventoryOut" -ForegroundColor Green
+    }
+}
+
 if ($sawOutput -match "Counterexample") {
     Write-Host ""
     Write-Host "  RESULT: DISPROVED" -ForegroundColor Red
@@ -486,6 +497,7 @@ if ($sawOutput -match "Counterexample") {
         [PSCustomObject]@{ Name = $_.Name; Value = [string]$_.Value }
     })
     Write-ResultJson "DISPROVED" $cexForJson $expectedVal $actualVal
+    Update-ImplementationInventory
     exit 1
 } elseif ($sawOutput -match "VERIFIED") {
     Write-Host ""
@@ -496,6 +508,7 @@ if ($sawOutput -match "Counterexample") {
     Write-Host "  Equivalence   : VERIFIED by z3" -ForegroundColor Green
     Write-Host ""
     Write-ResultJson "VERIFIED" @() $null $null
+    Update-ImplementationInventory
     exit 0
 } else {
     Write-Host ""
@@ -506,5 +519,6 @@ if ($sawOutput -match "Counterexample") {
     Write-Host ""
     Write-Host $sawOutput
     Write-ResultJson "UNKNOWN" @() $null $null
+    Update-ImplementationInventory
     exit 2
 }

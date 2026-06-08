@@ -226,6 +226,54 @@ entry:
     assert!(rj.exists(), "result.json should be written");
     let content = std::fs::read_to_string(&rj).unwrap();
     assert!(content.contains("not_attempted"));
+    assert!(
+        !out.join("inventory.json").exists(),
+        "spec-only path must not emit inventory.json"
+    );
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn run_emits_inventory_fragment() {
+    let ir = "\
+define i32 @_RNvCs0_4test7add_one(i32 %x) {
+entry:
+  ret i32 0
+}
+";
+    let tmp = std::env::temp_dir().join("saw_spec_gen_test_inventory_fragment");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let ll_path = tmp.join("test.ll");
+    std::fs::write(&ll_path, ir).unwrap();
+    let cry_path = tmp.join("spec.cry");
+    std::fs::write(&cry_path, "add_one_spec : [32] -> [32]\nadd_one_spec x = x").unwrap();
+    let bc_path = tmp.join("test.bc");
+    std::fs::write(&bc_path, b"BC").unwrap();
+    let out = tmp.join("out");
+
+    crate::gen_verify_rust::run(
+        &ll_path,
+        &bc_path,
+        &cry_path,
+        "add_one_spec",
+        "add_one",
+        &out,
+        false,
+        &BufferOverrides::default(),
+        &crate::gen_verify_rust_emit::VariantMap::default(),
+    )
+    .unwrap();
+
+    let inventory_text = std::fs::read_to_string(out.join("inventory.json")).unwrap();
+    let inventory: serde_json::Value = serde_json::from_str(&inventory_text).unwrap();
+    assert_eq!(inventory["name"], "add_one");
+    assert_eq!(inventory["lang"], "rust");
+    assert_eq!(inventory["models"], "add_one_spec");
+    assert!(
+        inventory["symbol"].as_str().unwrap().contains("add_one"),
+        "expected resolved mangled symbol in inventory.json"
+    );
     let _ = std::fs::remove_dir_all(&tmp);
 }
 

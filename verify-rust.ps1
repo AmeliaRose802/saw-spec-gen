@@ -274,6 +274,17 @@ function Write-ResultJson($verdict, $cex, $expected, $actual) {
     Write-VerifyResult @payloadArgs
 }
 
+function Update-ImplementationInventory {
+    $inventoryRoot = Split-Path -Parent $OutputDir
+    $inventoryOut  = Join-Path $inventoryRoot 'implementation_inventory.json'
+    & $specGen aggregate-inventory $inventoryRoot --output $inventoryOut 2>&1 | Write-Host
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Failed to aggregate implementation inventory at $inventoryOut"
+    } elseif (Test-Path $inventoryOut) {
+        Write-Host "  → $inventoryOut" -ForegroundColor Green
+    }
+}
+
 if ($sawOut -match "Counterexample") {
     # ── Parse counterexample bindings (x0, x1, ...) from SAW output ─────────
     $cexPairs = @()
@@ -389,6 +400,7 @@ fn main() {
     Write-Host ""
     Write-Host "RESULT: DISPROVED"
     Write-ResultJson 'DISPROVED' $cexPairs $expectedVal $actualVal
+    Update-ImplementationInventory
     exit 1
 }
 elseif ($sawOut -match "VERIFIED") {
@@ -398,6 +410,7 @@ elseif ($sawOut -match "VERIFIED") {
     Write-Host ""
     Write-Host "RESULT: VERIFIED"
     Write-ResultJson 'VERIFIED' @() $null $null
+    Update-ImplementationInventory
     exit 0
 }
 else {
@@ -415,5 +428,6 @@ else {
     Write-Host ""
     Write-Host "RESULT: UNKNOWN"
     Write-ResultJson 'UNKNOWN' @() $null $null
+    Update-ImplementationInventory
     exit 2
 }
