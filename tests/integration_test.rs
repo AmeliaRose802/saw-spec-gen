@@ -295,6 +295,228 @@ fn test_rust_async_function_handling() {
     let _ = std::fs::remove_dir_all(&output_dir);
 }
 
+// ============================================================================
+// gen-verify-rust async auto-detection integration tests
+// ============================================================================
+
+/// `gen-verify-rust` must auto-detect an `async fn` from the LLVM IR
+/// (no extra flag required) and emit a `mir_verify` script targeting
+/// the `_RNC`-prefixed coroutine resume symbol.
+#[test]
+fn test_gen_verify_rust_async_auto_detect() {
+    let output_dir = std::env::temp_dir().join("saw_spec_gen_integ_gvr_async_detect");
+    let _ = std::fs::remove_dir_all(&output_dir);
+
+    // Dummy bitcode file (gen-verify-rust uses only its filename for the script).
+    let bc_path = std::env::temp_dir().join("async_add_one_dummy.bc");
+    let _ = std::fs::write(&bc_path, b"BC");
+
+    let status = Command::new(saw_spec_gen_binary())
+        .args([
+            "gen-verify-rust",
+            "--llvm-ir",
+            "tests/fixtures/async_add_one.ll",
+            "--bitcode",
+            bc_path.to_str().unwrap(),
+            "--cryptol-spec",
+            "tests/fixtures/async_add_one_spec.cry",
+            "--cryptol-fn",
+            "add_one_spec",
+            "--function",
+            "add_one",
+            "--output",
+            output_dir.to_str().unwrap(),
+        ])
+        .status()
+        .expect("Failed to run saw-spec-gen");
+
+    assert!(status.success(), "gen-verify-rust exited with error");
+
+    // Script must exist.
+    let saw_path = output_dir.join("verify_rust.saw");
+    assert!(saw_path.exists(), "verify_rust.saw not generated");
+
+    let saw = std::fs::read_to_string(&saw_path).unwrap();
+
+    // Must be a mir_verify script (async path), not llvm_verify (sync path).
+    assert!(
+        saw.contains("mir_verify"),
+        "missing mir_verify in async SAW script:\n{saw}"
+    );
+    assert!(
+        !saw.contains("llvm_verify"),
+        "async script must not use llvm_verify:\n{saw}"
+    );
+
+    // Must target the _RNC resume symbol.
+    assert!(
+        saw.contains("_RNCNvCs1234_8async_fn7add_one0Bc_"),
+        "missing _RNC resume symbol in mir_verify call:\n{saw}"
+    );
+
+    let _ = std::fs::remove_file(&bc_path);
+    let _ = std::fs::remove_dir_all(&output_dir);
+}
+
+/// meta.json must carry `"async": true` and `"resume_symbol"` when the
+/// async path is taken.
+#[test]
+fn test_gen_verify_rust_async_meta_json() {
+    let output_dir = std::env::temp_dir().join("saw_spec_gen_integ_gvr_async_meta");
+    let _ = std::fs::remove_dir_all(&output_dir);
+
+    let bc_path = std::env::temp_dir().join("async_add_one_meta_dummy.bc");
+    let _ = std::fs::write(&bc_path, b"BC");
+
+    Command::new(saw_spec_gen_binary())
+        .args([
+            "gen-verify-rust",
+            "--llvm-ir",
+            "tests/fixtures/async_add_one.ll",
+            "--bitcode",
+            bc_path.to_str().unwrap(),
+            "--cryptol-spec",
+            "tests/fixtures/async_add_one_spec.cry",
+            "--cryptol-fn",
+            "add_one_spec",
+            "--function",
+            "add_one",
+            "--output",
+            output_dir.to_str().unwrap(),
+        ])
+        .status()
+        .unwrap();
+
+    let meta_path = output_dir.join("verify_rust.meta.json");
+    assert!(meta_path.exists(), "verify_rust.meta.json not generated");
+
+    let meta = std::fs::read_to_string(&meta_path).unwrap();
+
+    assert!(
+        meta.contains("\"async\": true"),
+        "meta.json must have async=true: {meta}"
+    );
+    assert!(
+        meta.contains("_RNC"),
+        "meta.json resume_symbol must contain _RNC: {meta}"
+    );
+    assert!(
+        meta.contains("\"function\": \"add_one\""),
+        "meta.json must record the source function name: {meta}"
+    );
+
+    let _ = std::fs::remove_file(&bc_path);
+    let _ = std::fs::remove_dir_all(&output_dir);
+}
+
+/// The generated `mir_verify` script must contain `BEGIN_PROOF` and `VERIFIED`
+/// so the harness correctly classifies a SAW run as VERIFIED.
+#[test]
+fn test_gen_verify_rust_async_saw_proof_tokens() {
+    let output_dir = std::env::temp_dir().join("saw_spec_gen_integ_gvr_async_tokens");
+    let _ = std::fs::remove_dir_all(&output_dir);
+
+    let bc_path = std::env::temp_dir().join("async_add_one_tokens_dummy.bc");
+    let _ = std::fs::write(&bc_path, b"BC");
+
+    Command::new(saw_spec_gen_binary())
+        .args([
+            "gen-verify-rust",
+            "--llvm-ir",
+            "tests/fixtures/async_add_one.ll",
+            "--bitcode",
+            bc_path.to_str().unwrap(),
+            "--cryptol-spec",
+            "tests/fixtures/async_add_one_spec.cry",
+            "--cryptol-fn",
+            "add_one_spec",
+            "--function",
+            "add_one",
+            "--output",
+            output_dir.to_str().unwrap(),
+        ])
+        .status()
+        .unwrap();
+
+    let saw = std::fs::read_to_string(output_dir.join("verify_rust.saw")).unwrap();
+
+    assert!(
+        saw.contains("BEGIN_PROOF add_one"),
+        "missing BEGIN_PROOF token:\n{saw}"
+    );
+    assert!(
+        saw.contains("PROVED add_one"),
+        "missing PROVED token:\n{saw}"
+    );
+    assert!(saw.contains("VERIFIED"), "missing VERIFIED token:\n{saw}");
+
+    let _ = std::fs::remove_file(&bc_path);
+
+    let _ = std::fs::remove_dir_all(&output_dir);
+}
+
+/// A sync (non-async) function in the same IR must still produce an
+/// `llvm_verify` script, not a `mir_verify` script.  Ensures that
+/// async detection doesn't over-fire.
+#[test]
+fn test_gen_verify_rust_sync_unaffected_by_async_detection() {
+    // Write a minimal IR with only a sync function (no _RNC symbol).
+    let ir = "\
+define i32 @_RNvCs0_4test7add_one(i32 %x) unnamed_addr {
+entry:
+  ret i32 0
+}
+";
+    let tmp = std::env::temp_dir().join("saw_spec_gen_integ_gvr_sync_check");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    let ll_path = tmp.join("sync.ll");
+    std::fs::write(&ll_path, ir).unwrap();
+    let bc_path = tmp.join("sync.bc");
+    std::fs::write(&bc_path, b"BC").unwrap();
+    let cry_path = tmp.join("spec.cry");
+    std::fs::write(
+        &cry_path,
+        "add_one_spec : [32] -> [32]\nadd_one_spec x = x + 1\n",
+    )
+    .unwrap();
+    let out = tmp.join("out");
+
+    let status = Command::new(saw_spec_gen_binary())
+        .args([
+            "gen-verify-rust",
+            "--llvm-ir",
+            ll_path.to_str().unwrap(),
+            "--bitcode",
+            bc_path.to_str().unwrap(),
+            "--cryptol-spec",
+            cry_path.to_str().unwrap(),
+            "--cryptol-fn",
+            "add_one_spec",
+            "--function",
+            "add_one",
+            "--output",
+            out.to_str().unwrap(),
+        ])
+        .status()
+        .unwrap();
+
+    assert!(status.success(), "sync gen-verify-rust must succeed");
+
+    let saw = std::fs::read_to_string(out.join("verify_rust.saw")).unwrap();
+    assert!(
+        saw.contains("llvm_verify"),
+        "sync path must use llvm_verify:\n{saw}"
+    );
+    assert!(
+        !saw.contains("mir_verify"),
+        "sync path must not use mir_verify:\n{saw}"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 #[test]
 fn test_rust_filter_functions() {
     let output_dir = std::env::temp_dir().join("saw_spec_gen_integ_rust_filter");

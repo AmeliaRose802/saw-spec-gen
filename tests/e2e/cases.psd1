@@ -323,6 +323,13 @@
            Script = 'tests/e2e/cases/11-rust-parity/return_narrowing/Check-ReturnNarrowing.ps1';
            ScriptArgs = @{} }
 
+        # async fn auto-detection: gen-verify-rust auto-detects the _RNC
+        # coroutine resume symbol and emits a mir_verify script targeting
+        # the resume body — no --async flag required.
+        @{ Tag = 'rust_parity'; Runner = 'custom'; Expected = 'VERIFIED';
+           Script = 'tests/e2e/cases/11-rust-parity/async_detect/Check-AsyncDetect.ps1';
+           ScriptArgs = @{} }
+
         # unified gen-verify: gen-verify --lang rust produces identical output
         # to gen-verify-rust.
         @{ Tag = 'rust_parity'; Runner = 'custom'; Expected = 'VERIFIED';
