@@ -53,6 +53,7 @@
 //! ov_my_log <- llvm_unsafe_assume_spec m "my_log" ov_my_log_spec;
 //! ```
 
+use crate::constraints::container_layouts::ContainerCatalog;
 use crate::constraints::{GlobalVarInfo, TypeInfo};
 use crate::parsers::llvm_ir::struct_defs;
 use crate::transform::extern_override_scan::{self, BrokenReason, OverrideTarget};
@@ -97,6 +98,7 @@ pub fn scan_and_emit(
     target_symbol: &str,
     already_covered: &[String],
     all_globals: &[GlobalVarInfo],
+    container_catalog: &ContainerCatalog,
 ) -> EmittedBitcodeOverrides {
     let Some(path) = llvm_ir_path else {
         return EmittedBitcodeOverrides::empty();
@@ -126,10 +128,14 @@ pub fn scan_and_emit(
         .cloned()
         .collect();
     // Pre-discover container layouts so the functional STL emitter can
-    // dispatch on canonical method names. This is cheap (one IR scan)
-    // and shared across every target in this script.
+    // dispatch on canonical method names. The discovery is gated by
+    // the AST-derived `ContainerCatalog` (saw_spec_gen-qms): we only
+    // emit a functional override for a container whose shape the
+    // catalog has independently confirmed from the clang AST. This
+    // means the catalog — not ad-hoc IR-string matching — is the
+    // source of truth for which containers we model.
     let struct_table = struct_defs(&ir_text);
-    let layouts = FunctionalLayouts::discover(&struct_table);
+    let layouts = FunctionalLayouts::discover(&struct_table, container_catalog);
     let emitted = emit_overrides(&targets, already_covered, &mutable_globals, &layouts);
     if !emitted.is_empty() {
         eprintln!(

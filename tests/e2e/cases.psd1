@@ -297,6 +297,12 @@
         # the wrong case writes the wrong length on purpose.
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/string_size_havoc';      File = 'add_one_verified.cpp';  Expected = 'VERIFIED' }
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/string_size_havoc';      File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
+        # std::string SSO regression (saw_spec_gen-xzg): exercises
+        # `basic_string::data()` on a symbolic-length string so both
+        # the SSO branch (len <= 15) and the heap branch (len > 15)
+        # flow through the override. The model-agnostic option (a)
+        # spec verifies under both branches.
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/string_data_sso';        File = 'add_one_verified.cpp';  Expected = 'VERIFIED' }
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/unique_ptr_deref_havoc'; File = 'add_one_gap_disproved.cpp';  Expected = 'DISPROVED' }
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/unique_ptr_deref_havoc'; File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
 

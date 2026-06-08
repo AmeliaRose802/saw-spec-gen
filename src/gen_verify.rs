@@ -62,11 +62,17 @@ pub fn run(
         &mut all_functions,
         no_struct_shape_recognizer,
     );
-    // The catalog is built (and the user warned) but no emitter pass
-    // consumes it yet. Wiring is tracked under saw_spec_gen-qms; the
-    // user-facing auto-derive replacement (so no TOML is ever needed)
-    // is saw_spec_gen-530.
-    let _container_catalog = crate::array_view_passes::load_container_catalog(container_layouts);
+    // Build the clang AST type context once: feeds container-layout
+    // auto-derive (saw_spec_gen-26d / 530) and is cheap to compute.
+    let type_ctx = clang_ast::build_type_ctx(&parsed_ast);
+    // Container-layout catalog (saw_spec_gen-qms wiring): merges
+    // built-in defaults, AST-derived layouts, and optional TOML. The
+    // catalog is now passed into the SAW bitcode-overrides emitter
+    // below so functional STL specs (saw_spec_gen-i47) confirm
+    // recognized container shapes against the catalog instead of
+    // re-discovering them from the IR each time.
+    let container_catalog =
+        crate::array_view_passes::load_container_catalog(container_layouts, &type_ctx.structs);
     crate::array_view_passes::apply_cryptol_length_binding(
         &mut all_functions,
         bind_cryptol_lengths,
@@ -436,6 +442,7 @@ pub fn run(
         &target_mangled,
         &already_covered,
         &all_globals,
+        &container_catalog,
     );
 
     saw_emit::emit_verification_script(
