@@ -108,7 +108,9 @@ pub struct GenVerifyArgs {
     /// alloc from the bare pointer type.
     ///
     /// Format: `NAME=SHAPE`, SHAPE = `BYTES` (byte buffer) |
-    /// `iW` (single wide scalar field) | `NxiW` (wide array).
+    /// `iW` (single wide scalar field) | `NxiW` (wide array) |
+    /// `{f1,f2,...}` (heterogeneous struct, fields are themselves
+    /// SHAPEs) | `<{f1,f2,...}>` (packed struct, no padding).
     #[arg(long = "in-buffer-size", value_name = "NAME=SHAPE", num_args = 0..)]
     pub in_buffer_size: Vec<String>,
 
@@ -121,8 +123,10 @@ pub struct GenVerifyArgs {
     /// Format: `NAME=SHAPE` or `NAME=auto`. SHAPE = `BYTES`
     /// (byte buffer, for byte-granular fields) | `iW` (a single
     /// wide scalar field, e.g. a `uint32` loaded as one i32 a byte
-    /// array can't model) | `NxiW` (wide array, e.g. `4xi32`).
-    /// `auto` keeps the inferred pointee type.
+    /// array can't model) | `NxiW` (wide array, e.g. `4xi32`) |
+    /// `{f1,f2,...}` (heterogeneous struct for mixed-width
+    /// layouts, e.g. `{16xi8,i8}` for a Uuid+bool) | `<{f1,f2,...}>`
+    /// (packed struct). `auto` keeps the inferred pointee type.
     #[arg(long = "out-buffer-param", value_name = "NAME=SHAPE|auto", num_args = 0..)]
     pub out_buffer_param: Vec<String>,
 
@@ -230,12 +234,14 @@ pub struct GenVerifyRustArgs {
     pub spec_only_on_missing: bool,
 
     /// Read-only input buffer override. Format: `NAME=SHAPE`
-    /// (SHAPE = `BYTES` | `iW` | `NxiW`).
+    /// (SHAPE = `BYTES` | `iW` | `NxiW` | `{f1,f2,...}` |
+    /// `<{f1,f2,...}>`).
     #[arg(long = "in-buffer-size", value_name = "NAME=SHAPE", num_args = 0..)]
     pub in_buffer_size: Vec<String>,
 
     /// Writable output buffer override. Format: `NAME=SHAPE`
-    /// (SHAPE = `BYTES` | `iW` | `NxiW`) or `NAME=auto`.
+    /// (SHAPE = `BYTES` | `iW` | `NxiW` | `{f1,f2,...}` |
+    /// `<{f1,f2,...}>`) or `NAME=auto`.
     #[arg(long = "out-buffer-param", value_name = "NAME=SHAPE|auto", num_args = 0..)]
     pub out_buffer_param: Vec<String>,
 

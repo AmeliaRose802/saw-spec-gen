@@ -1,0 +1,25 @@
+// Cryptol model for enroll_key (whole-object post-state, heterogeneous
+// mixed-width struct).
+//
+// The EnrollmentKey object is a `uint32_t id` (offset 0, accessed as
+// one i32) next to a `uint8_t engaged` flag (offset 4). We model it as
+// a struct out-buffer:
+//
+//   --out-buffer-param k={i32,i8}  --cryptol-fn-out k=enroll_key_post
+//
+// SAW allocates the object as `llvm_struct_type [llvm_int 32, llvm_int
+// 8]` and presents the pre-state `k_pre` as the Cryptol tuple
+// ([32],[8]) — the first element is `id`, the second is `engaged`.
+
+module enrollment_spec where
+
+// (id, engaged) — mirrors the EnrollmentKey struct field order.
+type Key = ([32], [8])
+
+// Post-state: id incremented by one (wrapping mod 2^32), engaged kept.
+enroll_key_post : Key -> Key
+enroll_key_post (id, engaged) = (id + 1, engaged)
+
+// Return value: always reports success (1).
+enroll_key_ret : Key -> [32]
+enroll_key_ret _ = 1
