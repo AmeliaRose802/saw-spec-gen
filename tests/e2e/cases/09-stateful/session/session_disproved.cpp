@@ -17,7 +17,6 @@ struct Session {
     std::uint8_t tag[3];
 };
 
-extern "C"
 std::uint8_t session_open(Session* s) noexcept {
     s->isOpen = 1;
     s->tag[0] = 0;  // BUG: wipes a tag byte that should be preserved.

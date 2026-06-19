@@ -17,7 +17,6 @@ struct Counter {
     std::uint32_t n;
 };
 
-extern "C"
 std::uint32_t counter_inc(Counter* c) noexcept {
     c->n = c->n + 1;
     return 1;

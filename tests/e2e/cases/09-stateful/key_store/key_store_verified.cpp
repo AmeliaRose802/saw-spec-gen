@@ -27,7 +27,6 @@ struct KeyStore {
 
 // Activate the key. Returns 1 (success). Monotone: regardless of the
 // prior state, the key is Active afterwards.
-extern "C"
 std::uint8_t key_store_activate(KeyStore* ks) noexcept {
     ks->isActive = 1;
     return 1;

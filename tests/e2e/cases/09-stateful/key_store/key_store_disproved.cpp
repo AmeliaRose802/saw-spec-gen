@@ -17,7 +17,6 @@ struct KeyStore {
     std::uint8_t isActive;
 };
 
-extern "C"
 std::uint8_t key_store_activate(KeyStore* ks) noexcept {
     // BUG: toggles rather than latching — reverts an active key.
     ks->isActive = ks->isActive ? 0 : 1;

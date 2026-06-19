@@ -16,7 +16,6 @@ struct Block {
     std::uint8_t data[4];
 };
 
-extern "C"
 std::uint8_t block_mask(Block* b) noexcept {
     for (int i = 0; i < 4; ++i) {
         b->data[i] = static_cast<std::uint8_t>(b->data[i] ^ 0xAB);

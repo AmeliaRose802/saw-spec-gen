@@ -21,7 +21,6 @@ struct Session {
     std::uint8_t tag[3];   // offsets 1..3, opaque, must be preserved
 };
 
-extern "C"
 std::uint8_t session_open(Session* s) noexcept {
     s->isOpen = 1;  // tag bytes left untouched.
     return 1;
