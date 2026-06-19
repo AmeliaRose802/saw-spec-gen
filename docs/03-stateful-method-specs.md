@@ -74,23 +74,37 @@ intent is just a value-level expression — no special syntax:
 | Keep a field unchanged       | `pre @ i` for the kept bytes (e.g. `[1] # drop`{1} pre`) |
 | Relational / byte-wise       | `[ byte ^ 0xAB | byte <- pre ]`                          |
 | Multi-field                  | concatenate per-field byte groups                       |
+| Wide scalar field (`uint32`) | `pre + 1` over `[32]` (shape `c=i32`)                    |
 
-The `tests/e2e/cases/09-stateful/**` fixtures demonstrate all three:
+The `tests/e2e/cases/09-stateful/**` fixtures demonstrate each:
 `key_store` (single-byte latch), `block` (a `uint8[4]` buffer XOR-ed
-byte-by-byte), and `session` (set one field, keep the tag bytes).
+byte-by-byte), `session` (set one field, keep the tag bytes), and `counter`
+(a wide `uint32` field incremented as one `i32` store).
 
-## Byte-granular only: wide typed fields are out of scope
+## Object shape: byte buffers and wide typed fields
 
-saw-spec-gen models an object pointer as a **byte array** (`llvm_array N
-(llvm_int 8)`). That satisfies byte-granular member access (`uint8`,
-`uint8[]`), but **not** a wide typed field such as a bare `uint32`: the
-compiled body issues a single `i32` load/store, which SAW's memory model
-rejects against an `i8`-array allocation (`Error during memory load`). A
-struct-typed allocation (`llvm_alloc (llvm_struct "struct.T")`) would be
-required, which the out-buffer machinery does not emit. (The removed
-`--state-field` flag modelled the object the same byte-array way, so it hit
-the identical wall — wide fields were never covered.) Keep stateful fixtures
-byte-granular, or split the wide field into individual `uint8` lanes.
+The SHAPE in `--out-buffer-param NAME=SHAPE` chooses how the object pointer is
+allocated, so the allocation matches how the compiled body accesses memory:
+
+| SHAPE   | SAW allocation               | Use for                                   |
+|---------|------------------------------|-------------------------------------------|
+| `N`     | `llvm_array N (llvm_int 8)`  | byte-granular fields (`uint8`, `uint8[]`) |
+| `iW`    | `llvm_int W`                 | a single wide scalar field (e.g. `uint32` → `i32`) |
+| `NxiW`  | `llvm_array N (llvm_int W)`  | a homogeneous array of wide fields (`uint32[4]` → `4xi32`) |
+| `auto`  | inferred pointee type        | keep the front-end's inferred layout      |
+
+A byte array satisfies byte-granular access, but **not** a wide typed field:
+a bare `uint32` member compiles to a single `i32` load/store, which SAW's
+memory model rejects against an `i8`-array allocation (`Error during memory
+load`). Declaring the shape as `iW` allocates `llvm_int W`, so the wide access
+type-checks and the Cryptol model operates on a `[W]` word — see the `counter`
+fixture (`--out-buffer-param c=i32`, `counter_inc_post pre = pre + 1`).
+
+The remaining gap is a **heterogeneous** struct (mixed widths, e.g. `uint8` +
+`uint32`): there is no single `iW`/byte shape that matches every field, and the
+out-buffer machinery does not yet emit a struct-typed allocation (`llvm_alloc
+(llvm_struct ...)`). Split such an object into byte lanes where the body permits,
+or hand-write the struct-typed spec.
 
 ## When a partial, per-field assertion would help
 

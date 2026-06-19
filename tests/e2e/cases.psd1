@@ -296,11 +296,15 @@
         #             byte-by-byte (post == map (^0xAB) pre).
         # session   : multi-field with kept (unchanged) members — set
         #             isOpen, preserve the tag bytes (`[1] # drop pre`).
+        # counter   : a *wide typed field* — a bare uint32 incremented as
+        #             a single i32 store. The byte-array object model
+        #             can't satisfy that access, so the object is typed
+        #             explicitly via the `i32` out-buffer shape
+        #             (`--out-buffer-param c=i32`).
         #
-        # All members are byte-granular (uint8), so each object models as
-        # a plain byte buffer. (Wide typed fields like a bare uint32 force
-        # an i32 load the byte-array object model can't satisfy — out of
-        # scope; see docs/03-stateful-method-specs.md.)
+        # key_store/block/session model as plain byte buffers; counter
+        # exercises the typed `iW` out-buffer shape that lifts the
+        # byte-granular restriction for wide scalar fields.
         #
         # Each *_disproved variant proves the post-condition is not
         # vacuous: the buggy body diverges from the model and SAW returns
@@ -340,6 +344,18 @@
            ExtraSpecGenArgs = @(
                '--out-buffer-param', 's=4',
                '--cryptol-fn-out',   's=session_open_post'
+           ) }
+        @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/counter'; File = 'counter_verified.cpp';  Expected = 'VERIFIED';
+           Cry = 'counter_spec.cry'; CryptolFn = 'counter_inc_ret'; Function = 'counter_inc';
+           ExtraSpecGenArgs = @(
+               '--out-buffer-param', 'c=i32',
+               '--cryptol-fn-out',   'c=counter_inc_post'
+           ) }
+        @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/counter'; File = 'counter_disproved.cpp'; Expected = 'DISPROVED';
+           Cry = 'counter_spec.cry'; CryptolFn = 'counter_inc_ret'; Function = 'counter_inc';
+           ExtraSpecGenArgs = @(
+               '--out-buffer-param', 'c=i32',
+               '--cryptol-fn-out',   'c=counter_inc_post'
            ) }
 
         # ── Box allocator: currently UNKNOWN due to MIR allocator model gap
