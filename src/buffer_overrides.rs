@@ -9,8 +9,10 @@
 //!   --cryptol-arg-order FN=arg1,arg2,...
 //!
 //! SHAPE is one of `BYTES` (byte buffer), `iW` (a single wide scalar
-//! field, e.g. a bare `uint32_t` member), or `NxiW` (a homogeneous
-//! array of wide fields). See `parse_buf_saw_type`.
+//! field, e.g. a bare `uint32_t` member), `NxiW` (a homogeneous
+//! array of wide fields), `{f1,f2,...}` (a heterogeneous struct whose
+//! fields are themselves SHAPEs), or `<{f1,f2,...}>` (a packed struct).
+//! See `parse_buf_saw_type`.
 //!
 //! Motivation: targets whose C++ signature carries raw `uint8_t*`
 //! pointers + a separate scalar return value need to be verified
@@ -43,7 +45,8 @@ pub struct BufferOverrides {
     /// `--in-buffer-size NAME=SHAPE` — pointer param NAME is a
     /// read-only input buffer. The map value is the resolved SAW
     /// allocation type (see `parse_buf_saw_type` for the accepted
-    /// SHAPE forms: `BYTES`, `iW`, `NxiW`).
+    /// SHAPE forms: `BYTES`, `iW`, `NxiW`, `{f1,f2,...}`,
+    /// `<{f1,f2,...}>`).
     pub in_buffers: HashMap<String, String>,
 
     /// `--out-buffer-param NAME=SHAPE` — pointer param NAME is a
@@ -54,9 +57,10 @@ pub struct BufferOverrides {
     ///
     /// The map value is the resolved SAW allocation type. SHAPE may be
     /// `BYTES` (byte buffer), `iW` (a single wide scalar field — e.g.
-    /// a bare `uint32_t` member the body loads/stores as one i32), or
-    /// `NxiW` (a homogeneous array of wide fields). See
-    /// `parse_buf_saw_type`.
+    /// a bare `uint32_t` member the body loads/stores as one i32),
+    /// `NxiW` (a homogeneous array of wide fields), `{f1,f2,...}` (a
+    /// heterogeneous struct for mixed-width layouts), or `<{f1,f2,...}>`
+    /// (a packed struct). See `parse_buf_saw_type`.
     pub out_buffers: HashMap<String, String>,
     /// `--out-buffer-param NAME=auto` — treat pointer param NAME as an
     /// out-buffer but keep its inferred SAW pointee type (no byte-size
@@ -259,7 +263,29 @@ fn parse_cry_arg(tok: &str) -> CryArg {
 ///     the field must be typed explicitly.
 ///   - `NxiW`  → `llvm_array N (llvm_int W)` — a homogeneous array of
 ///     N wide fields (e.g. `uint32_t[4]` → `4xi32`).
+///   - `{f1,f2,...}`   → `llvm_struct_type [ <f1>, <f2>, ... ]` — a
+///     heterogeneous struct with natural alignment. Each field `fi`
+///     is itself a SHAPE (`iW`, `NxiW`, or `BYTES`), so mixed-width
+///     layouts like `{16xi8,i8}` (a 16-byte Uuid then a `bool`) are
+///     expressible. Use when the pointee is a struct whose fields the
+///     body loads/stores at differing widths — a flat byte array
+///     can't satisfy those typed accesses.
+///   - `<{f1,f2,...}>` → `llvm_packed_struct_type [ ... ]` — same as
+///     above but packed (no inter-field padding), matching a
+///     `#pragma pack` / `__attribute__((packed))` layout.
 fn parse_buf_saw_type(value: &str, flag: &str) -> Result<String> {
+    let value = value.trim();
+    // Struct shapes must be checked before the `x`/`i` scalar forms:
+    // a value like `<{16xi8,i8}>` contains an `x` that `split_once`
+    // would otherwise mis-handle.
+    if let Some(inner) = value.strip_prefix("<{").and_then(|s| s.strip_suffix("}>")) {
+        let fields = parse_struct_fields(inner, flag, value)?;
+        return Ok(format!("llvm_packed_struct_type [{}]", fields.join(", ")));
+    }
+    if let Some(inner) = value.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
+        let fields = parse_struct_fields(inner, flag, value)?;
+        return Ok(format!("llvm_struct_type [{}]", fields.join(", ")));
+    }
     if let Some((n_str, elem)) = value.split_once('x') {
         let n: usize = n_str.trim().parse().map_err(|_| {
             anyhow!("{flag} value '{value}': expected <count>xi<width> (e.g. 4xi32)")
@@ -272,9 +298,24 @@ fn parse_buf_saw_type(value: &str, flag: &str) -> Result<String> {
         return Ok(format!("llvm_int {width}"));
     }
     let n: usize = value.parse().map_err(|_| {
-        anyhow!("{flag} value '{value}': expected <bytes>, i<width>, or <count>xi<width>")
+        anyhow!("{flag} value '{value}': expected <bytes>, i<width>, <count>xi<width>, or {{f1,f2,...}}")
     })?;
     Ok(format!("llvm_array {n} (llvm_int 8)"))
+}
+
+/// Parse the comma-separated field list inside a `{...}` / `<{...}>`
+/// struct shape. Each field is resolved recursively via
+/// [`parse_buf_saw_type`], so fields may be `iW`, `NxiW`, or `BYTES`.
+/// Nested struct fields are not split-aware; use a flat field list.
+fn parse_struct_fields(inner: &str, flag: &str, value: &str) -> Result<Vec<String>> {
+    let inner = inner.trim();
+    if inner.is_empty() {
+        bail!("{flag} value '{value}': struct shape must list at least one field");
+    }
+    inner
+        .split(',')
+        .map(|f| parse_buf_saw_type(f.trim(), flag))
+        .collect()
 }
 
 /// Parse an `i<width>` element-type token (the part after the `x` in a
@@ -413,6 +454,46 @@ mod tests {
         assert!(ov.is_out_buffer("n"));
         assert!(ov.is_out_buffer("arr"));
         assert!(ov.has_in_buffer_size("hdr"));
+    }
+
+    #[test]
+    fn parses_struct_buffer_shapes() {
+        // Heterogeneous struct: a 16-byte Uuid then a bool, modelling
+        // std::optional<EnrollmentKey>-style mixed-width layouts.
+        let ov = BufferOverrides::from_cli(
+            &["hdr={i128,i8}".into()],
+            &["key={16xi8,i8}".into(), "pk=<{i64,i8}>".into()],
+            &["key=key_post".into(), "pk=pk_post".into()],
+            &[],
+            &[],
+            &[],
+        )
+        .unwrap();
+
+        assert_eq!(
+            ov.override_saw_type("hdr"),
+            Some("llvm_struct_type [llvm_int 128, llvm_int 8]".into())
+        );
+        assert_eq!(
+            ov.override_saw_type("key"),
+            Some("llvm_struct_type [llvm_array 16 (llvm_int 8), llvm_int 8]".into())
+        );
+        // Angle-bracket prefix selects the packed variant.
+        assert_eq!(
+            ov.override_saw_type("pk"),
+            Some("llvm_packed_struct_type [llvm_int 64, llvm_int 8]".into())
+        );
+        assert!(ov.is_out_buffer("key"));
+        assert!(ov.has_in_buffer_size("hdr"));
+    }
+
+    #[test]
+    fn rejects_empty_struct_shape() {
+        let err = BufferOverrides::from_cli(&["m={}".into()], &[], &[], &[], &[], &[]).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("at least one field"),
+            "msg = {err:#}"
+        );
     }
 
     #[test]
