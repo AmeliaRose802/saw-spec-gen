@@ -42,8 +42,32 @@ pub enum StlMethod {
     BasicStringSize,
     /// `basic_string::resize(size_type)` — write-only size mutator.
     BasicStringResize,
-    /// `basic_string::data()` — read-only data-pointer accessor.
-    BasicStringData,
+    /// Read-only byte-view accessor with no explicit index argument
+    /// (e.g. `data()`, `c_str()`).
+    BasicStringByteViewNoArg,
+    /// Read-only byte-view accessor with an explicit index argument
+    /// (e.g. `operator[]`, `at()`).
+    BasicStringByteViewIndexArg,
+    /// `basic_string::basic_string(const char*)` — ctor from C-string.
+    BasicStringCtorFromCStr,
+    /// `basic_string::basic_string(const basic_string&)` — copy ctor.
+    BasicStringCtorCopy,
+    /// `basic_string::assign(const char*)` — assign from C-string.
+    BasicStringAssignCStr,
+    /// `basic_string::assign(const basic_string&)` — assign from another string.
+    BasicStringAssignStr,
+    /// `basic_string::operator=(const char*)` — assign-op from C-string.
+    BasicStringOpEqCStr,
+    /// `basic_string::operator=(const basic_string&)` — copy-assign.
+    BasicStringOpEqStr,
+    /// `basic_string::empty()` — returns `sz == 0`.
+    BasicStringEmpty,
+    /// Size-neutral scalar query (e.g. `capacity()`) modeled as a
+    /// fresh symbolic i64 return.
+    BasicStringSizeNeutralScalarQuery,
+    /// Size-neutral mutator with one size-like argument (e.g.
+    /// `reserve(size_type)`), modeled with no post-state writes.
+    BasicStringSizeNeutralMutator,
     /// `vector::vector()` — default ctor.
     VectorCtorDefault,
     /// `vector::~vector()` — destructor.
@@ -92,20 +116,62 @@ fn is_vector(mangled: &str) -> bool {
 }
 
 fn classify_basic_string(m: &str) -> Option<StlMethod> {
+    // From-cstr ctor must precede default ctor (both start with C1/C2).
+    if has_suffix_any(m, &["C1EPKc", "C2EPKc", "EC1EPKc", "EC2EPKc"]) {
+        return Some(StlMethod::BasicStringCtorFromCStr);
+    }
     if has_suffix_any(m, &["C1Ev", "C2Ev", "EC1Ev", "EC2Ev"]) {
         return Some(StlMethod::BasicStringCtorDefault);
+    }
+    // Copy ctor: const-ref to same type (substitution number varies).
+    if m.contains("C1ERKS") || m.contains("C2ERKS") || m.contains("EC1ERKS") {
+        return Some(StlMethod::BasicStringCtorCopy);
     }
     if has_suffix_any(m, &["D1Ev", "D2Ev", "ED1Ev", "ED2Ev"]) {
         return Some(StlMethod::BasicStringDtor);
     }
-    if has_suffix_any(m, &["4sizeEv", "E4sizeEv"]) {
+    if has_suffix_any(m, &["4sizeEv", "E4sizeEv", "6lengthEv", "E6lengthEv"]) {
         return Some(StlMethod::BasicStringSize);
     }
-    if has_suffix_any(m, &["6resizeEm", "E6resizeEm"]) {
+    if has_suffix_any(m, &["6resizeEm", "E6resizeEm", "6resizeEj", "E6resizeEj"]) {
         return Some(StlMethod::BasicStringResize);
     }
-    if has_suffix_any(m, &["4dataEv", "E4dataEv"]) {
-        return Some(StlMethod::BasicStringData);
+    // Family: byte-view accessors. These methods expose character
+    // storage but do not change the tracked size field.
+    if has_suffix_any(m, &["4dataEv", "E4dataEv", "5c_strEv", "E5c_strEv"]) {
+        return Some(StlMethod::BasicStringByteViewNoArg);
+    }
+    if has_suffix_any(
+        m,
+        &[
+            "ixEm", "EixEm", "ixEj", "EixEj", "2atEm", "E2atEm", "2atEj", "E2atEj",
+        ],
+    ) {
+        return Some(StlMethod::BasicStringByteViewIndexArg);
+    }
+    if has_suffix_any(m, &["6assignEPKc", "E6assignEPKc"]) {
+        return Some(StlMethod::BasicStringAssignCStr);
+    }
+    if m.contains("6assignERKS") {
+        return Some(StlMethod::BasicStringAssignStr);
+    }
+    if has_suffix_any(m, &["aSEPKc", "EaSEPKc"]) {
+        return Some(StlMethod::BasicStringOpEqCStr);
+    }
+    if m.contains("aSERKS") {
+        return Some(StlMethod::BasicStringOpEqStr);
+    }
+    if has_suffix_any(m, &["5emptyEv", "E5emptyEv"]) {
+        return Some(StlMethod::BasicStringEmpty);
+    }
+    if has_suffix_any(m, &["8capacityEv", "E8capacityEv"]) {
+        return Some(StlMethod::BasicStringSizeNeutralScalarQuery);
+    }
+    if has_suffix_any(
+        m,
+        &["7reserveEm", "E7reserveEm", "7reserveEj", "E7reserveEj"],
+    ) {
+        return Some(StlMethod::BasicStringSizeNeutralMutator);
     }
     None
 }
