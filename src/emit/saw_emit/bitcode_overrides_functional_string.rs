@@ -373,7 +373,10 @@ mod tests {
     #[test]
     fn emit_cstr_matches_data_pattern() {
         let (alias, _) = def_basic_string();
-        let layout = StringLayout { alias, size_field_index: 1 };
+        let layout = StringLayout {
+            alias,
+            size_field_index: 1,
+        };
         let mut out = String::new();
         emit_string_override(
             &mut out,
@@ -392,7 +395,10 @@ mod tests {
     #[test]
     fn emit_index_passes_idx_and_returns_fresh_pointer() {
         let (alias, _) = def_basic_string();
-        let layout = StringLayout { alias, size_field_index: 1 };
+        let layout = StringLayout {
+            alias,
+            size_field_index: 1,
+        };
         let mut out = String::new();
         emit_string_override(
             &mut out,
@@ -411,7 +417,10 @@ mod tests {
     #[test]
     fn emit_empty_returns_size_eq_zero() {
         let (alias, _) = def_basic_string();
-        let layout = StringLayout { alias, size_field_index: 1 };
+        let layout = StringLayout {
+            alias,
+            size_field_index: 1,
+        };
         let mut out = String::new();
         emit_string_override(
             &mut out,
@@ -429,7 +438,10 @@ mod tests {
     #[test]
     fn emit_copy_assign_threads_size_from_src_to_dst() {
         let (alias, _) = def_basic_string();
-        let layout = StringLayout { alias: alias.clone(), size_field_index: 1 };
+        let layout = StringLayout {
+            alias: alias.clone(),
+            size_field_index: 1,
+        };
         let mut out = String::new();
         emit_string_override(
             &mut out,
@@ -449,7 +461,10 @@ mod tests {
     #[test]
     fn emit_ctor_from_cstr_sets_symbolic_size_no_return() {
         let (alias, _) = def_basic_string();
-        let layout = StringLayout { alias, size_field_index: 1 };
+        let layout = StringLayout {
+            alias,
+            size_field_index: 1,
+        };
         let mut out = String::new();
         emit_string_override(
             &mut out,
@@ -462,13 +477,19 @@ mod tests {
         assert!(out.contains("llvm_fresh_pointer (llvm_int 8)"));
         assert!(out.contains("llvm_fresh_var \"n\""));
         assert!(out.contains("llvm_points_to (llvm_elem s 1) (llvm_term n)"));
-        assert!(!out.contains("llvm_return"), "ctor must not emit llvm_return");
+        assert!(
+            !out.contains("llvm_return"),
+            "ctor must not emit llvm_return"
+        );
     }
 
     #[test]
     fn emit_reserve_has_no_post_state() {
         let (alias, _) = def_basic_string();
-        let layout = StringLayout { alias, size_field_index: 1 };
+        let layout = StringLayout {
+            alias,
+            size_field_index: 1,
+        };
         let mut out = String::new();
         emit_string_override(
             &mut out,

@@ -304,10 +304,15 @@
         # spec verifies under both branches.
       @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/string_data_sso';        File = 'add_one_verified.cpp';  Expected = 'VERIFIED' }
       @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/string_cstr';            File = 'add_one_verified.cpp';  Expected = 'VERIFIED' }
+         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/string_cstr';            File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
       @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/string_index';           File = 'add_one_verified.cpp';  Expected = 'VERIFIED' }
+         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/string_index';           File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
       @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/string_copy_assign';     File = 'add_one_verified.cpp';  Expected = 'VERIFIED' }
+         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/string_copy_assign';     File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
       @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/string_empty';           File = 'add_one_verified.cpp';  Expected = 'VERIFIED' }
+         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/string_empty';           File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
       @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/string_reserve';         File = 'add_one_verified.cpp';  Expected = 'VERIFIED' }
+         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/string_reserve';         File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/unique_ptr_deref_havoc'; File = 'add_one_gap_disproved.cpp';  Expected = 'DISPROVED' }
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/unique_ptr_deref_havoc'; File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
 

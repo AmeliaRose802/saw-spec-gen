@@ -166,7 +166,10 @@ fn classify_basic_string(m: &str) -> Option<StlMethod> {
     if has_suffix_any(m, &["8capacityEv", "E8capacityEv"]) {
         return Some(StlMethod::BasicStringCapacity);
     }
-    if has_suffix_any(m, &["7reserveEm", "E7reserveEm", "7reserveEj", "E7reserveEj"]) {
+    if has_suffix_any(
+        m,
+        &["7reserveEm", "E7reserveEm", "7reserveEj", "E7reserveEj"],
+    ) {
         return Some(StlMethod::BasicStringReserve);
     }
     None
