@@ -1,0 +1,32 @@
+# Container-layout catalog for saw-spec-gen (ArrayView rule 5,
+# saw_spec_gen-26d).
+#
+# !!! THIS FILE IS SCHEDULED FOR DELETION. !!!
+#
+# Hand-writing libstdc++ ABI field paths like `_M_dataplus._M_p` is
+# the wrong long-term answer — users consume `std::string`, they do
+# not know its internals, and the layout differs across libstdc++ /
+# libc++ / MSVC STL. The struct-shape recognizer in this PR already
+# pairs adjacent `(T* buf, size_t len)` *function parameters*; the
+# same heuristic applied to *struct fields* derives layouts for
+# every container shape (stdlib AND project-local) directly from
+# the clang AST.
+#
+# Once that lands, this entire user-facing layer goes away:
+#
+#   * saw_spec_gen-530  — auto-derive layouts from the AST
+#                         (replaces both this file and the built-in
+#                         defaults; covers stdlib + project-local).
+#   * saw_spec_gen-qms  — wire the catalog into the emitter's
+#                         llvm_points_to lowering.
+#   * saw_spec_gen-i47  — functional STL overrides on top.
+#   * saw_spec_gen-0nf  — delete --container-layouts flag,
+#                         delete this TOML file, delete
+#                         ContainerCatalog::load_toml_*.
+#
+# Until those land, the `--container-layouts` flag is a no-op for
+# verdicts (it prints a stderr warning naming the issues above).
+#
+# DO NOT ADD ENTRIES HERE. If your project has a container type the
+# generator does not recognize, the right fix is to extend the AST
+# walker (saw_spec_gen-530), not to grow this file.

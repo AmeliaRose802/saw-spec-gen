@@ -67,6 +67,21 @@ fn classify(value: &str) -> Option<Annotation> {
     if let Some(a) = classify_sized("_In_reads_(", Annotation::InReads, Annotation::InReadsParam) {
         return Some(a);
     }
+    // `_In_z_(MAX)`: same allocation shape as `_In_reads_(MAX)`, with
+    // an extra "this is a NUL-terminated string" semantic that the
+    // emitter records as `Annotation::InZ`. Only the literal form is
+    // supported; `_In_z_(paramName)` falls back to `InReadsParam`
+    // (the NUL semantic is lost — a paramref-z variant can be added
+    // later if needed).
+    if let Some(inner) = inner_text("_In_z_(") {
+        let trimmed = inner.trim();
+        if !trimmed.is_empty() {
+            if let Ok(n) = trimmed.parse::<usize>() {
+                return Some(Annotation::InZ(n));
+            }
+            return Some(Annotation::InReadsParam(trimmed.to_string()));
+        }
+    }
     if let Some(a) = classify_sized(
         "_In_reads_bytes_(",
         Annotation::InReads,
@@ -151,6 +166,24 @@ mod tests {
     #[test]
     fn parses_in_reads_bytes_param_reference() {
         let a = parse(json!({"kind": "AnnotateAttr", "value": "_In_reads_bytes_(cb)"}));
+        assert_eq!(
+            parse_sal_annotation(&a),
+            Some(Annotation::InReadsParam("cb".into()))
+        );
+    }
+
+    #[test]
+    fn parses_in_z_with_literal_count() {
+        let a = parse(json!({"kind": "AnnotateAttr", "value": "_In_z_(64)"}));
+        assert_eq!(parse_sal_annotation(&a), Some(Annotation::InZ(64)));
+    }
+
+    #[test]
+    fn parses_in_z_with_paramref_falls_back_to_in_reads_param() {
+        // `_In_z_(cb)` carries dynamic length: today we lose the NUL
+        // semantic and fall back to InReadsParam so the rest of the
+        // pipeline keeps working. Tightening this is future work.
+        let a = parse(json!({"kind": "AnnotateAttr", "value": "_In_z_(cb)"}));
         assert_eq!(
             parse_sal_annotation(&a),
             Some(Annotation::InReadsParam("cb".into()))

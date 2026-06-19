@@ -2,6 +2,7 @@
 //! and emit normalized [`crate::constraints::FunctionInfo`] values.
 
 pub mod clang_ast;
+pub mod cryptol_poly_sig;
 pub mod cryptol_sig;
 pub mod llvm_ir;
 pub mod mir_json;

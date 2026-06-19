@@ -31,6 +31,9 @@ pub fn run(
     use_llvm_combine_modules: bool,
     spec_only_on_missing: bool,
     buffer_overrides: &crate::buffer_overrides::BufferOverrides,
+    bind_cryptol_lengths: bool,
+    no_struct_shape_recognizer: bool,
+    container_layouts: Option<&Path>,
 ) -> Result<()> {
     if ast.is_empty() {
         anyhow::bail!("At least one --ast file is required");
@@ -47,8 +50,36 @@ pub fn run(
         }
         clang_ast::merge_asts(parsed)
     };
-    let all_functions = clang_ast::extract_functions(&parsed_ast, None)?;
+    let mut all_functions = clang_ast::extract_functions(&parsed_ast, None)?;
     eprintln!("Found {} functions", all_functions.len());
+
+    // ArrayView pre-derive passes (saw_spec_gen-rng umbrella).
+    // Order matters: struct-shape recognizer first so the binding
+    // pass can respect its output, then the container catalog
+    // (diagnostic-only for the scaffold), then the Cryptol length
+    // binding for the target function. See `src/array_view_passes.rs`.
+    crate::array_view_passes::apply_struct_shape_recognizer(
+        &mut all_functions,
+        no_struct_shape_recognizer,
+    );
+    // Build the clang AST type context once: feeds container-layout
+    // auto-derive (saw_spec_gen-26d / 530) and is cheap to compute.
+    let type_ctx = clang_ast::build_type_ctx(&parsed_ast);
+    // Container-layout catalog (saw_spec_gen-qms wiring): merges
+    // built-in defaults, AST-derived layouts, and optional TOML. The
+    // catalog is now passed into the SAW bitcode-overrides emitter
+    // below so functional STL specs (saw_spec_gen-i47) confirm
+    // recognized container shapes against the catalog instead of
+    // re-discovering them from the IR each time.
+    let container_catalog =
+        crate::array_view_passes::load_container_catalog(container_layouts, &type_ctx.structs);
+    crate::array_view_passes::apply_cryptol_length_binding(
+        &mut all_functions,
+        bind_cryptol_lengths,
+        cryptol_spec,
+        cryptol_fn,
+        function,
+    );
 
     // Optional LLVM IR: struct-size table + per-param `dereferenceable(N)`.
     // MSVC-clang fully qualifies struct symbols, so without the IR we can't
@@ -411,6 +442,7 @@ pub fn run(
         &target_mangled,
         &already_covered,
         &all_globals,
+        &container_catalog,
     );
 
     saw_emit::emit_verification_script(
