@@ -42,14 +42,12 @@ pub enum StlMethod {
     BasicStringSize,
     /// `basic_string::resize(size_type)` — write-only size mutator.
     BasicStringResize,
-    /// `basic_string::data()` — read-only data-pointer accessor.
-    BasicStringData,
-    /// `basic_string::c_str()` — null-terminated pointer (same model as data()).
-    BasicStringCStr,
-    /// `basic_string::operator[](size_type)` — subscript (returns fresh byte ptr).
-    BasicStringIndex,
-    /// `basic_string::at(size_type)` — bounds-checked subscript (same as Index).
-    BasicStringAt,
+    /// Read-only byte-view accessor with no explicit index argument
+    /// (e.g. `data()`, `c_str()`).
+    BasicStringByteViewNoArg,
+    /// Read-only byte-view accessor with an explicit index argument
+    /// (e.g. `operator[]`, `at()`).
+    BasicStringByteViewIndexArg,
     /// `basic_string::basic_string(const char*)` — ctor from C-string.
     BasicStringCtorFromCStr,
     /// `basic_string::basic_string(const basic_string&)` — copy ctor.
@@ -64,10 +62,12 @@ pub enum StlMethod {
     BasicStringOpEqStr,
     /// `basic_string::empty()` — returns `sz == 0`.
     BasicStringEmpty,
-    /// `basic_string::capacity()` — returns a symbolic capacity value.
-    BasicStringCapacity,
-    /// `basic_string::reserve(size_type)` — no observable side-effect in our model.
-    BasicStringReserve,
+    /// Size-neutral scalar query (e.g. `capacity()`) modeled as a
+    /// fresh symbolic i64 return.
+    BasicStringSizeNeutralScalarQuery,
+    /// Size-neutral mutator with one size-like argument (e.g.
+    /// `reserve(size_type)`), modeled with no post-state writes.
+    BasicStringSizeNeutralMutator,
     /// `vector::vector()` — default ctor.
     VectorCtorDefault,
     /// `vector::~vector()` — destructor.
@@ -136,17 +136,18 @@ fn classify_basic_string(m: &str) -> Option<StlMethod> {
     if has_suffix_any(m, &["6resizeEm", "E6resizeEm", "6resizeEj", "E6resizeEj"]) {
         return Some(StlMethod::BasicStringResize);
     }
-    if has_suffix_any(m, &["4dataEv", "E4dataEv"]) {
-        return Some(StlMethod::BasicStringData);
+    // Family: byte-view accessors. These methods expose character
+    // storage but do not change the tracked size field.
+    if has_suffix_any(m, &["4dataEv", "E4dataEv", "5c_strEv", "E5c_strEv"]) {
+        return Some(StlMethod::BasicStringByteViewNoArg);
     }
-    if has_suffix_any(m, &["5c_strEv", "E5c_strEv"]) {
-        return Some(StlMethod::BasicStringCStr);
-    }
-    if has_suffix_any(m, &["ixEm", "EixEm", "ixEj", "EixEj"]) {
-        return Some(StlMethod::BasicStringIndex);
-    }
-    if has_suffix_any(m, &["2atEm", "E2atEm", "2atEj", "E2atEj"]) {
-        return Some(StlMethod::BasicStringAt);
+    if has_suffix_any(
+        m,
+        &[
+            "ixEm", "EixEm", "ixEj", "EixEj", "2atEm", "E2atEm", "2atEj", "E2atEj",
+        ],
+    ) {
+        return Some(StlMethod::BasicStringByteViewIndexArg);
     }
     if has_suffix_any(m, &["6assignEPKc", "E6assignEPKc"]) {
         return Some(StlMethod::BasicStringAssignCStr);
@@ -164,13 +165,13 @@ fn classify_basic_string(m: &str) -> Option<StlMethod> {
         return Some(StlMethod::BasicStringEmpty);
     }
     if has_suffix_any(m, &["8capacityEv", "E8capacityEv"]) {
-        return Some(StlMethod::BasicStringCapacity);
+        return Some(StlMethod::BasicStringSizeNeutralScalarQuery);
     }
     if has_suffix_any(
         m,
         &["7reserveEm", "E7reserveEm", "7reserveEj", "E7reserveEj"],
     ) {
-        return Some(StlMethod::BasicStringReserve);
+        return Some(StlMethod::BasicStringSizeNeutralMutator);
     }
     None
 }

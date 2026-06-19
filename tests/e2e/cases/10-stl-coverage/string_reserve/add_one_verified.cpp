@@ -2,10 +2,10 @@
 DEMO: std::string::reserve() does not affect size().
 
 reserve(n) adjusts capacity but leaves the logical size untouched.
-The BasicStringReserve override declares a fresh 'n' arg and has no
-post-state llvm_points_to, confirming it makes no observable change
-to the size field. After reserve() the size is still x + 1 as set
-by resize().
+The size-neutral mutator override family declares a fresh 'n' arg
+and has no post-state llvm_points_to, confirming it makes no
+observable change to the size field. After reserve() the size is
+still x + 1 as set by resize().
 */
 
 #include <cstdint>

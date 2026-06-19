@@ -113,7 +113,7 @@ pub fn emit_string_override(
                 "    llvm_points_to (llvm_elem s {idx}) (llvm_term n);\n",
             ));
         }
-        StlMethod::BasicStringData => {
+        StlMethod::BasicStringByteViewNoArg => {
             // SSO handling (saw_spec_gen-xzg). libstdc++ basic_string
             // is short-string-optimized: for strings <= 15 chars
             // `data()` returns a pointer into the embedded
@@ -139,16 +139,9 @@ pub fn emit_string_override(
             out.push_str("    d <- llvm_fresh_pointer (llvm_int 8);\n");
             out.push_str("    llvm_return d;\n");
         }
-        // c_str() is semantically identical to data() for std::string;
-        // same model-agnostic fresh-pointer approach.
-        StlMethod::BasicStringCStr => {
-            out.push_str("    llvm_execute_func [s];\n");
-            out.push_str("    d <- llvm_fresh_pointer (llvm_int 8);\n");
-            out.push_str("    llvm_return d;\n");
-        }
         // operator[](pos) and at(pos) return char& (i8* in LLVM IR).
         // Content is symbolic; we return a fresh byte pointer.
-        StlMethod::BasicStringIndex | StlMethod::BasicStringAt => {
+        StlMethod::BasicStringByteViewIndexArg => {
             out.push_str("    idx <- llvm_fresh_var \"idx\" (llvm_int 64);\n");
             out.push_str("    llvm_execute_func [s, llvm_term idx];\n");
             out.push_str("    d <- llvm_fresh_pointer (llvm_int 8);\n");
@@ -217,15 +210,16 @@ pub fn emit_string_override(
             out.push_str("    llvm_execute_func [s];\n");
             out.push_str("    llvm_return (llvm_term {{ sz == 0 }});\n");
         }
-        // capacity(): we don't track capacity, so return a fresh i64.
-        StlMethod::BasicStringCapacity => {
+        // Size-neutral scalar query family (e.g. capacity()).
+        // We don't track capacity, so return a fresh i64.
+        StlMethod::BasicStringSizeNeutralScalarQuery => {
             out.push_str("    cap <- llvm_fresh_var \"cap\" (llvm_int 64);\n");
             out.push_str("    llvm_execute_func [s];\n");
             out.push_str("    llvm_return (llvm_term cap);\n");
         }
-        // reserve(): only affects capacity, not size — no observable
-        // post-state in our model.
-        StlMethod::BasicStringReserve => {
+        // Size-neutral mutator family (e.g. reserve(n)): no
+        // observable post-state in our model.
+        StlMethod::BasicStringSizeNeutralMutator => {
             out.push_str("    n <- llvm_fresh_var \"n\" (llvm_int 64);\n");
             out.push_str("    llvm_execute_func [s, llvm_term n];\n");
         }
@@ -352,7 +346,7 @@ mod tests {
         let mut out = String::new();
         emit_string_override(
             &mut out,
-            StlMethod::BasicStringData,
+            StlMethod::BasicStringByteViewNoArg,
             &layout,
             "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE4dataEv",
             "ov_data_safe",
@@ -380,7 +374,7 @@ mod tests {
         let mut out = String::new();
         emit_string_override(
             &mut out,
-            StlMethod::BasicStringCStr,
+            StlMethod::BasicStringByteViewNoArg,
             &layout,
             "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE5c_strEv",
             "ov_cstr_safe",
@@ -402,7 +396,7 @@ mod tests {
         let mut out = String::new();
         emit_string_override(
             &mut out,
-            StlMethod::BasicStringIndex,
+            StlMethod::BasicStringByteViewIndexArg,
             &layout,
             "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEixEm",
             "ov_idx_safe",
@@ -493,7 +487,7 @@ mod tests {
         let mut out = String::new();
         emit_string_override(
             &mut out,
-            StlMethod::BasicStringReserve,
+            StlMethod::BasicStringSizeNeutralMutator,
             &layout,
             "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7reserveEm",
             "ov_reserve_safe",

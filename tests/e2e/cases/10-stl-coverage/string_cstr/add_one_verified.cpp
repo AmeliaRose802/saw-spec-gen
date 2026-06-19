@@ -3,8 +3,8 @@ DEMO: std::string::c_str() leaves size unchanged.
 
 c_str() returns a pointer to the null-terminated character data.
 In libstdc++ it is semantically identical to data() for
-std::__cxx11::basic_string. Our override (BasicStringCStr) models
-it identically to data(): returns a fresh symbolic byte pointer
+std::__cxx11::basic_string. Our byte-view override family models
+both accessors identically: return a fresh symbolic byte pointer
 with no pre-state constraint, so it composes freely with resize().
 
 The c_str() return value is discarded here; we only care that
