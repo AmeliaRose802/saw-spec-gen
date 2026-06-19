@@ -22,6 +22,9 @@ $ScriptRoot = Split-Path -Parent $PSCommandPath
 . (Join-Path $ScriptRoot 'scripts/discover-tools.ps1')
 
 $specGen = Build-SawSpecGen -RepoRoot $ScriptRoot
+$RustFile = (Resolve-Path $RustFile).Path
+$CryptolSpec = (Resolve-Path $CryptolSpec).Path
+if ($OutputDir) { $OutputDir = [System.IO.Path]::GetFullPath($OutputDir) }
 
 $nativeArgs = @(
     'verify-rust'

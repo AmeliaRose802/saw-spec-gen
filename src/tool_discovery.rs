@@ -68,7 +68,9 @@ impl DiscoveredTools {
             }
         }
         if let Ok(joined) = env::join_paths(new_path) {
-            // SAFETY: process-local environment mutation is intended.
+            // SAFETY: process-local environment mutation is intentional
+            // here and done by this single-threaded CLI before any
+            // concurrent worker threads are spawned.
             unsafe { env::set_var("PATH", joined) };
         }
     }
