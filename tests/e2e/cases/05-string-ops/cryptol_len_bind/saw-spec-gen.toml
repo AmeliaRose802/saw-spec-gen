@@ -1,7 +1,0 @@
-# Project config for the cryptol_len_bind e2e fixture.
-#
-# Enables --bind-cryptol-lengths so saw-spec-gen reads the upper bound
-# from the length-polymorphic Cryptol signature ({n}(fin n, n <= 8) => ...)
-# and allocates the right-sized buffer without any SAL annotation on the
-# C++ side.  No CLI flag is needed when this file is present.
-bind_cryptol_lengths = true

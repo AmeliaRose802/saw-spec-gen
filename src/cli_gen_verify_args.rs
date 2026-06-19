@@ -249,15 +249,17 @@ pub struct GenVerifyArgs {
     #[arg(long = "container-layouts", value_name = "PATH")]
     pub container_layouts: Option<PathBuf>,
 
-    /// Path to a `saw-spec-gen.toml` project config file.
+    /// Path to a per-invocation config file (TOML).
     ///
-    /// When omitted, saw-spec-gen walks up from the current directory looking
-    /// for the first `saw-spec-gen.toml` it finds (the same auto-discovery
-    /// behaviour as `rustfmt.toml`).  Pass `--config /dev/null` to disable
-    /// auto-discovery entirely.
+    /// When omitted, saw-spec-gen looks for config in this order:
+    ///   1. `<cryptol-spec-stem>.toml` — sibling of the `--cryptol-spec` file,
+    ///      same name, `.toml` extension (e.g. `count_bytes_spec.toml` next to
+    ///      `count_bytes_spec.cry`).  Ideal for per-spec settings in a repo
+    ///      with multiple compositional specs.
+    ///   2. `saw-spec-gen.toml` walking up from the spec's directory.
+    ///   3. `saw-spec-gen.toml` walking up from the current working directory.
     ///
-    /// Config values act as project-wide defaults; explicit CLI flags always
-    /// override them.
+    /// Config values act as defaults; explicit CLI flags always override them.
     #[arg(long = "config", value_name = "PATH")]
     pub config: Option<PathBuf>,
 }

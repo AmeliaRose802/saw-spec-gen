@@ -164,8 +164,8 @@
         #    fall outside the allocation → DISPROVED.
         #    With config: `n <= 8` is harvested as the buffer length →
         #    8-byte alloc → VERIFIED.
-        #    Config lives at tests/e2e/cases/05-string-ops/cryptol_len_bind/saw-spec-gen.toml
-        #    and is auto-discovered from the Cryptol spec's directory. ───────
+        #    Config lives at tests/e2e/cases/05-string-ops/cryptol_len_bind/count_bytes_spec.toml
+        #    (sibling of count_bytes_spec.cry) and is auto-discovered by name. ──
         @{ Tag = 'cryptol_len_bind'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/cryptol_len_bind'; File = 'count_bytes_bind_verified.cpp'; Cry = 'count_bytes_spec.cry'; CryptolFn = 'count_bytes_spec'; Function = 'count_bytes'; Expected = 'VERIFIED' }
         # Deliberate value bug (widens digit range to include '@'). The
         # config still allocates 8 bytes, so reads succeed; the proof fails

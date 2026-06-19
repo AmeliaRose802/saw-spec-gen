@@ -66,6 +66,18 @@ impl ProjectConfig {
         toml::from_str(&text).with_context(|| format!("parsing config {}", path.display()))
     }
 
+    /// Return the path of a config file that is a sibling of `spec_path`,
+    /// sharing its stem with a `.toml` extension (e.g. `count_bytes_spec.toml`
+    /// next to `count_bytes_spec.cry`), or `None` if no such file exists.
+    pub fn sibling_path(spec_path: &Path) -> Option<PathBuf> {
+        let candidate = spec_path.with_extension("toml");
+        if candidate.exists() {
+            Some(candidate)
+        } else {
+            None
+        }
+    }
+
     /// Walk from `start_dir` toward the filesystem root, returning the path
     /// of the first `saw-spec-gen.toml` found, or `None`.
     pub fn find(start_dir: &Path) -> Option<PathBuf> {
@@ -81,31 +93,29 @@ impl ProjectConfig {
         }
     }
 
-    /// Load the first `saw-spec-gen.toml` found walking up from `start_dir`,
-    /// or return a default (all-`None`) config if none is found.
-    pub fn discover(start_dir: &Path) -> Result<Self> {
-        match Self::find(start_dir) {
+    /// Locate and load the config for a given Cryptol spec file.
+    ///
+    /// Search order (first match wins):
+    /// 1. `<spec_stem>.toml` — sibling of the spec file (per-spec config)
+    /// 2. `saw-spec-gen.toml` walking up from the spec's directory
+    /// 3. `saw-spec-gen.toml` walking up from `fallback_dir` (typically cwd)
+    pub fn discover_for_spec(spec_path: &Path, fallback_dir: &Path) -> Result<Self> {
+        if let Some(p) = Self::sibling_path(spec_path) {
+            eprintln!("Using project config: {}", p.display());
+            return Self::load(&p);
+        }
+        let spec_dir = spec_path.parent().unwrap_or(fallback_dir);
+        if let Some(p) = Self::find(spec_dir) {
+            eprintln!("Using project config: {}", p.display());
+            return Self::load(&p);
+        }
+        match Self::find(fallback_dir) {
             Some(p) => {
                 eprintln!("Using project config: {}", p.display());
                 Self::load(&p)
             }
             None => Ok(Self::default()),
         }
-    }
-
-    /// Like [`discover`], but also searches from `hint_dir` before `start_dir`.
-    ///
-    /// Use this when the files being verified live in a subdirectory (e.g.
-    /// a test-case directory).  The config closest to the source files wins;
-    /// if none is found there the search continues from `start_dir` (typically
-    /// `cwd`).
-    pub fn discover_with_hint(hint_dir: &Path, fallback_dir: &Path) -> Result<Self> {
-        // Prefer a config that lives near the source/spec files.
-        if let Some(p) = Self::find(hint_dir) {
-            eprintln!("Using project config: {}", p.display());
-            return Self::load(&p);
-        }
-        Self::discover(fallback_dir)
     }
 
     /// Merge CLI values over this config.  For booleans, `true` from either

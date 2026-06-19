@@ -325,16 +325,12 @@ pub fn gen_verify_cmd(
     container_layouts: Option<PathBuf>,
     config: Option<PathBuf>,
 ) -> Result<()> {
-    // Load project config: explicit path > near the spec file > cwd.
+    // Load project config: explicit path > spec-sibling > saw-spec-gen.toml.
     let cfg = match config {
         Some(ref p) => crate::project_config::ProjectConfig::load(p)?,
         None => {
             let cwd = std::env::current_dir()?;
-            // Walk up from the Cryptol spec's directory first so a config
-            // placed next to the spec files is found even when the binary is
-            // invoked from the repo root (e.g. via the e2e test harness).
-            let spec_dir = cryptol_spec.parent().unwrap_or(&cwd);
-            crate::project_config::ProjectConfig::discover_with_hint(spec_dir, &cwd)?
+            crate::project_config::ProjectConfig::discover_for_spec(&cryptol_spec, &cwd)?
         }
     };
     let merged = cfg.apply(
