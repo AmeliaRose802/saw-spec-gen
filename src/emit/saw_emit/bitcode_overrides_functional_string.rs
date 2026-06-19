@@ -139,7 +139,97 @@ pub fn emit_string_override(
             out.push_str("    d <- llvm_fresh_pointer (llvm_int 8);\n");
             out.push_str("    llvm_return d;\n");
         }
-        // Vector-family variants are handled by the vector emitter.
+        // c_str() is semantically identical to data() for std::string;
+        // same model-agnostic fresh-pointer approach.
+        StlMethod::BasicStringCStr => {
+            out.push_str("    llvm_execute_func [s];\n");
+            out.push_str("    d <- llvm_fresh_pointer (llvm_int 8);\n");
+            out.push_str("    llvm_return d;\n");
+        }
+        // operator[](pos) and at(pos) return char& (i8* in LLVM IR).
+        // Content is symbolic; we return a fresh byte pointer.
+        StlMethod::BasicStringIndex | StlMethod::BasicStringAt => {
+            out.push_str("    idx <- llvm_fresh_var \"idx\" (llvm_int 64);\n");
+            out.push_str("    llvm_execute_func [s, llvm_term idx];\n");
+            out.push_str("    d <- llvm_fresh_pointer (llvm_int 8);\n");
+            out.push_str("    llvm_return d;\n");
+        }
+        // basic_string(const char*): init size to symbolic `n`;
+        // ctor returns void so no llvm_return.
+        StlMethod::BasicStringCtorFromCStr => {
+            out.push_str("    src <- llvm_fresh_pointer (llvm_int 8);\n");
+            out.push_str("    n <- llvm_fresh_var \"n\" (llvm_int 64);\n");
+            out.push_str("    llvm_execute_func [s, src];\n");
+            out.push_str(&format!(
+                "    llvm_points_to (llvm_elem s {idx}) (llvm_term n);\n",
+            ));
+        }
+        // basic_string(const basic_string&): copy ctor — threads the
+        // source size into the destination. Ctor returns void.
+        StlMethod::BasicStringCtorCopy => {
+            out.push_str(&format!(
+                "    src <- llvm_fresh_pointer (llvm_alias \"{}\");\n",
+                layout.alias,
+            ));
+            out.push_str("    sz_src <- llvm_fresh_var \"sz_src\" (llvm_int 64);\n");
+            out.push_str(&format!(
+                "    llvm_points_to (llvm_elem src {idx}) (llvm_term sz_src);\n",
+            ));
+            out.push_str("    llvm_execute_func [s, src];\n");
+            out.push_str(&format!(
+                "    llvm_points_to (llvm_elem s {idx}) (llvm_term sz_src);\n",
+            ));
+        }
+        // assign(const char*) / operator=(const char*): set size to
+        // a fresh symbolic value; returns *this (basic_string&).
+        StlMethod::BasicStringAssignCStr | StlMethod::BasicStringOpEqCStr => {
+            out.push_str("    src <- llvm_fresh_pointer (llvm_int 8);\n");
+            out.push_str("    n <- llvm_fresh_var \"n\" (llvm_int 64);\n");
+            out.push_str("    llvm_execute_func [s, src];\n");
+            out.push_str(&format!(
+                "    llvm_points_to (llvm_elem s {idx}) (llvm_term n);\n",
+            ));
+            out.push_str("    llvm_return s;\n");
+        }
+        // assign(const basic_string&) / operator=(const basic_string&):
+        // threads the source size into the destination; returns *this.
+        StlMethod::BasicStringAssignStr | StlMethod::BasicStringOpEqStr => {
+            out.push_str(&format!(
+                "    src <- llvm_fresh_pointer (llvm_alias \"{}\");\n",
+                layout.alias,
+            ));
+            out.push_str("    sz_src <- llvm_fresh_var \"sz_src\" (llvm_int 64);\n");
+            out.push_str(&format!(
+                "    llvm_points_to (llvm_elem src {idx}) (llvm_term sz_src);\n",
+            ));
+            out.push_str("    llvm_execute_func [s, src];\n");
+            out.push_str(&format!(
+                "    llvm_points_to (llvm_elem s {idx}) (llvm_term sz_src);\n",
+            ));
+            out.push_str("    llvm_return s;\n");
+        }
+        // empty(): reads the size field and returns sz == 0 as i1.
+        StlMethod::BasicStringEmpty => {
+            out.push_str("    sz <- llvm_fresh_var \"sz\" (llvm_int 64);\n");
+            out.push_str(&format!(
+                "    llvm_points_to (llvm_elem s {idx}) (llvm_term sz);\n",
+            ));
+            out.push_str("    llvm_execute_func [s];\n");
+            out.push_str("    llvm_return (llvm_term {{ sz == 0 }});\n");
+        }
+        // capacity(): we don't track capacity, so return a fresh i64.
+        StlMethod::BasicStringCapacity => {
+            out.push_str("    cap <- llvm_fresh_var \"cap\" (llvm_int 64);\n");
+            out.push_str("    llvm_execute_func [s];\n");
+            out.push_str("    llvm_return (llvm_term cap);\n");
+        }
+        // reserve(): only affects capacity, not size — no observable
+        // post-state in our model.
+        StlMethod::BasicStringReserve => {
+            out.push_str("    n <- llvm_fresh_var \"n\" (llvm_int 64);\n");
+            out.push_str("    llvm_execute_func [s, llvm_term n];\n");
+        }
+        // Vector-family variants and any future unknowns.
         _ => unreachable!("emit_string_override called with non-string method"),
     }
     out.push_str("};\n");
@@ -278,5 +368,122 @@ mod tests {
         // Returns a fresh symbolic byte pointer:
         assert!(out.contains("llvm_fresh_pointer (llvm_int 8)"));
         assert!(out.contains("llvm_return d"));
+    }
+
+    #[test]
+    fn emit_cstr_matches_data_pattern() {
+        let (alias, _) = def_basic_string();
+        let layout = StringLayout { alias, size_field_index: 1 };
+        let mut out = String::new();
+        emit_string_override(
+            &mut out,
+            StlMethod::BasicStringCStr,
+            &layout,
+            "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE5c_strEv",
+            "ov_cstr_safe",
+            "ov_cstr",
+        );
+        assert!(out.contains("llvm_fresh_pointer (llvm_int 8)"));
+        assert!(out.contains("llvm_return d"));
+        let exec_pos = out.find("llvm_execute_func").expect("has execute");
+        assert!(!out[..exec_pos].contains("llvm_points_to"));
+    }
+
+    #[test]
+    fn emit_index_passes_idx_and_returns_fresh_pointer() {
+        let (alias, _) = def_basic_string();
+        let layout = StringLayout { alias, size_field_index: 1 };
+        let mut out = String::new();
+        emit_string_override(
+            &mut out,
+            StlMethod::BasicStringIndex,
+            &layout,
+            "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEixEm",
+            "ov_idx_safe",
+            "ov_idx",
+        );
+        assert!(out.contains("llvm_fresh_var \"idx\""));
+        assert!(out.contains("llvm_execute_func [s, llvm_term idx]"));
+        assert!(out.contains("llvm_fresh_pointer (llvm_int 8)"));
+        assert!(out.contains("llvm_return d"));
+    }
+
+    #[test]
+    fn emit_empty_returns_size_eq_zero() {
+        let (alias, _) = def_basic_string();
+        let layout = StringLayout { alias, size_field_index: 1 };
+        let mut out = String::new();
+        emit_string_override(
+            &mut out,
+            StlMethod::BasicStringEmpty,
+            &layout,
+            "_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE5emptyEv",
+            "ov_empty_safe",
+            "ov_empty",
+        );
+        assert!(out.contains("llvm_fresh_var \"sz\""));
+        assert!(out.contains("llvm_points_to (llvm_elem s 1) (llvm_term sz)"));
+        assert!(out.contains("llvm_return (llvm_term {{ sz == 0 }})"));
+    }
+
+    #[test]
+    fn emit_copy_assign_threads_size_from_src_to_dst() {
+        let (alias, _) = def_basic_string();
+        let layout = StringLayout { alias: alias.clone(), size_field_index: 1 };
+        let mut out = String::new();
+        emit_string_override(
+            &mut out,
+            StlMethod::BasicStringAssignStr,
+            &layout,
+            "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE6assignERKS4_",
+            "ov_assign_safe",
+            "ov_assign",
+        );
+        assert!(out.contains(&format!("llvm_fresh_pointer (llvm_alias \"{alias}\")",)));
+        assert!(out.contains("sz_src"));
+        assert!(out.contains("llvm_points_to (llvm_elem src 1) (llvm_term sz_src)"));
+        assert!(out.contains("llvm_points_to (llvm_elem s 1) (llvm_term sz_src)"));
+        assert!(out.contains("llvm_return s"));
+    }
+
+    #[test]
+    fn emit_ctor_from_cstr_sets_symbolic_size_no_return() {
+        let (alias, _) = def_basic_string();
+        let layout = StringLayout { alias, size_field_index: 1 };
+        let mut out = String::new();
+        emit_string_override(
+            &mut out,
+            StlMethod::BasicStringCtorFromCStr,
+            &layout,
+            "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC1EPKc",
+            "ov_ctor_cstr_safe",
+            "ov_ctor_cstr",
+        );
+        assert!(out.contains("llvm_fresh_pointer (llvm_int 8)"));
+        assert!(out.contains("llvm_fresh_var \"n\""));
+        assert!(out.contains("llvm_points_to (llvm_elem s 1) (llvm_term n)"));
+        assert!(!out.contains("llvm_return"), "ctor must not emit llvm_return");
+    }
+
+    #[test]
+    fn emit_reserve_has_no_post_state() {
+        let (alias, _) = def_basic_string();
+        let layout = StringLayout { alias, size_field_index: 1 };
+        let mut out = String::new();
+        emit_string_override(
+            &mut out,
+            StlMethod::BasicStringReserve,
+            &layout,
+            "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7reserveEm",
+            "ov_reserve_safe",
+            "ov_reserve",
+        );
+        let exec_pos = out.find("llvm_execute_func").expect("has execute");
+        let post_slice = &out[exec_pos..];
+        assert!(
+            !post_slice.contains("llvm_points_to"),
+            "reserve post-state must be empty; got:\n{out}",
+        );
+        assert!(!out.contains("llvm_return"));
     }
 }
