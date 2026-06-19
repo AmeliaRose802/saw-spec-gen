@@ -111,6 +111,7 @@ impl ProjectConfig {
     /// Merge CLI values over this config.  For booleans, `true` from either
     /// source wins.  For `Vec` fields, config entries come first so that CLI
     /// entries can extend (not replace) them.
+    #[allow(clippy::too_many_arguments)]
     pub fn apply(
         &self,
         cli_bind_cryptol_lengths: bool,
