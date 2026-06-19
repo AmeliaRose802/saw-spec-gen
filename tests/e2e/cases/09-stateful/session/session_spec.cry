@@ -1,0 +1,21 @@
+// Cryptol model for session_open (whole-object post-state with kept
+// fields).
+//
+// The Session object is 4 byte-granular members: isOpen@0 and tag[0..2]
+// at offsets 1..3. We model `s` as a 4-byte writable buffer:
+//
+//   --out-buffer-param s=4  --cryptol-fn-out s=session_open_post
+//
+// `s_pre : [4][8]` is the pre-state byte view. The transition sets byte
+// 0 to 1 and keeps bytes 1..3 from the pre-state — the whole-object
+// equivalent of "assert isOpen, leave the rest unchanged".
+
+module session_spec where
+
+// Post-state: isOpen := 1; all other bytes preserved from the pre-state.
+session_open_post : [4][8] -> [4][8]
+session_open_post pre = [1] # drop`{1} pre
+
+// Return value: always reports success (1).
+session_open_ret : [4][8] -> [8]
+session_open_ret _ = 1

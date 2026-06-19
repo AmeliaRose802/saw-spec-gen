@@ -292,7 +292,6 @@ pub fn gen_verify_cmd(
     max_len_precond: Vec<String>,
     cryptol_arg_order: Vec<String>,
     variant_map: Vec<String>,
-    state_field: Vec<String>,
 ) -> Result<()> {
     // Auto-detect language: Rust when --llvm-ir is provided without --ast
     let effective_lang = match lang.as_deref() {
@@ -336,7 +335,7 @@ pub fn gen_verify_cmd(
     if ast.is_empty() {
         anyhow::bail!("--ast is required for C++ verification (use --lang rust for Rust)");
     }
-    let mut buffer_overrides = crate::buffer_overrides::BufferOverrides::from_cli(
+    let buffer_overrides = crate::buffer_overrides::BufferOverrides::from_cli(
         &in_buffer_size,
         &out_buffer_param,
         &cryptol_fn_out,
@@ -344,17 +343,6 @@ pub fn gen_verify_cmd(
         &cryptol_arg_order,
         &cryptol_fn_pre,
     )?;
-    // Stateful method support: model each tracked object as a byte
-    // buffer so pre/post field assertions are plain Cryptol slices.
-    let state = crate::state_fields::StateModel::from_cli(&state_field)?;
-    for param in state.params() {
-        if !buffer_overrides.is_out_buffer(param) {
-            buffer_overrides
-                .out_buffer_sizes
-                .insert(param.to_string(), state.min_size_for(param));
-        }
-    }
-    buffer_overrides.state = state;
     gen_verify::run(
         &ast,
         &bitcode,

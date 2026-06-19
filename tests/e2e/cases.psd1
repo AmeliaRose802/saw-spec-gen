@@ -280,28 +280,66 @@
                '--max-len-precond',   'nb=4'
            ) }
 
-        # ── Stateful methods: --state-field (R3 gap, docs/03-stateful-method-specs.md)
-        # key_store_activate mutates an object member (`isActive` byte at
-        # offset 0). The monotone safety invariant ("Active is
-        # irreversible") is a relation over the pre/post heap that the
-        # default functional-equivalence spec can't express. `--state-field
-        # ks.isActive@0:1=*->1` models the object as a byte buffer and
-        # asserts the post-state byte directly.
+        # ── Stateful methods: whole-object post-state via the ordinary
+        #    --out-buffer-param / --cryptol-fn-out flags (no dedicated
+        #    flag needed; see docs/03-stateful-method-specs.md).
         #
-        # verified  : always latches isActive = 1 → post-state is 1 for
-        #             every pre-state; the invariant holds.
-        # disproved : toggles the flag, reverting an already-active key;
-        #             SAW finds pre=1 → post=0, proving the stateful
-        #             post-condition is not vacuous.
+        # A stateful method's headline safety property is relational over
+        # the pre/post heap, which the default functional-equivalence spec
+        # (`f(x) == model(x)`) can't express. Modelling the object as a
+        # writable byte buffer and pinning its post-state with
+        # `--cryptol-fn-out` closes the gap — the same machinery used for
+        # ordinary output buffers.
+        #
+        # key_store : single-byte latch (isActive 0/1 → 1).
+        # block     : wide but byte-granular — a uint8[4] buffer XOR-ed
+        #             byte-by-byte (post == map (^0xAB) pre).
+        # session   : multi-field with kept (unchanged) members — set
+        #             isOpen, preserve the tag bytes (`[1] # drop pre`).
+        #
+        # All members are byte-granular (uint8), so each object models as
+        # a plain byte buffer. (Wide typed fields like a bare uint32 force
+        # an i32 load the byte-array object model can't satisfy — out of
+        # scope; see docs/03-stateful-method-specs.md.)
+        #
+        # Each *_disproved variant proves the post-condition is not
+        # vacuous: the buggy body diverges from the model and SAW returns
+        # the discriminating counterexample.
         @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/key_store'; File = 'key_store_verified.cpp';  Expected = 'VERIFIED';
            Cry = 'key_store_spec.cry'; CryptolFn = 'key_store_activate_ret'; Function = 'key_store_activate';
            ExtraSpecGenArgs = @(
-               '--state-field', 'ks.isActive@0:1=*->1'
+               '--out-buffer-param', 'ks=1',
+               '--cryptol-fn-out',   'ks=key_store_activate_post'
            ) }
         @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/key_store'; File = 'key_store_disproved.cpp'; Expected = 'DISPROVED';
            Cry = 'key_store_spec.cry'; CryptolFn = 'key_store_activate_ret'; Function = 'key_store_activate';
            ExtraSpecGenArgs = @(
-               '--state-field', 'ks.isActive@0:1=*->1'
+               '--out-buffer-param', 'ks=1',
+               '--cryptol-fn-out',   'ks=key_store_activate_post'
+           ) }
+        @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/block'; File = 'block_verified.cpp';  Expected = 'VERIFIED';
+           Cry = 'block_spec.cry'; CryptolFn = 'block_mask_ret'; Function = 'block_mask';
+           ExtraSpecGenArgs = @(
+               '--out-buffer-param', 'b=4',
+               '--cryptol-fn-out',   'b=block_mask_post'
+           ) }
+        @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/block'; File = 'block_disproved.cpp'; Expected = 'DISPROVED';
+           Cry = 'block_spec.cry'; CryptolFn = 'block_mask_ret'; Function = 'block_mask';
+           ExtraSpecGenArgs = @(
+               '--out-buffer-param', 'b=4',
+               '--cryptol-fn-out',   'b=block_mask_post'
+           ) }
+        @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/session'; File = 'session_verified.cpp';  Expected = 'VERIFIED';
+           Cry = 'session_spec.cry'; CryptolFn = 'session_open_ret'; Function = 'session_open';
+           ExtraSpecGenArgs = @(
+               '--out-buffer-param', 's=4',
+               '--cryptol-fn-out',   's=session_open_post'
+           ) }
+        @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/session'; File = 'session_disproved.cpp'; Expected = 'DISPROVED';
+           Cry = 'session_spec.cry'; CryptolFn = 'session_open_ret'; Function = 'session_open';
+           ExtraSpecGenArgs = @(
+               '--out-buffer-param', 's=4',
+               '--cryptol-fn-out',   's=session_open_post'
            ) }
 
         # ── Box allocator: currently UNKNOWN due to MIR allocator model gap

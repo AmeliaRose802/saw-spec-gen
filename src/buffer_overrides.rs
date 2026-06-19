@@ -19,8 +19,6 @@
 use anyhow::{anyhow, bail, Context, Result};
 use std::collections::{HashMap, HashSet};
 
-use crate::state_fields::StateModel;
-
 /// One position in an explicit Cryptol-side argument list, derived
 /// from a `--cryptol-arg-order FN=arg1,arg2,...` value.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,11 +70,6 @@ pub struct BufferOverrides {
     /// before `llvm_execute_func`. This is a lightweight "model_pre"
     /// hook for stateful specs.
     pub cryptol_fn_pre: Option<String>,
-
-    /// `--state-field PARAM.FIELD@OFFSET:WIDTH=PRE->POST` — per-field
-    /// pre/post heap assertions for stateful methods. Empty by default;
-    /// populated by `gen_verify_cmd` after `from_cli`.
-    pub state: StateModel,
 }
 
 impl BufferOverrides {
@@ -189,21 +182,6 @@ impl BufferOverrides {
     /// Whether `param_name` is declared as an out-buffer.
     pub fn is_out_buffer(&self, param_name: &str) -> bool {
         self.out_buffer_sizes.contains_key(param_name) || self.out_buffer_auto.contains(param_name)
-    }
-
-    /// Emit `--state-field` pre-state assertions (before
-    /// `llvm_execute_func`). No-op when no stateful fields are tracked.
-    pub fn emit_state_preconditions(&self, out: &mut String) {
-        self.state.emit_preconditions(out);
-    }
-
-    /// Emit `--state-field` post-state assertions (after
-    /// `llvm_execute_func`). No-op when no stateful fields are tracked.
-    pub fn emit_state_postconditions(&self, out: &mut String) {
-        self.state.emit_postconditions(out, &|param| {
-            self.override_saw_type(param)
-                .unwrap_or_else(|| "llvm_array 0 (llvm_int 8)".to_string())
-        });
     }
 
     /// Iterator over `(out_param_name, cryptol_fn)` pairs from

@@ -1,13 +1,30 @@
 # One-pager: verifying stateful methods (the R3 gap)
 
-**Tool:** saw-spec-gen · **Status:** proposal · **Motivating gap:** `KeyStore::provision` / `KeyStore::activate`
+**Tool:** saw-spec-gen · **Status:** supported (no new flag) · **Motivating gap:** `KeyStore::provision` / `KeyStore::activate`
 
 ## The gap in one sentence
 
-saw-spec-gen today only generates **pure functional-equivalence** specs —
-`f(x) == model(x)` — so it cannot express a method whose effect is to **mutate
-object state**, which is exactly where this protocol's headline safety invariant
-(P1: *Active is irreversible*) actually lives.
+saw-spec-gen's *default* spec is **pure functional-equivalence** —
+`f(x) == model(x)` — so by default it cannot express a method whose effect is to
+**mutate object state**, which is exactly where this protocol's headline safety
+invariant (P1: *Active is irreversible*) actually lives.
+
+## The fix: model the object as a writable buffer (existing flags)
+
+There is **no dedicated flag** for this. A stateful method's `this`/object
+pointer is just a writable region, and saw-spec-gen already knows how to express
+the pre/post state of a writable region — that is precisely what
+`--out-buffer-param` + `--cryptol-fn-out` do for ordinary output buffers. Point
+them at the object:
+
+```
+--out-buffer-param ks=1               # model `ks` as a 1-byte writable buffer
+--cryptol-fn-out   ks=key_store_post  # pin the whole-object post-state
+```
+
+The generated spec allocates `ks`, binds a fresh `ks_pre` to its pre-state,
+runs the method, then asserts `llvm_points_to ks_ptr (llvm_term {{ key_store_post ks_pre }})`.
+That `llvm_points_to` on the post-state side is the stateful contract.
 
 ## Why this matters here
 
@@ -17,43 +34,11 @@ The whole point of `KeyStore` is the state machine, not a return value:
 [No Key] --provision--> [Provisional] --activate--> [Active]   (sealed)
 ```
 
-From `cpp/src/key_store.cpp`, the object's entire state is one member:
-
-```cpp
-std::optional<EnrollmentKey> key_;   // guarded by mu_
-```
-
-and the two transitions read **and write** it:
-
-```cpp
-std::optional<EnrollmentKey> KeyStore::provision(EnrollmentKey newKey) {
-    if (key_.has_value() && key_->isActive) return std::nullopt; // P1: never overwrite Active
-    if (key_.has_value())                   return std::nullopt; // TOFU: never overwrite Provisional
-    newKey.isActive = false;
-    key_ = std::move(newKey);
-    return key_;
-}
-
-ActivationResult KeyStore::activate(const Uuid& keyId) {
-    if (!key_.has_value())        return ActivationResult::IoFailure;
-    if (key_->keyId != keyId)     return ActivationResult::IoFailure;
-    if (key_->isActive)           return ActivationResult::AlreadyActive; // P1
-    key_->isActive = true;                                                // the mutation
-    return ActivationResult::Success;
-}
-```
-
 The property we want to machine-check is **relational over the pre/post heap**:
 
 > For all reachable states *s*, `activate` never produces a state where a key
 > that *was* `isActive` becomes not-active; and `provision` never overwrites a
 > key that *was* `isActive`.
-
-`provisionKey` (the **decision** function, already ✅ proven) captures the
-*pure* truth table — given booleans `keyIsActive`, etc., what outcome should
-result. But it is given `keyIsActive` as an **input**; it never demonstrates
-that the real object's stored `isActive` bit actually obeys the transition. That
-last mile — "the stored state evolves as the truth table says" — is the R3 gap.
 
 ## What SAW can already do (so this is a generator gap, not a prover gap)
 
@@ -62,70 +47,60 @@ looks like:
 
 ```
 let activate_spec = do {
-    this <- llvm_alloc (llvm_struct "class.sdep::KeyStore");
-    // PRE-state: a provisional key is present
-    isActive_pre <- llvm_fresh_var "isActive_pre" (llvm_int 8);
-    llvm_points_to (llvm_field this "key_.isActive") (llvm_term isActive_pre);
-    llvm_precond {{ isActive_pre == 0 }};            // start Provisional
-    keyId <- llvm_alloc_readonly ...;
+    ks_ptr <- llvm_alloc (llvm_array 1 (llvm_int 8));
+    ks_pre <- llvm_fresh_var "ks_pre" (llvm_array 1 (llvm_int 8));
+    llvm_points_to ks_ptr (llvm_term ks_pre);
 
-    llvm_execute_func [this, keyId];
+    llvm_execute_func [ks_ptr];
 
-    // POST-state: the stored bit is now set, and the return code agrees
-    llvm_points_to (llvm_field this "key_.isActive") (llvm_term {{ 1 : [8] }});
-    llvm_return (llvm_term {{ `ActivationResult_Success }});
+    // POST-state: the stored bit is now set (whole-object model)
+    llvm_points_to ks_ptr (llvm_term {{ key_store_post ks_pre }});
+    llvm_return (llvm_term {{ key_store_ret ks_pre }});
 };
 ```
 
-and the dual *negative* spec asserts that from `isActive_pre == 1` the method
-**leaves the bit set** and returns `AlreadyActive`. SAW verifies both against the
-real bitcode. **The prover handles this fine** — there is no missing SAW
-capability. What is missing is saw-spec-gen *emitting* it.
+**The prover handles this fine** — there is no missing SAW capability, and now no
+missing *generator* capability either: `--out-buffer-param` + `--cryptol-fn-out`
+emit exactly this.
 
-## What saw-spec-gen would need to add
+## Expressing field-level intent in the Cryptol model
 
-1. **Detect statefulness.** From the clang AST: a non-`const` method on a class
-   with non-static data members, whose body writes a member (or the
-   `[[nodiscard]] bool isActive() const` companion exists). Today the generator
-   treats `this` as just another opaque pointer arg and produces no heap
-   post-conditions.
+Because the post-state is one whole-object Cryptol value, every common per-field
+intent is just a value-level expression — no special syntax:
 
-2. **A pre/post state vocabulary in the spec model.** Let the model author write
-   two Cryptol-level views — `model_pre : State -> Args -> bool` (precondition)
-   and `model_post : State -> Args -> (State, Ret)` (transition) — and have
-   saw-spec-gen wire `this`'s member layout to those `State` fields via
-   `llvm_points_to` on both sides of `llvm_execute_func`. This is the
-   generalization of the existing `--out-buffer-param` / `--cryptol-fn-out`
-   machinery (which already splits a *buffer* into pre/post); here the "buffer"
-   is the object's member region.
+| Intent                       | Cryptol post-state (for `pre`)                          |
+|------------------------------|---------------------------------------------------------|
+| Set a byte to a constant     | `[1]` (1-byte object)                                   |
+| Keep a field unchanged       | `pre @ i` for the kept bytes (e.g. `[1] # drop`{1} pre`) |
+| Relational / byte-wise       | `[ byte ^ 0xAB | byte <- pre ]`                          |
+| Multi-field                  | concatenate per-field byte groups                       |
 
-3. **Member-layout resolution.** Map `KeyStore::key_` (an
-   `std::optional<EnrollmentKey>`) to concrete field offsets. The
-   `optional<EnrollmentKey>` engaged-flag + payload is the same STL-layout
-   problem as R2, so in practice the first cut should target a **plain-struct
-   state** (e.g. a `struct { bool present; bool isActive; Uuid id; }`), or a
-   `-O1` build where the optional is inlined to byte stores — the same
-   workaround already used for `getStatus` / `enforceAccess`.
+The `tests/e2e/cases/09-stateful/**` fixtures demonstrate all three:
+`key_store` (single-byte latch), `block` (a `uint8[4]` buffer XOR-ed
+byte-by-byte), and `session` (set one field, keep the tag bytes).
 
-4. **Generate the dual obligation.** For an irreversibility invariant, emit the
-   matched pair automatically: the *forward* transition spec **and** the
-   *no-revert* spec from the already-Active precondition. A single
-   `--state-invariant isActive:monotone` flag could expand to both.
+## Byte-granular only: wide typed fields are out of scope
 
-## Suggested scope (smallest useful step)
+saw-spec-gen models an object pointer as a **byte array** (`llvm_array N
+(llvm_int 8)`). That satisfies byte-granular member access (`uint8`,
+`uint8[]`), but **not** a wide typed field such as a bare `uint32`: the
+compiled body issues a single `i32` load/store, which SAW's memory model
+rejects against an `i8`-array allocation (`Error during memory load`). A
+struct-typed allocation (`llvm_alloc (llvm_struct "struct.T")`) would be
+required, which the out-buffer machinery does not emit. (The removed
+`--state-field` flag modelled the object the same byte-array way, so it hit
+the identical wall — wide fields were never covered.) Keep stateful fixtures
+byte-granular, or split the wide field into individual `uint8` lanes.
 
-A `--stateful` mode that, given:
+## When a partial, per-field assertion would help
 
-- the method symbol (`KeyStore::activate`),
-- a model file exposing `activate_pre` / `activate_post` over a declared
-  `KeyState` record, and
-- a `--state-struct class.sdep::KeyStore` layout hint,
-
-emits a SAW script that allocates `this`, constrains the pre-state members from
-`activate_pre`, runs the method, and asserts the post-state members and return
-value from `activate_post`. Prove it against `key_store_o1.bc` (optional inlined,
-per the existing `-O1` workaround). Ship the `KeyStore` P1 pair as the first
-fixture.
+Whole-object `llvm_points_to` pins **every** byte, so the model must account for
+the entire region. The one scenario it can't express is "constrain field X, leave
+the rest of the object free" — useful only when the object's full byte layout is
+genuinely un-modellable (e.g. an `std::optional`/STL member at `-O0` whose padding
+and engaged-flag bytes you can't pin). That partial-assertion case is intentionally
+**not** supported today (YAGNI): the `-O1`-inlined-state workaround keeps the real
+targets modellable as plain byte regions, so the whole-object form suffices.
 
 ## Definition of done
 
@@ -134,9 +109,9 @@ fixture.
   verified against real bitcode — not the pure `provisionKey` truth table alone.
 - `KeyStore::provision`'s "never overwrite Active / never overwrite Provisional"
   guards are proven the same way.
-- The generator path is general enough that any non-`const` mutating method with
-  a declared pre/post model gets a stateful spec instead of being dropped to
-  ⚠️ R3.
+- Any non-`const` mutating method with a declared whole-object pre/post model
+  gets a stateful spec via `--out-buffer-param` + `--cryptol-fn-out` instead of
+  being dropped to ⚠️ R3.
 
 ## Honest caveats
 

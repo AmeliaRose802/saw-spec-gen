@@ -304,11 +304,6 @@ pub enum Commands {
         /// for a narrowing adapter on the return type.
         #[arg(long = "variant-map", value_name = "PARAM=V1:D1,V2:D2,...", num_args = 0..)]
         variant_map: Vec<String>,
-
-        /// Stateful field assertion (repeatable): `P.F@OFF:W=PRE->POST`
-        /// e.g. `this.isActive@8:1=0->1` (`*`/empty=any, `keep`=unchanged).
-        #[arg(long = "state-field", value_name = "P.F@O:W=PRE->POST", num_args = 0..)]
-        state_field: Vec<String>,
     },
 
     /// Generate Rust trait vtable stubs + havoc specs for opaque

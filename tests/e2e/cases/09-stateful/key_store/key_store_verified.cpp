@@ -1,5 +1,6 @@
-// key_store — exercises saw-spec-gen's `--state-field` stateful-method
-// branch (the R3 gap; see docs/03-stateful-method-specs.md).
+// key_store — exercises a *stateful* method post-condition using only
+// the existing out-buffer machinery (no dedicated flag; see
+// docs/03-stateful-method-specs.md).
 //
 // `key_store_activate` is a *stateful* method: its headline safety
 // property is relational over the pre/post heap, not a pure function of
@@ -9,9 +10,10 @@
 //
 // A pure functional-equivalence spec (`f(x) == model(x)`) can't express
 // that, because it treats `this`/`ks` as an opaque pointer with no heap
-// post-conditions. `--state-field ks.isActive@0:1=*->1` closes the gap:
-// it models the object as a byte buffer and asserts the post-state of
-// the `isActive` byte directly.
+// post-conditions. Modelling `ks` as a 1-byte writable buffer and
+// pinning its post-state closes the gap with the ordinary flags:
+//
+//   --out-buffer-param ks=1  --cryptol-fn-out ks=key_store_activate_post
 //
 // verified  : always latches isActive = 1, so the post-state is 1 for
 //             every pre-state. The monotone invariant holds.

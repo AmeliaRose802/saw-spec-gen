@@ -1,11 +1,11 @@
 // key_store (disproved) — the buggy counterpart that proves the
-// `--state-field` post-state assertion is not vacuous.
+// whole-object post-state assertion is not vacuous.
 //
 // This `key_store_activate` *toggles* the flag instead of latching it,
 // so an already-Active key (pre-state isActive = 1) is reverted to 0.
-// That violates the monotone invariant `--state-field ks.isActive@0:1
-// =*->1` (post-state must be 1 for every pre-state), and SAW finds the
-// counterexample pre-state isActive = 1 → post-state 0.
+// That violates the monotone invariant (post-state must be 1 for every
+// pre-state, per `--cryptol-fn-out ks=key_store_activate_post`), and SAW
+// finds the counterexample pre-state isActive = 1 → post-state 0.
 //
 // The return value (1) still matches the Cryptol return model, so the
 // *only* discriminating check is the stateful post-condition — exactly
