@@ -9,7 +9,6 @@
 #include <cstddef>
 #include <cstdint>
 
-extern "C"
 std::size_t bounded_copy(std::uint8_t* out,
                          const std::uint8_t* src,
                          std::uint8_t nb) noexcept {
