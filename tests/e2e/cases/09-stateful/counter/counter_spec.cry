@@ -1,0 +1,20 @@
+// Cryptol model for counter_inc (whole-object post-state, wide field).
+//
+// The Counter object is a single `uint32_t` field `n` at offset 0,
+// accessed as one i32 load/store. We model `c` as a wide scalar
+// out-buffer:
+//
+//   --out-buffer-param c=i32  --cryptol-fn-out c=counter_inc_post
+//
+// `c_pre : [32]` is the pre-state of the 32-bit field. The transition
+// adds one (wrapping mod 2^32, matching unsigned C++ overflow).
+
+module counter_spec where
+
+// Post-state: the field incremented by one.
+counter_inc_post : [32] -> [32]
+counter_inc_post pre = pre + 1
+
+// Return value: always reports success (1).
+counter_inc_ret : [32] -> [32]
+counter_inc_ret _ = 1

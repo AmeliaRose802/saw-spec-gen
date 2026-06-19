@@ -104,26 +104,26 @@ pub struct GenVerifyArgs {
     pub spec_only_on_missing: bool,
 
     /// Declare a C++ pointer parameter as a read-only input
-    /// buffer of a known size in bytes. Causes the generated
-    /// spec to allocate `llvm_alloc_readonly (llvm_array BYTES
-    /// (llvm_int 8))` and bind a fresh `[BYTES][8]` value to
-    /// the parameter, instead of inferring a 1-byte alloc from
-    /// the bare `uint8_t*` type.
+    /// buffer of a known shape, instead of inferring a 1-byte
+    /// alloc from the bare pointer type.
     ///
-    /// Format: `NAME=BYTES`. Pass once per parameter.
-    #[arg(long = "in-buffer-size", value_name = "NAME=BYTES", num_args = 0..)]
+    /// Format: `NAME=SHAPE`, SHAPE = `BYTES` (byte buffer) |
+    /// `iW` (single wide scalar field) | `NxiW` (wide array).
+    #[arg(long = "in-buffer-size", value_name = "NAME=SHAPE", num_args = 0..)]
     pub in_buffer_size: Vec<String>,
 
     /// Declare a C++ pointer parameter as a writable output
-    /// buffer of a known size in bytes. Causes the generated spec to:
-    ///   1. allocate `llvm_alloc (llvm_array BYTES (llvm_int 8))`,
-    ///   2. bind a fresh `<NAME>_pre` to its pre-call contents,
-    ///   3. (with `--cryptol-fn-out NAME=FN`) post-assert
-    ///      `llvm_points_to <NAME>_ptr (llvm_term {{ FN ... }})`
-    ///      after `llvm_execute_func`.
+    /// buffer of a known shape. The generated spec allocates a
+    /// typed region, binds a fresh `<NAME>_pre` to its pre-call
+    /// contents, and (with `--cryptol-fn-out NAME=FN`) post-asserts
+    /// `llvm_points_to <NAME>_ptr (llvm_term {{ FN ... }})`.
     ///
-    /// Format: `NAME=BYTES` or `NAME=auto`.
-    #[arg(long = "out-buffer-param", value_name = "NAME=BYTES|auto", num_args = 0..)]
+    /// Format: `NAME=SHAPE` or `NAME=auto`. SHAPE = `BYTES`
+    /// (byte buffer, for byte-granular fields) | `iW` (a single
+    /// wide scalar field, e.g. a `uint32` loaded as one i32 a byte
+    /// array can't model) | `NxiW` (wide array, e.g. `4xi32`).
+    /// `auto` keeps the inferred pointee type.
+    #[arg(long = "out-buffer-param", value_name = "NAME=SHAPE|auto", num_args = 0..)]
     pub out_buffer_param: Vec<String>,
 
     /// Bind a Cryptol function to the post-call contents of an
@@ -229,12 +229,14 @@ pub struct GenVerifyRustArgs {
     #[arg(long = "spec-only-on-missing", default_value_t = false)]
     pub spec_only_on_missing: bool,
 
-    /// Read-only input buffer override. Format: `NAME=BYTES`.
-    #[arg(long = "in-buffer-size", value_name = "NAME=BYTES", num_args = 0..)]
+    /// Read-only input buffer override. Format: `NAME=SHAPE`
+    /// (SHAPE = `BYTES` | `iW` | `NxiW`).
+    #[arg(long = "in-buffer-size", value_name = "NAME=SHAPE", num_args = 0..)]
     pub in_buffer_size: Vec<String>,
 
-    /// Writable output buffer override. Format: `NAME=BYTES` or `NAME=auto`.
-    #[arg(long = "out-buffer-param", value_name = "NAME=BYTES|auto", num_args = 0..)]
+    /// Writable output buffer override. Format: `NAME=SHAPE`
+    /// (SHAPE = `BYTES` | `iW` | `NxiW`) or `NAME=auto`.
+    #[arg(long = "out-buffer-param", value_name = "NAME=SHAPE|auto", num_args = 0..)]
     pub out_buffer_param: Vec<String>,
 
     /// Cryptol fn for out-buffer postcondition. Format: `OUT_PARAM=FN`.

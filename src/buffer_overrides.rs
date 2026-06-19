@@ -1,12 +1,16 @@
 //! Per-target overrides for buffer-shape parameters and Cryptol arg ordering.
 //!
 //! Exposed via the `gen-verify` CLI flags:
-//!   --in-buffer-size   NAME=BYTES
-//!   --out-buffer-param NAME=BYTES|auto
+//!   --in-buffer-size   NAME=SHAPE
+//!   --out-buffer-param NAME=SHAPE|auto
 //!   --cryptol-fn-out   OUT_PARAM=FN
 //!   --cryptol-fn-pre   PRE_FN
 //!   --max-len-precond  NAME=VAL
 //!   --cryptol-arg-order FN=arg1,arg2,...
+//!
+//! SHAPE is one of `BYTES` (byte buffer), `iW` (a single wide scalar
+//! field, e.g. a bare `uint32_t` member), or `NxiW` (a homogeneous
+//! array of wide fields). See `parse_buf_saw_type`.
 //!
 //! Motivation: targets whose C++ signature carries raw `uint8_t*`
 //! pointers + a separate scalar return value need to be verified
@@ -36,17 +40,24 @@ pub enum CryArg {
 
 #[derive(Debug, Default, Clone)]
 pub struct BufferOverrides {
-    /// `--in-buffer-size NAME=BYTES` — pointer param NAME is a
-    /// read-only input buffer of BYTES bytes (emit
-    /// `llvm_alloc_readonly (llvm_array BYTES (llvm_int 8))`).
-    pub in_buffer_sizes: HashMap<String, usize>,
+    /// `--in-buffer-size NAME=SHAPE` — pointer param NAME is a
+    /// read-only input buffer. The map value is the resolved SAW
+    /// allocation type (see `parse_buf_saw_type` for the accepted
+    /// SHAPE forms: `BYTES`, `iW`, `NxiW`).
+    pub in_buffers: HashMap<String, String>,
 
-    /// `--out-buffer-param NAME=BYTES` — pointer param NAME is a
-    /// writable output buffer of BYTES bytes. The emitter:
-    ///   - allocates `NAME_ptr` with `llvm_alloc (llvm_array BYTES (llvm_int 8))`
+    /// `--out-buffer-param NAME=SHAPE` — pointer param NAME is a
+    /// writable output buffer. The emitter:
+    ///   - allocates `NAME_ptr` with `llvm_alloc (<saw_type>)`
     ///   - binds a fresh `NAME_pre` to its pre-call contents
     ///   - post-asserts the new contents via `--cryptol-fn-out NAME=FN`
-    pub out_buffer_sizes: HashMap<String, usize>,
+    ///
+    /// The map value is the resolved SAW allocation type. SHAPE may be
+    /// `BYTES` (byte buffer), `iW` (a single wide scalar field — e.g.
+    /// a bare `uint32_t` member the body loads/stores as one i32), or
+    /// `NxiW` (a homogeneous array of wide fields). See
+    /// `parse_buf_saw_type`.
+    pub out_buffers: HashMap<String, String>,
     /// `--out-buffer-param NAME=auto` — treat pointer param NAME as an
     /// out-buffer but keep its inferred SAW pointee type (no byte-size
     /// override). Useful for stateful `this` members where we want
@@ -84,20 +95,16 @@ impl BufferOverrides {
         let mut me = BufferOverrides::default();
         for s in in_buffer_size {
             let (k, v) = split_name_eq(s, "--in-buffer-size")?;
-            let bytes: usize = v.parse().with_context(|| {
-                format!("--in-buffer-size {s}: expected NAME=<unsigned integer>")
-            })?;
-            me.in_buffer_sizes.insert(k.to_string(), bytes);
+            let saw_ty = parse_buf_saw_type(v, "--in-buffer-size")?;
+            me.in_buffers.insert(k.to_string(), saw_ty);
         }
         for s in out_buffer_param {
             let (k, v) = split_name_eq(s, "--out-buffer-param")?;
             if v.eq_ignore_ascii_case("auto") {
                 me.out_buffer_auto.insert(k.to_string());
             } else {
-                let bytes: usize = v.parse().with_context(|| {
-                    format!("--out-buffer-param {s}: expected NAME=<unsigned integer> or NAME=auto")
-                })?;
-                me.out_buffer_sizes.insert(k.to_string(), bytes);
+                let saw_ty = parse_buf_saw_type(v, "--out-buffer-param")?;
+                me.out_buffers.insert(k.to_string(), saw_ty);
             }
         }
         for s in cryptol_fn_out {
@@ -170,18 +177,18 @@ impl BufferOverrides {
     /// SAW type for a pointer parameter that this override knows
     /// about, or None if the parameter is not buffer-overridden.
     pub fn override_saw_type(&self, param_name: &str) -> Option<String> {
-        if let Some(n) = self.in_buffer_sizes.get(param_name) {
-            return Some(format!("llvm_array {n} (llvm_int 8)"));
+        if let Some(ty) = self.in_buffers.get(param_name) {
+            return Some(ty.clone());
         }
-        if let Some(n) = self.out_buffer_sizes.get(param_name) {
-            return Some(format!("llvm_array {n} (llvm_int 8)"));
+        if let Some(ty) = self.out_buffers.get(param_name) {
+            return Some(ty.clone());
         }
         None
     }
 
     /// Whether `param_name` is declared as an out-buffer.
     pub fn is_out_buffer(&self, param_name: &str) -> bool {
-        self.out_buffer_sizes.contains_key(param_name) || self.out_buffer_auto.contains(param_name)
+        self.out_buffers.contains_key(param_name) || self.out_buffer_auto.contains(param_name)
     }
 
     /// Iterator over `(out_param_name, cryptol_fn)` pairs from
@@ -206,7 +213,7 @@ impl BufferOverrides {
     }
 
     pub fn has_in_buffer_size(&self, param_name: &str) -> bool {
-        self.in_buffer_sizes.contains_key(param_name)
+        self.in_buffers.contains_key(param_name)
     }
 
     pub fn has_auto_out_buffers(&self) -> bool {
@@ -215,8 +222,8 @@ impl BufferOverrides {
 
     /// Whether any overrides are configured.
     pub fn is_empty(&self) -> bool {
-        self.in_buffer_sizes.is_empty()
-            && self.out_buffer_sizes.is_empty()
+        self.in_buffers.is_empty()
+            && self.out_buffers.is_empty()
             && self.out_buffer_auto.is_empty()
             && self.cryptol_fn_out.is_empty()
             && self.max_len_preconds.is_empty()
@@ -239,6 +246,57 @@ fn parse_cry_arg(tok: &str) -> CryArg {
     }
 }
 
+/// Resolve an `--in-buffer-size` / `--out-buffer-param` SHAPE value
+/// into the SAW allocation type for the buffer. Accepted forms:
+///
+///   - `N`     → `llvm_array N (llvm_int 8)` — a byte buffer of N
+///     bytes. Use for objects whose fields are all byte-granular
+///     (`uint8_t` / `uint8_t[]`), which the compiled body accesses
+///     byte-by-byte.
+///   - `iW`    → `llvm_int W` — a single wide scalar field (e.g. a
+///     bare `uint32_t` member). The body loads/stores it as one
+///     i`W`; a byte-array allocation can't satisfy that access, so
+///     the field must be typed explicitly.
+///   - `NxiW`  → `llvm_array N (llvm_int W)` — a homogeneous array of
+///     N wide fields (e.g. `uint32_t[4]` → `4xi32`).
+fn parse_buf_saw_type(value: &str, flag: &str) -> Result<String> {
+    if let Some((n_str, elem)) = value.split_once('x') {
+        let n: usize = n_str.trim().parse().map_err(|_| {
+            anyhow!("{flag} value '{value}': expected <count>xi<width> (e.g. 4xi32)")
+        })?;
+        let width = parse_int_width(elem.trim(), flag, value)?;
+        return Ok(format!("llvm_array {n} (llvm_int {width})"));
+    }
+    if let Some(w_str) = value.strip_prefix('i') {
+        let width = parse_int_width_digits(w_str, flag, value)?;
+        return Ok(format!("llvm_int {width}"));
+    }
+    let n: usize = value.parse().map_err(|_| {
+        anyhow!("{flag} value '{value}': expected <bytes>, i<width>, or <count>xi<width>")
+    })?;
+    Ok(format!("llvm_array {n} (llvm_int 8)"))
+}
+
+/// Parse an `i<width>` element-type token (the part after the `x` in a
+/// `NxiW` shape).
+fn parse_int_width(elem: &str, flag: &str, value: &str) -> Result<u32> {
+    let w_str = elem.strip_prefix('i').ok_or_else(|| {
+        anyhow!("{flag} value '{value}': element type must be i<width> (e.g. i32)")
+    })?;
+    parse_int_width_digits(w_str, flag, value)
+}
+
+/// Parse the bare width digits of an integer type and reject zero.
+fn parse_int_width_digits(w_str: &str, flag: &str, value: &str) -> Result<u32> {
+    let width: u32 = w_str.parse().map_err(|_| {
+        anyhow!("{flag} value '{value}': integer width must be a positive number (e.g. i32)")
+    })?;
+    if width == 0 {
+        bail!("{flag} value '{value}': integer width must be greater than 0");
+    }
+    Ok(width)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -258,8 +316,8 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(ov.in_buffer_sizes["m"], 4);
-        assert_eq!(ov.out_buffer_sizes["out"], 10);
+        assert_eq!(ov.in_buffers["m"], "llvm_array 4 (llvm_int 8)");
+        assert_eq!(ov.out_buffers["out"], "llvm_array 10 (llvm_int 8)");
         assert!(ov.out_buffer_auto.contains("this"));
         assert_eq!(ov.cryptol_fn_out["out"], "canonicalize_lp_post");
         assert_eq!(ov.cryptol_fn_pre(), Some("canonicalize_lp_pre"));
@@ -306,8 +364,8 @@ mod tests {
     #[test]
     fn empty_when_no_flags() {
         let ov = BufferOverrides::from_cli(&[], &[], &[], &[], &[], &[]).unwrap();
-        assert!(ov.in_buffer_sizes.is_empty());
-        assert!(ov.out_buffer_sizes.is_empty());
+        assert!(ov.in_buffers.is_empty());
+        assert!(ov.out_buffers.is_empty());
         assert!(ov.out_buffer_auto.is_empty());
         assert!(ov.cryptol_fn_out.is_empty());
         assert!(ov.max_len_preconds.is_empty());
@@ -325,6 +383,51 @@ mod tests {
                 .unwrap_err();
         assert!(
             format!("{err:#}").contains("--cryptol-fn-pre"),
+            "msg = {err:#}"
+        );
+    }
+
+    #[test]
+    fn parses_typed_wide_buffer_shapes() {
+        // iW form: a single wide scalar field allocates as llvm_int W.
+        // NxiW form: a homogeneous array of wide fields.
+        let ov = BufferOverrides::from_cli(
+            &["hdr=2xi16".into()],
+            &["n=i32".into(), "arr=4xi32".into()],
+            &["n=inc_post".into(), "arr=arr_post".into()],
+            &[],
+            &[],
+            &[],
+        )
+        .unwrap();
+
+        assert_eq!(
+            ov.override_saw_type("hdr"),
+            Some("llvm_array 2 (llvm_int 16)".into())
+        );
+        assert_eq!(ov.override_saw_type("n"), Some("llvm_int 32".into()));
+        assert_eq!(
+            ov.override_saw_type("arr"),
+            Some("llvm_array 4 (llvm_int 32)".into())
+        );
+        assert!(ov.is_out_buffer("n"));
+        assert!(ov.is_out_buffer("arr"));
+        assert!(ov.has_in_buffer_size("hdr"));
+    }
+
+    #[test]
+    fn rejects_bad_typed_buffer_shapes() {
+        // Missing `i` on the element width.
+        let err =
+            BufferOverrides::from_cli(&[], &["n=4x32".into()], &[], &[], &[], &[]).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("--out-buffer-param"),
+            "msg = {err:#}"
+        );
+        // Zero width is rejected.
+        let err = BufferOverrides::from_cli(&["m=i0".into()], &[], &[], &[], &[], &[]).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("greater than 0"),
             "msg = {err:#}"
         );
     }

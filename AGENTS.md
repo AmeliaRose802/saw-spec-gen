@@ -20,6 +20,64 @@ cp -rf source dest      # recursive copy
 Other commands worth knowing: `scp`/`ssh` with `-o BatchMode=yes`,
 `apt-get -y`, `HOMEBREW_NO_AUTO_UPDATE=1`.
 
+## Project rules & workflow
+
+This repo is a **Rust CLI** (`saw-spec-gen`) plus a set of PowerShell
+driver scripts (`verify*.ps1`) that wrap `clang`/`rustc` → bitcode →
+SAW. The full coding rules live in
+[.github/copilot-instructions.md](.github/copilot-instructions.md) and
+[CLAUDE.md](CLAUDE.md); the highlights every agent must follow:
+
+### 500 non-whitespace lines per file (hard limit)
+
+No source file may exceed **500 non-whitespace lines** (blank lines
+don't count, comments do). Enforced by `scripts/check-line-count.ps1`
+(or `.sh`), the `.githooks/pre-commit` hook, and the `line-count` CI
+job. Split along clear seams (parsing vs emission, public API vs
+helpers) instead of growing a file past the limit. **Never** add
+entries to `.linecount-allow`.
+
+### Build, test, lint
+
+```powershell
+cargo build
+cargo test                                  # unit + integration
+cargo clippy --all-targets -- -D warnings
+cargo fmt                                   # or: cargo fmt -- --check
+pwsh ./scripts/check-line-count.ps1
+```
+
+### End-to-end suite
+
+The SAW/clang/rustc end-to-end tests live under `tests/e2e/`, driven by
+a single manifest. Auto-skips when SAW isn't installed.
+
+```powershell
+pwsh tests/e2e/Run-E2ETests.ps1                  # full suite
+pwsh tests/e2e/Run-E2ETests.ps1 -Tag cpp_stateful
+pwsh tests/e2e/Run-E2ETests.ps1 -List            # dry run
+```
+
+Add new cases by appending to
+[`tests/e2e/cases.psd1`](tests/e2e/cases.psd1) — see
+[tests/e2e/README.md](tests/e2e/README.md) for the schema and tag list.
+Do not write a bespoke runner script.
+
+### Pre-commit hook
+
+```powershell
+git config core.hooksPath .githooks   # one-time, per clone
+```
+
+Runs the line-count check, `cargo fmt -- --check`, `cargo clippy -- -D
+warnings`, and the e2e suite.
+
+### Platform
+
+PowerShell-first: on Windows use PowerShell 7 (`pwsh`), not Windows
+PowerShell 5.1. Rust 1.85+ is required. Avoid
+`Select-Object -First`/`-Last` in pipelines — it can hang.
+
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
 ## Beads Issue Tracker
 

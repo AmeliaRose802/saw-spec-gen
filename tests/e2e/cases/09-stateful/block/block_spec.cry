@@ -1,0 +1,20 @@
+// Cryptol model for block_mask (whole-object post-state).
+//
+// The Block object is a 4-byte array `data` at offset 0, accessed one
+// byte at a time. We model `b` as a 4-byte writable buffer:
+//
+//   --out-buffer-param b=4  --cryptol-fn-out b=block_mask_post
+//
+// `b_pre : [4][8]` is the pre-state byte view. The transition XOR-es
+// each byte with the fixed key 0xAB — a relational function of every
+// input byte, expressed as a plain Cryptol comprehension.
+
+module block_spec where
+
+// Post-state: each byte XOR-ed with 0xAB.
+block_mask_post : [4][8] -> [4][8]
+block_mask_post pre = [ byte ^ 0xAB | byte <- pre ]
+
+// Return value: always reports success (1).
+block_mask_ret : [4][8] -> [8]
+block_mask_ret _ = 1

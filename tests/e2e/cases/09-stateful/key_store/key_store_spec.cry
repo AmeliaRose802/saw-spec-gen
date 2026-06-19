@@ -1,0 +1,30 @@
+// Cryptol model for key_store_activate (whole-object post-state).
+//
+// `key_store_activate` is a *stateful* method: its headline safety
+// property is relational over the pre/post heap, not a pure function of
+// the inputs. The KeyStore object carries a single-byte `isActive` flag
+// at offset 0; activation must latch it to 1.
+//
+// No special flag is needed — the existing out-buffer machinery already
+// expresses object post-state. We model `ks` as a writable byte buffer
+// and pin its post-state with the *same* `--out-buffer-param` /
+// `--cryptol-fn-out` pair used for ordinary output buffers:
+//
+//   --out-buffer-param ks=1
+//   --cryptol-fn-out   ks=key_store_activate_post
+//
+// `key_store_activate_post` is the whole-object transition model: it
+// takes the 1-byte pre-state `ks_pre : [1][8]` and returns the post
+// bytes. `key_store_activate_ret` models the return value. Both take the
+// pre-state byte view as their single positional argument (the 1:1
+// default mapping), so no `--cryptol-arg-order` override is required.
+
+module key_store_spec where
+
+// Post-state: activation latches `isActive` to 1, regardless of pre.
+key_store_activate_post : [1][8] -> [1][8]
+key_store_activate_post _ = [1]
+
+// Return value: activation always succeeds (1), independent of state.
+key_store_activate_ret : [1][8] -> [8]
+key_store_activate_ret _ = 1
