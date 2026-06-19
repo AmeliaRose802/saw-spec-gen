@@ -201,6 +201,9 @@ fn resolve_tool_path(
     if let Some(v) = read_with_file_fallback(&env_key, file_vars) {
         let p = PathBuf::from(v);
         if p.exists() {
+            if base == "rustc" {
+                return Some(p);
+            }
             return fs::canonicalize(p).ok();
         }
     }
@@ -208,6 +211,9 @@ fn resolve_tool_path(
     if let Some(dir) = dir_hint {
         let p = dir.join(format!("{base}{exe_ext}"));
         if p.exists() {
+            if base == "rustc" {
+                return Some(p);
+            }
             return fs::canonicalize(p).ok();
         }
     }
@@ -219,6 +225,9 @@ fn resolve_tool_path(
     if let Some(cands) = default_candidates {
         for p in cands {
             if p.exists() {
+                if base == "rustc" {
+                    return Some(p);
+                }
                 return fs::canonicalize(p).ok();
             }
         }
@@ -349,9 +358,6 @@ fn find_on_path(base: &str, exe_ext: &str) -> Option<PathBuf> {
     for dir in env::split_paths(&path) {
         let cand = dir.join(format!("{base}{exe_ext}"));
         if cand.exists() {
-            if let Ok(canon) = fs::canonicalize(&cand) {
-                return Some(canon);
-            }
             return Some(cand);
         }
     }
@@ -367,11 +373,37 @@ fn user_home_dir() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     #[test]
     fn default_target_is_non_empty() {
         assert!(!default_llvm_target(Platform::Windows).is_empty());
         assert!(!default_llvm_target(Platform::Linux).is_empty());
         assert!(!default_llvm_target(Platform::MacOs).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rustc_env_path_keeps_symlink_name() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = std::env::temp_dir().join(format!("saw-spec-gen-rustc-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).expect("create temp dir");
+        let rustup = tmp.join("rustup");
+        let rustc = tmp.join("rustc");
+        fs::write(&rustup, "#!/bin/sh\n").expect("write rustup file");
+        symlink(&rustup, &rustc).expect("create rustc symlink");
+
+        let mut file_vars = HashMap::new();
+        file_vars.insert(
+            "SAW_SPEC_GEN_RUSTC".to_string(),
+            rustc.to_string_lossy().to_string(),
+        );
+        let resolved =
+            resolve_tool_path("rustc", "", None, &file_vars, None).expect("resolve rustc");
+        assert_eq!(resolved, rustc);
+
+        let _ = fs::remove_dir_all(&tmp);
     }
 }

@@ -41,6 +41,16 @@ pub(crate) fn run_capture(cmd: &mut Command) -> Result<String> {
     Ok(text)
 }
 
+pub(crate) fn run_capture_allow_failure(cmd: &mut Command) -> Result<String> {
+    let out = cmd
+        .output()
+        .with_context(|| format!("failed to run command: {:?}", cmd))?;
+    let mut text = String::new();
+    text.push_str(&String::from_utf8_lossy(&out.stdout));
+    text.push_str(&String::from_utf8_lossy(&out.stderr));
+    Ok(text)
+}
+
 pub(crate) fn parse_counterexample_bindings(
     saw_out: &str,
     params: &[RustMetaParam],
@@ -258,5 +268,20 @@ mod tests {
         let (names, types) = parse_rust_signature(src, "add_one");
         assert_eq!(names, vec!["x", "y"]);
         assert_eq!(types, vec!["u32", "bool"]);
+    }
+
+    #[test]
+    fn capture_allow_failure_keeps_output() {
+        let mut cmd = if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.arg("/C").arg("echo Counterexample && exit 2");
+            c
+        } else {
+            let mut c = Command::new("sh");
+            c.arg("-c").arg("echo Counterexample; exit 2");
+            c
+        };
+        let out = run_capture_allow_failure(&mut cmd).expect("capture should succeed");
+        assert!(out.contains("Counterexample"));
     }
 }

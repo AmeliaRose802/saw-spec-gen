@@ -2,7 +2,7 @@ use crate::result_json::{write_verify_result, ResultCounterexample, VerifyResult
 use crate::tool_discovery::discover_tools;
 use crate::verify_rust_helpers::{
     eval_cryptol_at_cex, parse_counterexample_bindings, parse_rust_signature, run_and_print,
-    run_capture, run_rust_harness_at_cex, RustMetaParam,
+    run_capture, run_capture_allow_failure, run_rust_harness_at_cex, RustMetaParam,
 };
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
@@ -192,7 +192,7 @@ pub fn run(args: VerifyRustArgs) -> Result<VerifyRustOutcome> {
     println!("═══════════════════════════════════════════════════════");
     println!(" Step 4: SAW verification");
     println!("═══════════════════════════════════════════════════════");
-    let saw_out = run_capture(
+    let saw_out = run_capture_allow_failure(
         Command::new(saw)
             .arg("verify_rust.saw")
             .current_dir(&output_dir),
