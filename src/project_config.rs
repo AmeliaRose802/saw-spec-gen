@@ -63,8 +63,7 @@ impl ProjectConfig {
     pub fn load(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("reading config {}", path.display()))?;
-        toml::from_str(&text)
-            .with_context(|| format!("parsing config {}", path.display()))
+        toml::from_str(&text).with_context(|| format!("parsing config {}", path.display()))
     }
 
     /// Walk from `start_dir` toward the filesystem root, returning the path
