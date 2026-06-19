@@ -157,15 +157,10 @@
         @{ Tag = 'strings'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/count_digits'; File = 'count_digits_cstr_disproved.cpp'; Cry = 'count_digits_spec.cry'; CryptolFn = 'count_digits_spec'; Function = 'count_digits'; Expected = 'DISPROVED' }
 
         # ── ArrayView rule 1 (saw_spec_gen-4po): bind Cryptol type
-        #    variable to C++ pointer length via a `saw-spec-gen.toml` project
-        #    config (or `--bind-cryptol-lengths` CLI flag).
-        #    The Cryptol spec carries `{n}(fin n, n <= 8) => [n][8] -> [32]`.
-        #    Without config/flag: 1-byte fallback alloc → reads at offset 1..7
-        #    fall outside the allocation → DISPROVED.
-        #    With config: `n <= 8` is harvested as the buffer length →
-        #    8-byte alloc → VERIFIED.
-        #    Config lives at tests/e2e/cases/05-string-ops/cryptol_len_bind/count_bytes_spec.toml
-        #    (sibling of count_bytes_spec.cry) and is auto-discovered by name. ──
+        #    variable to C++ pointer length. The Cryptol spec carries
+        #    `{n}(fin n, n <= 8) => [n][8] -> [32]`.
+        #    saw-spec-gen reads the upper bound automatically (no annotation
+        #    or CLI flag needed) and allocates an 8-byte buffer. ─────────────
         @{ Tag = 'cryptol_len_bind'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/cryptol_len_bind'; File = 'count_bytes_bind_verified.cpp'; Cry = 'count_bytes_spec.cry'; CryptolFn = 'count_bytes_spec'; Function = 'count_bytes'; Expected = 'VERIFIED' }
         # Deliberate value bug (widens digit range to include '@'). The
         # config still allocates 8 bytes, so reads succeed; the proof fails

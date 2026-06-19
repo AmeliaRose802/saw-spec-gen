@@ -227,13 +227,6 @@ pub struct GenVerifyArgs {
     #[arg(long = "variant-map", value_name = "PARAM=V1:D1,V2:D2,...", num_args = 0..)]
     pub variant_map: Vec<String>,
 
-    /// Bind Cryptol-signature type variables to the matching
-    /// C++/Rust pointer parameter lengths (ArrayView rule 1).
-    /// Parses the spec's binders + predicate context and injects
-    /// synthetic `_In_reads_(MAX)` annotations.
-    #[arg(long = "bind-cryptol-lengths", default_value_t = false)]
-    pub bind_cryptol_lengths: bool,
-
     /// Disable the struct-shape recognizer (ArrayView rule 4).
     /// The recognizer pairs adjacent `(T* buf, size_t len)`
     /// parameters and synthesizes `_In_reads_(len)` on the buffer

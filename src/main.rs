@@ -66,7 +66,6 @@ fn main() -> Result<()> {
             args.max_len_precond,
             args.cryptol_arg_order,
             args.variant_map,
-            args.bind_cryptol_lengths,
             args.no_struct_shape_recognizer,
             args.container_layouts,
             args.config,

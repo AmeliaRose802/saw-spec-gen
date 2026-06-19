@@ -320,7 +320,6 @@ pub fn gen_verify_cmd(
     max_len_precond: Vec<String>,
     cryptol_arg_order: Vec<String>,
     variant_map: Vec<String>,
-    bind_cryptol_lengths: bool,
     no_struct_shape_recognizer: bool,
     container_layouts: Option<PathBuf>,
     config: Option<PathBuf>,
@@ -334,7 +333,6 @@ pub fn gen_verify_cmd(
         }
     };
     let merged = cfg.apply(
-        bind_cryptol_lengths,
         no_struct_shape_recognizer,
         use_llvm_combine_modules,
         spec_only_on_missing,
@@ -407,7 +405,6 @@ pub fn gen_verify_cmd(
         merged.use_llvm_combine_modules,
         merged.spec_only_on_missing,
         &buffer_overrides,
-        merged.bind_cryptol_lengths,
         merged.no_struct_shape_recognizer,
         container_layouts.as_deref(),
     )

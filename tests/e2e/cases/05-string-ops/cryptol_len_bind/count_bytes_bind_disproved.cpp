@@ -5,13 +5,12 @@ bug. The Cryptol spec counts ASCII digits (`0x30`..`0x39`); this
 C++ implementation widens the upper bound to `0x40` so the byte
 `'@'` (0x40) is wrongly counted as a digit.
 
-The `--bind-cryptol-lengths` flag still picks `n <= 8` off the
-Cryptol signature and allocates an 8-byte buffer — every read in
-the loop succeeds. The proof itself fails because the symbolic
-solver finds an input (e.g. `s = "@\0\0\0\0\0\0\0"`) where the
-C++ returns 1 but the spec returns 0.
+saw-spec-gen reads `n <= 8` off the Cryptol signature and allocates
+an 8-byte buffer — every read in the loop succeeds. The proof fails
+because the symbolic solver finds an input (e.g. `s = "@\0\0\0\0\0\0\0"`)
+where the C++ returns 1 but the spec returns 0.
 
-Expected RESULT: DISPROVED (with `--bind-cryptol-lengths`).
+Expected RESULT: DISPROVED.
 */
 
 #include <cstdint>

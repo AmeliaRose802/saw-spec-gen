@@ -31,7 +31,6 @@ pub fn run(
     use_llvm_combine_modules: bool,
     spec_only_on_missing: bool,
     buffer_overrides: &crate::buffer_overrides::BufferOverrides,
-    bind_cryptol_lengths: bool,
     no_struct_shape_recognizer: bool,
     container_layouts: Option<&Path>,
 ) -> Result<()> {
@@ -75,7 +74,6 @@ pub fn run(
         crate::array_view_passes::load_container_catalog(container_layouts, &type_ctx.structs);
     crate::array_view_passes::apply_cryptol_length_binding(
         &mut all_functions,
-        bind_cryptol_lengths,
         cryptol_spec,
         cryptol_fn,
         function,

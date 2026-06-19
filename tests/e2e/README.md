@@ -45,7 +45,7 @@ $env:SKIP_SAW_TESTS = '1'
 | `rust_equiv`         | `tests/e2e/cases/04-cpp-rust-equivalence/**` — C++/Rust equivalence via shared Cryptol spec.              |
 | `string_ops`         | `tests/e2e/cases/05-string-ops/has_null_byte/**` — SWAR null-byte detection (C++).                        |
 | `strings`            | `tests/e2e/cases/05-string-ops/count_digits/**` — C-string `count_digits` over `_In_reads_(8) const char*` (C++).          |
-| `cryptol_len_bind`   | `tests/e2e/cases/05-string-ops/cryptol_len_bind/**` — ArrayView rule 1: buffer size derived from a length-polymorphic Cryptol signature via `saw-spec-gen.toml` project config. |
+| `cryptol_len_bind`   | `tests/e2e/cases/05-string-ops/cryptol_len_bind/**` — ArrayView rule 1: buffer size derived automatically from a length-polymorphic Cryptol signature. |
 | `int_ops`            | `tests/e2e/cases/06-int-ops/**` — integer-op coverage fillers (multi-arg signed min, predicate bit-trick, byte swap, u8 popcount). |
 | `cpp_stateful`       | `tests/e2e/cases/09-stateful/**` — stateful-method whole-object post-state via `--out-buffer-param` + `--cryptol-fn-out`, incl. byte buffers and typed wide fields (`i32`).  |
 | `rust_adversarial`   | `tests/e2e/cases/99-research/rust_adversarial/**` — research cases for known verifier blind spots.  |

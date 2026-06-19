@@ -14,9 +14,6 @@
 //! ## Example `saw-spec-gen.toml`
 //!
 //! ```toml
-//! # Project-wide gen-verify defaults
-//! bind_cryptol_lengths = true
-//!
 //! # Global alias-size overrides applied to every gen-verify call
 //! alias_size = ["MyOpaque=16"]
 //! ```
@@ -29,9 +26,6 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectConfig {
-    /// Equivalent to `--bind-cryptol-lengths`.
-    pub bind_cryptol_lengths: Option<bool>,
-
     /// Equivalent to `--no-struct-shape-recognizer`.
     pub no_struct_shape_recognizer: Option<bool>,
 
@@ -124,7 +118,6 @@ impl ProjectConfig {
     #[allow(clippy::too_many_arguments)]
     pub fn apply(
         &self,
-        cli_bind_cryptol_lengths: bool,
         cli_no_struct_shape_recognizer: bool,
         cli_use_llvm_combine_modules: bool,
         cli_spec_only_on_missing: bool,
@@ -146,8 +139,6 @@ impl ProjectConfig {
         max_len_precond.extend(cli_max_len_precond);
 
         MergedConfig {
-            bind_cryptol_lengths: cli_bind_cryptol_lengths
-                || self.bind_cryptol_lengths.unwrap_or(false),
             no_struct_shape_recognizer: cli_no_struct_shape_recognizer
                 || self.no_struct_shape_recognizer.unwrap_or(false),
             use_llvm_combine_modules: cli_use_llvm_combine_modules
@@ -164,7 +155,6 @@ impl ProjectConfig {
 
 /// Fully-resolved values after merging the project config with CLI flags.
 pub struct MergedConfig {
-    pub bind_cryptol_lengths: bool,
     pub no_struct_shape_recognizer: bool,
     pub use_llvm_combine_modules: bool,
     pub spec_only_on_missing: bool,

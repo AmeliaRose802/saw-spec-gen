@@ -161,10 +161,9 @@ pub enum Annotation {
     /// SAL: `_In_z_(MAX)` — null-terminated input string with maximum
     /// element count `MAX`. saw-spec-gen treats this as the same shape
     /// as [`Annotation::InReads`] for allocation purposes (a `MAX`-byte
-    /// buffer is allocated) and additionally emits a TODO note marking
-    /// the parameter as carrying a NUL terminator. A future revision
-    /// will auto-emit a `findNul` Cryptol precondition; see
-    /// `lib/cryptol/saw_strings.cry` for the helper definition.
+    /// buffer is allocated) and emits a Cryptol precondition requiring
+    /// at least one NUL byte in the symbolic buffer:
+    /// `llvm_precond {{ any (\\b -> b == 0) buf }}`.
     InZ(usize),
     /// SAL: _Inout_ — read on entry, may be modified
     Inout,
