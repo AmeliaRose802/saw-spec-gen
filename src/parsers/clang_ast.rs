@@ -75,6 +75,12 @@ pub use path_filter::{filter_ast_file, filter_translation_unit_value, FilterStat
 #[allow(unused_imports)]
 pub use virtual_methods::{classes_with_virtual_dtor, extract_virtual_methods, InterfaceMethod};
 
+// Type-resolution context: needed by `array_view_passes` to feed the
+// AST-driven container-layout auto-derive (saw_spec_gen-26d / 530 /
+// qms wiring).
+#[allow(unused_imports)]
+pub use type_ctx::{build as build_type_ctx, TypeContext};
+
 // Visitor / typed-node primitives, exposed for downstream tooling and
 // future extractors.
 #[allow(unused_imports)]

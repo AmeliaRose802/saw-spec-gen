@@ -47,6 +47,9 @@ mod writer;
 // `crate::gen_verify_rust`. Public so the Rust path can reuse it
 // without a circular dep on `verify_script_steps`.
 mod bitcode_overrides;
+mod bitcode_overrides_functional;
+mod bitcode_overrides_functional_string;
+mod bitcode_overrides_functional_vector;
 pub mod cryptol_bridge;
 pub mod cryptol_sig_parse;
 

@@ -191,6 +191,7 @@ fn annotation_str(a: &Annotation) -> String {
         Annotation::OutWrites(n) => format!("out_writes({n})"),
         Annotation::InReadsParam(p) => format!("in_reads({p})"),
         Annotation::OutWritesParam(p) => format!("out_writes({p})"),
+        Annotation::InZ(n) => format!("in_z({n})"),
         Annotation::Inout => "inout".to_string(),
         Annotation::PreValid => "pre_valid".to_string(),
         Annotation::PostInvalid => "post_invalid".to_string(),
