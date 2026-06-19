@@ -280,6 +280,30 @@
                '--max-len-precond',   'nb=4'
            ) }
 
+        # ── Stateful methods: --state-field (R3 gap, docs/03-stateful-method-specs.md)
+        # key_store_activate mutates an object member (`isActive` byte at
+        # offset 0). The monotone safety invariant ("Active is
+        # irreversible") is a relation over the pre/post heap that the
+        # default functional-equivalence spec can't express. `--state-field
+        # ks.isActive@0:1=*->1` models the object as a byte buffer and
+        # asserts the post-state byte directly.
+        #
+        # verified  : always latches isActive = 1 → post-state is 1 for
+        #             every pre-state; the invariant holds.
+        # disproved : toggles the flag, reverting an already-active key;
+        #             SAW finds pre=1 → post=0, proving the stateful
+        #             post-condition is not vacuous.
+        @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/key_store'; File = 'key_store_verified.cpp';  Expected = 'VERIFIED';
+           Cry = 'key_store_spec.cry'; CryptolFn = 'key_store_activate_ret'; Function = 'key_store_activate';
+           ExtraSpecGenArgs = @(
+               '--state-field', 'ks.isActive@0:1=*->1'
+           ) }
+        @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/key_store'; File = 'key_store_disproved.cpp'; Expected = 'DISPROVED';
+           Cry = 'key_store_spec.cry'; CryptolFn = 'key_store_activate_ret'; Function = 'key_store_activate';
+           ExtraSpecGenArgs = @(
+               '--state-field', 'ks.isActive@0:1=*->1'
+           ) }
+
         # ── Box allocator: currently UNKNOWN due to MIR allocator model gap
         # box_allocator currently produces UNKNOWN under the default pipeline
         # (Box::new path the front-end can't model). Tracked separately; not

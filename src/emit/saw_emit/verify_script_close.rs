@@ -58,6 +58,9 @@ pub(super) fn emit_postcondition_and_close(
         ));
     }
 
+    // Stateful method post-state field assertions (--state-field).
+    buffer_overrides.emit_state_postconditions(out);
+
     // Honor --cryptol-arg-order for the *return-value* Cryptol fn.
     // When set, override the auto-derived positional arg list.
     let cryptol_args_owned: Vec<String> = buffer_overrides

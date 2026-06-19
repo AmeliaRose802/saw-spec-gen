@@ -1,0 +1,20 @@
+// Cryptol model for key_store_activate.
+//
+// The stateful post-condition (`isActive` must be 1 afterwards) is
+// expressed entirely on the SAW side via:
+//
+//   --state-field ks.isActive@0:1=*->1
+//
+// so the only Cryptol function needed here is the *return-value* model.
+// `key_store_activate` always reports success (1).
+//
+// saw-spec-gen auto-allocates `ks` as a 1-byte buffer (the field spec's
+// max offset+width), so the pre-state byte view `ks_pre : [1][8]` is the
+// single positional argument to the return model. The 1:1 default
+// mapping means no `--cryptol-arg-order` override is required.
+
+module key_store_spec where
+
+// Return value: activation always succeeds (1), independent of state.
+key_store_activate_ret : [1][8] -> [8]
+key_store_activate_ret _ = 1

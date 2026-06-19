@@ -46,6 +46,7 @@ $env:SKIP_SAW_TESTS = '1'
 | `string_ops`         | `tests/e2e/cases/05-string-ops/has_null_byte/**` — SWAR null-byte detection (C++).                        |
 | `strings`            | `tests/e2e/cases/05-string-ops/count_digits/**` — C-string `count_digits` over `_In_reads_(8) const char*` (C++).          |
 | `int_ops`            | `tests/e2e/cases/06-int-ops/**` — integer-op coverage fillers (multi-arg signed min, predicate bit-trick, byte swap, u8 popcount). |
+| `cpp_stateful`       | `tests/e2e/cases/09-stateful/**` — stateful-method pre/post heap assertions via `--state-field` (R3 gap).  |
 | `rust_adversarial`   | `tests/e2e/cases/99-research/rust_adversarial/**` — research cases for known verifier blind spots.  |
 | `box_allocator`      | `tests/e2e/cases/99-research/box_allocator` — excluded by default; produces `UNKNOWN` under the current pipeline. |
 

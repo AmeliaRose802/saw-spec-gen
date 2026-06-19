@@ -453,6 +453,8 @@ pub(super) fn emit_equiv_spec_body(
         out.push_str(&format!("    llvm_precond {{{{ {call} }}}};\n\n"));
     }
 
+    buffer_overrides.emit_state_preconditions(out);
+
     for global in all_globals {
         out.push_str(&format!(
             "    llvm_alloc_global \"{}\";\n",
