@@ -157,29 +157,28 @@
         @{ Tag = 'strings'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/count_digits'; File = 'count_digits_cstr_disproved.cpp'; Cry = 'count_digits_spec.cry'; CryptolFn = 'count_digits_spec'; Function = 'count_digits'; Expected = 'DISPROVED' }
 
         # ── ArrayView rule 1 (saw_spec_gen-4po): bind Cryptol type
-        #    variable to C++ pointer length via `--bind-cryptol-lengths`.
+        #    variable to C++ pointer length via a `saw-spec-gen.toml` project
+        #    config (or `--bind-cryptol-lengths` CLI flag).
         #    The Cryptol spec carries `{n}(fin n, n <= 8) => [n][8] -> [32]`.
-        #    Without the flag: 1-byte fallback alloc → reads at offset 1..7
+        #    Without config/flag: 1-byte fallback alloc → reads at offset 1..7
         #    fall outside the allocation → DISPROVED.
-        #    With the flag: `n <= 8` is harvested as the buffer length →
-        #    8-byte alloc → VERIFIED. ──────────────────────────────────────
-        @{ Tag = 'cryptol_len_bind'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/cryptol_len_bind'; File = 'count_bytes_bind_verified.cpp'; Cry = 'count_bytes_spec.cry'; CryptolFn = 'count_bytes_spec'; Function = 'count_bytes'; Expected = 'VERIFIED';  ExtraSpecGenArgs = @('--bind-cryptol-lengths') }
-        # Same source, no flag: 1-byte fallback alloc, reads at i>=1 fall
-        # outside the allocation → DISPROVED (allocation-bound failure).
-        @{ Tag = 'cryptol_len_bind'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/cryptol_len_bind'; File = 'count_bytes_bind_verified.cpp'; Cry = 'count_bytes_spec.cry'; CryptolFn = 'count_bytes_spec'; Function = 'count_bytes'; Expected = 'DISPROVED' }
+        #    With config: `n <= 8` is harvested as the buffer length →
+        #    8-byte alloc → VERIFIED.
+        #    Config lives at tests/e2e/cases/05-string-ops/cryptol_len_bind/saw-spec-gen.toml
+        #    and is auto-discovered from the Cryptol spec's directory. ───────
+        @{ Tag = 'cryptol_len_bind'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/cryptol_len_bind'; File = 'count_bytes_bind_verified.cpp'; Cry = 'count_bytes_spec.cry'; CryptolFn = 'count_bytes_spec'; Function = 'count_bytes'; Expected = 'VERIFIED' }
         # Deliberate value bug (widens digit range to include '@'). The
-        # flag still allocates 8 bytes, so reads succeed; the proof fails
-        # because the symbolic solver finds a witness — DISPROVED for
-        # the *right* reason (real arithmetic bug).
-        @{ Tag = 'cryptol_len_bind'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/cryptol_len_bind'; File = 'count_bytes_bind_disproved.cpp'; Cry = 'count_bytes_spec.cry'; CryptolFn = 'count_bytes_spec'; Function = 'count_bytes'; Expected = 'DISPROVED'; ExtraSpecGenArgs = @('--bind-cryptol-lengths') }
+        # config still allocates 8 bytes, so reads succeed; the proof fails
+        # because the symbolic solver finds a witness — DISPROVED for the
+        # *right* reason (real arithmetic bug, not allocation size).
+        @{ Tag = 'cryptol_len_bind'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/cryptol_len_bind'; File = 'count_bytes_bind_disproved.cpp'; Cry = 'count_bytes_spec.cry'; CryptolFn = 'count_bytes_spec'; Function = 'count_bytes'; Expected = 'DISPROVED' }
 
         # ── ArrayView rule 2 (saw_spec_gen-5mt): `_In_z_(N)` SAL macro
         #    for null-terminated input strings. The macro allocates an
-        #    N-byte buffer (same shape as `_In_reads_(N)`) so reads in
-        #    the bounded loop succeed. A future revision will auto-emit
-        #    a `findNul` Cryptol precondition (helper lives in
-        #    lib/cryptol/saw_strings.cry); today the macro only handles
-        #    the allocation. ─────────────────────────────────────────────
+        #    N-byte buffer (same shape as `_In_reads_(N)`) and emits a
+        #    NUL-content precondition (`any (\b -> b == 0) s`) so SAW
+        #    only explores buffers that contain a terminator within the
+        #    declared bound. ─────────────────────────────────────────────
         @{ Tag = 'in_z_macro'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/in_z_macro'; File = 'count_digits_z_verified.cpp'; Cry = 'count_digits_z_spec.cry'; CryptolFn = 'count_digits_z_spec'; Function = 'count_digits_z'; Expected = 'VERIFIED' }
         # Deliberate value bug (counts non-digits). The _In_z_(8) macro
         # still allocates 8 bytes, so reads succeed; the proof fails on

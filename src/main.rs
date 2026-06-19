@@ -69,6 +69,7 @@ fn main() -> Result<()> {
             args.bind_cryptol_lengths,
             args.no_struct_shape_recognizer,
             args.container_layouts,
+            args.config,
         ),
         Commands::GenRustTraitStubs { schema, output } => {
             commands::gen_rust_trait_stubs(schema, output)

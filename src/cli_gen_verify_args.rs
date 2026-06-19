@@ -248,6 +248,18 @@ pub struct GenVerifyArgs {
     /// Passing this flag prints a stderr warning.
     #[arg(long = "container-layouts", value_name = "PATH")]
     pub container_layouts: Option<PathBuf>,
+
+    /// Path to a `saw-spec-gen.toml` project config file.
+    ///
+    /// When omitted, saw-spec-gen walks up from the current directory looking
+    /// for the first `saw-spec-gen.toml` it finds (the same auto-discovery
+    /// behaviour as `rustfmt.toml`).  Pass `--config /dev/null` to disable
+    /// auto-discovery entirely.
+    ///
+    /// Config values act as project-wide defaults; explicit CLI flags always
+    /// override them.
+    #[arg(long = "config", value_name = "PATH")]
+    pub config: Option<PathBuf>,
 }
 
 /// Arguments for the `gen-verify-rust` subcommand (legacy Rust-only alias).

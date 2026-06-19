@@ -323,7 +323,31 @@ pub fn gen_verify_cmd(
     bind_cryptol_lengths: bool,
     no_struct_shape_recognizer: bool,
     container_layouts: Option<PathBuf>,
+    config: Option<PathBuf>,
 ) -> Result<()> {
+    // Load project config: explicit path > near the spec file > cwd.
+    let cfg = match config {
+        Some(ref p) => crate::project_config::ProjectConfig::load(p)?,
+        None => {
+            let cwd = std::env::current_dir()?;
+            // Walk up from the Cryptol spec's directory first so a config
+            // placed next to the spec files is found even when the binary is
+            // invoked from the repo root (e.g. via the e2e test harness).
+            let spec_dir = cryptol_spec.parent().unwrap_or(&cwd);
+            crate::project_config::ProjectConfig::discover_with_hint(spec_dir, &cwd)?
+        }
+    };
+    let merged = cfg.apply(
+        bind_cryptol_lengths,
+        no_struct_shape_recognizer,
+        use_llvm_combine_modules,
+        spec_only_on_missing,
+        alias_size,
+        alias_enum,
+        in_buffer_size,
+        max_len_precond,
+    );
+
     // Auto-detect language: Rust when --llvm-ir is provided without --ast
     let effective_lang = match lang.as_deref() {
         Some("rust") => "rust",
@@ -341,10 +365,10 @@ pub fn gen_verify_cmd(
     if effective_lang == "rust" {
         let ir_path = llvm_ir.ok_or_else(|| anyhow::anyhow!("--lang rust requires --llvm-ir"))?;
         let overrides = crate::buffer_overrides::BufferOverrides::from_cli(
-            &in_buffer_size,
+            &merged.in_buffer_size,
             &out_buffer_param,
             &cryptol_fn_out,
-            &max_len_precond,
+            &merged.max_len_precond,
             &cryptol_arg_order,
             &cryptol_fn_pre,
         )?;
@@ -356,7 +380,7 @@ pub fn gen_verify_cmd(
             &cryptol_fn,
             &function,
             &output,
-            spec_only_on_missing,
+            merged.spec_only_on_missing,
             &overrides,
             &vmap,
         );
@@ -367,10 +391,10 @@ pub fn gen_verify_cmd(
         anyhow::bail!("--ast is required for C++ verification (use --lang rust for Rust)");
     }
     let buffer_overrides = crate::buffer_overrides::BufferOverrides::from_cli(
-        &in_buffer_size,
+        &merged.in_buffer_size,
         &out_buffer_param,
         &cryptol_fn_out,
-        &max_len_precond,
+        &merged.max_len_precond,
         &cryptol_arg_order,
         &cryptol_fn_pre,
     )?;
@@ -382,13 +406,13 @@ pub fn gen_verify_cmd(
         &cryptol_fn,
         &function,
         &output,
-        &alias_size,
-        &alias_enum,
-        use_llvm_combine_modules,
-        spec_only_on_missing,
+        &merged.alias_size,
+        &merged.alias_enum,
+        merged.use_llvm_combine_modules,
+        merged.spec_only_on_missing,
         &buffer_overrides,
-        bind_cryptol_lengths,
-        no_struct_shape_recognizer,
+        merged.bind_cryptol_lengths,
+        merged.no_struct_shape_recognizer,
         container_layouts.as_deref(),
     )
 }
