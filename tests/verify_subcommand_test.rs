@@ -206,7 +206,7 @@ EOF
     fn run_verify(&self, out_dir: &Path) -> std::process::ExitStatus {
         Command::new(saw_spec_gen_binary())
             .args([
-                "verify",
+                "verify-cpp",
                 "--cpp-file",
                 self.cpp_file.to_str().unwrap(),
                 "--cryptol-spec",

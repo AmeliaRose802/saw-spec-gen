@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Thin PowerShell shim for the native `saw-spec-gen verify` subcommand.
+    Thin PowerShell shim for the native `saw-spec-gen verify-cpp` subcommand.
 
 .DESCRIPTION
     Keeps the historical `verify.ps1` entry point for callers and the e2e
@@ -30,7 +30,7 @@ $tools = Find-SawSpecGenTools -RepoRoot $ScriptRoot
 Add-SolverDirToPath -Tools $tools
 
 $args = @(
-    'verify',
+    'verify-cpp',
     '--cpp-file', $CppFile,
     '--cryptol-spec', $CryptolSpec,
     '--cryptol-fn', $CryptolFn,

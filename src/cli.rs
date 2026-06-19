@@ -22,9 +22,10 @@ pub enum Commands {
     /// Compiles the C++ source to LLVM bitcode, dumps/filter clang AST,
     /// invokes `gen-verify`, runs SAW, and writes `result.json`.
     ///
-    /// Usage: saw-spec-gen verify --cpp-file add_one.cpp \
+    /// Usage: saw-spec-gen verify-cpp --cpp-file add_one.cpp \
     ///          --cryptol-spec add_one.cry --cryptol-fn add_one_spec \
     ///          --function add_one
+    #[command(name = "verify-cpp")]
     Verify(#[command(flatten)] VerifyArgs),
 
     /// Generate SAW specs from a clang AST dump (C/C++)
