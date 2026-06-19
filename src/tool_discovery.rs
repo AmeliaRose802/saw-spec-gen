@@ -387,11 +387,12 @@ mod tests {
     fn rustc_env_path_keeps_symlink_name() {
         use std::os::unix::fs::symlink;
 
-        let tmp = std::env::temp_dir().join(format!("saw-spec-gen-rustc-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&tmp);
-        fs::create_dir_all(&tmp).expect("create temp dir");
-        let rustup = tmp.join("rustup");
-        let rustc = tmp.join("rustc");
+        let test_dir =
+            std::env::temp_dir().join(format!("saw-spec-gen-rustc-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&test_dir);
+        fs::create_dir_all(&test_dir).expect("create temp dir");
+        let rustup = test_dir.join("rustup");
+        let rustc = test_dir.join("rustc");
         fs::write(&rustup, "#!/bin/sh\n").expect("write rustup file");
         symlink(&rustup, &rustc).expect("create rustc symlink");
 
@@ -404,6 +405,6 @@ mod tests {
             resolve_tool_path("rustc", "", None, &file_vars, None).expect("resolve rustc");
         assert_eq!(resolved, rustc);
 
-        let _ = fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(&test_dir);
     }
 }

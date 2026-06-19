@@ -41,6 +41,10 @@ pub(crate) fn run_capture(cmd: &mut Command) -> Result<String> {
     Ok(text)
 }
 
+/// Run a command and always return captured stdout/stderr text.
+///
+/// Unlike `run_capture`, this does not treat non-zero exit codes as an
+/// error, which is required when downstream logic classifies tool output.
 pub(crate) fn run_capture_allow_failure(cmd: &mut Command) -> Result<String> {
     let out = cmd
         .output()
