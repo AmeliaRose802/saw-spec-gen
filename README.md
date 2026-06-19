@@ -20,8 +20,10 @@ pwsh -File ./verify.ps1 -CppFile tests/e2e/cases/01-tutorial/bounded_loop/add_on
 
 ## What's in the box
 
-- **`verify.ps1`** — prove a C++ function matches a Cryptol spec.
-  `clang → bitcode → AST → saw-spec-gen → SAW`.
+- **`saw-spec-gen verify`** — native C++ verification pipeline.
+  `clang → bitcode → AST → gen-verify → SAW`.
+- **`verify.ps1`** — thin PowerShell shim over `saw-spec-gen verify`
+  for existing callers.
 - **`verify-rust.ps1`** — same, for a Rust function. `rustc → bitcode →
   resolve mangled symbol → SAW`. No `#[no_mangle]` / `pub extern "C"`
   required.

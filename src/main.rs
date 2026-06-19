@@ -11,6 +11,18 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Verify(args) => commands::verify_cmd(
+            args.cpp_file,
+            args.cryptol_spec,
+            args.cryptol_fn,
+            args.function,
+            args.output,
+            args.include_dirs,
+            args.cxx_standard,
+            args.clang_flags,
+            args.extra_spec_gen_args,
+            args.spec_only_on_missing,
+        ),
         Commands::FromClangAst {
             input,
             output,

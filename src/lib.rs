@@ -18,6 +18,10 @@ pub mod gen_verify_rust;
 pub mod gen_verify_rust_emit;
 pub mod inventory;
 pub mod mangle;
+pub mod verify_cache;
+pub mod verify_cpp;
+pub mod verify_result;
+pub mod verify_tools;
 
 // Grouped subsystems. Each is a folder under `src/` with its own
 // module root file. Re-exported below so existing `crate::clang_ast::`

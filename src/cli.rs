@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-use crate::cli_gen_verify_args::{GenVerifyArgs, GenVerifyRustArgs};
+use crate::cli_gen_verify_args::{GenVerifyArgs, GenVerifyRustArgs, VerifyArgs};
 
 /// Auto-generate SAW verification specs from C++ AST and Rust MIR type information.
 ///
@@ -17,6 +17,16 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
+    /// Run the full native C++ verification pipeline.
+    ///
+    /// Compiles the C++ source to LLVM bitcode, dumps/filter clang AST,
+    /// invokes `gen-verify`, runs SAW, and writes `result.json`.
+    ///
+    /// Usage: saw-spec-gen verify --cpp-file add_one.cpp \
+    ///          --cryptol-spec add_one.cry --cryptol-fn add_one_spec \
+    ///          --function add_one
+    Verify(#[command(flatten)] VerifyArgs),
+
     /// Generate SAW specs from a clang AST dump (C/C++)
     ///
     /// Usage: saw-spec-gen from-clang-ast --input ast.json --output specs/
