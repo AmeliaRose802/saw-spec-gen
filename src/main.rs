@@ -77,6 +77,17 @@ fn main() -> Result<()> {
             args.cryptol_arg_order,
             args.variant_map,
         ),
+        Commands::VerifyRust(args) => {
+            let code = commands::verify_rust_cmd(saw_spec_gen::verify_rust::VerifyRustArgs {
+                rust_file: args.rust_file,
+                cryptol_spec: args.cryptol_spec,
+                cryptol_fn: args.cryptol_fn,
+                function: args.function,
+                output_dir: args.output,
+                spec_only_on_missing: args.spec_only_on_missing,
+            })?;
+            std::process::exit(code);
+        }
         Commands::FilterAst {
             input,
             output,

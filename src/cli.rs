@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-use crate::cli_gen_verify_args::{GenVerifyArgs, GenVerifyRustArgs};
+use crate::cli_gen_verify_args::{GenVerifyArgs, GenVerifyRustArgs, VerifyRustRunArgs};
 
 /// Auto-generate SAW verification specs from C++ AST and Rust MIR type information.
 ///
@@ -156,6 +156,14 @@ pub enum Commands {
     ///          --cryptol-spec add_one_spec.cry --cryptol-fn add_one_spec \
     ///          --function add_one --output out_rust_add_one/
     GenVerifyRust(#[command(flatten)] GenVerifyRustArgs),
+
+    /// Run the full native Rust verification pipeline:
+    /// `rustc -> llvm-dis -> gen-verify-rust -> saw`.
+    ///
+    /// On DISPROVED, evaluates the Cryptol spec and re-runs the Rust
+    /// implementation at the counterexample inputs, then writes
+    /// `result.json` in schema version `1`.
+    VerifyRust(#[command(flatten)] VerifyRustRunArgs),
 
     /// Strip system-header decls from a clang AST dump.
     ///

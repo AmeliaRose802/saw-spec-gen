@@ -265,3 +265,32 @@ pub struct GenVerifyRustArgs {
     #[arg(long = "variant-map", value_name = "PARAM=V1:D1,V2:D2,...", num_args = 0..)]
     pub variant_map: Vec<String>,
 }
+
+/// Arguments for the native `verify-rust` pipeline runner.
+#[derive(Args)]
+pub struct VerifyRustRunArgs {
+    /// Path to the Rust source file.
+    #[arg(long = "rust-file")]
+    pub rust_file: PathBuf,
+
+    /// Path to Cryptol spec file (`.cry`).
+    #[arg(long = "cryptol-spec")]
+    pub cryptol_spec: PathBuf,
+
+    /// Name of the Cryptol function to verify against.
+    #[arg(long = "cryptol-fn")]
+    pub cryptol_fn: String,
+
+    /// Source-level Rust function name (e.g. `add_one`).
+    #[arg(long)]
+    pub function: String,
+
+    /// Optional output directory (defaults to `out_rust_<basename>`).
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+
+    /// Soft-exit with `result.json` status `not_attempted`
+    /// when no matching implementation symbol exists.
+    #[arg(long = "spec-only-on-missing", default_value_t = false)]
+    pub spec_only_on_missing: bool,
+}
