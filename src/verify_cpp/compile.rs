@@ -8,10 +8,12 @@ use std::process::Command;
 
 /// Strip the Windows extended-length / verbatim prefix (`\\?\` or `\\?\UNC\`)
 /// from a path string. clang resolves quoted `#include "a/b.h"` directives
-/// relative to `-I` search dirs by textual path joining; when the search dir
-/// carries a `\\?\` verbatim prefix (as produced by `Path::canonicalize` on
-/// Windows) that resolution fails and the header is reported "file not found".
-/// Passing the plain absolute path keeps both clang and the OS happy.
+/// relative to the including file's directory and the `-I` search dirs by
+/// textual path joining; when that base path carries a `\\?\` verbatim prefix
+/// (as produced by `Path::canonicalize` on Windows) the join keeps the `..`
+/// components literal — verbatim paths are never normalized — so the header is
+/// reported "file not found". Passing the plain absolute path lets the Win32
+/// path layer collapse `..` and keeps both clang and the OS happy.
 fn strip_verbatim_prefix(path: &str) -> String {
     if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
         format!(r"\\{rest}")
@@ -20,6 +22,13 @@ fn strip_verbatim_prefix(path: &str) -> String {
     } else {
         path.to_string()
     }
+}
+
+/// Render a path as a clang command-line argument with any Windows verbatim
+/// prefix stripped. Used for the source file so clang can resolve relative
+/// `#include "../.."` directives against the on-disk directory.
+fn clang_path_arg(path: &Path) -> String {
+    strip_verbatim_prefix(&path.display().to_string())
 }
 
 pub(super) fn build_clang_flags(
@@ -57,7 +66,7 @@ pub(super) fn emit_bitcode(
                 llvm_target,
             ])
             .args(user_flags)
-            .arg(cpp_file)
+            .arg(clang_path_arg(cpp_file))
             .arg("-o")
             .arg(bc_file),
         "clang bitcode",
@@ -81,7 +90,7 @@ pub(super) fn emit_llvm_ir(
             llvm_target,
         ])
         .args(user_flags)
-        .arg(cpp_file)
+        .arg(clang_path_arg(cpp_file))
         .arg("-o")
         .arg(ll_file)
         .output()?;
@@ -155,7 +164,7 @@ pub(super) fn dump_ast(
             llvm_target,
         ])
         .args(user_flags)
-        .arg(cpp_file)
+        .arg(clang_path_arg(cpp_file))
         .output()?;
     if !out.status.success() || out.stdout.is_empty() {
         bail!("clang AST dump failed");
