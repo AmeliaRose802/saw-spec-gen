@@ -9,7 +9,7 @@ use super::cryptol_bridge::cryptol_arg_for;
 use super::names::{sanitize_name, spec_safe_id};
 use super::overrides::{container_layout_for, emit_container_this};
 use super::stubs::AssembledStubs;
-use super::verify_script::SretPrestate;
+use super::verify_script_sret::SretPrestate;
 use crate::buffer_overrides::BufferOverrides;
 use crate::constraints::*;
 use std::collections::HashSet;
