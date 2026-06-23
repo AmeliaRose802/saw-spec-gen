@@ -52,6 +52,17 @@ pub fn run(
     let mut all_functions = clang_ast::extract_functions(&parsed_ast, None)?;
     eprintln!("Found {} functions", all_functions.len());
 
+    // Remember which params had SOURCE-level SAL annotations before any
+    // synthetic pass (length-binding, struct-shape) injects its own. The
+    // emitter uses this to decide whether to emit a no-op override for
+    // `llvm.var.annotation.p0.p0`, which only exists in the bitcode when
+    // an `__attribute__((annotate(...)))` was actually present in the source.
+    let has_source_sal_annotations = all_functions
+        .iter()
+        .find(|f| f.name == function)
+        .map(|f| f.params.iter().any(|p| !p.annotations.is_empty()))
+        .unwrap_or(false);
+
     // ArrayView pre-derive passes (saw_spec_gen-rng umbrella).
     // Order matters: struct-shape recognizer first so the binding
     // pass can respect its output, then the container catalog
@@ -462,6 +473,7 @@ pub fn run(
         &ir_struct_defs,
         output,
         buffer_overrides,
+        has_source_sal_annotations,
     )?;
 
     // Post-processing: rewrite unresolved `llvm_alias "X"` references into

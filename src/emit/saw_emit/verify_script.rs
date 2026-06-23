@@ -44,6 +44,7 @@ pub fn emit_verification_script(
     ir_struct_defs: &HashMap<String, IrStructDef>,
     output_dir: &Path,
     buffer_overrides: &BufferOverrides,
+    has_source_sal_annotations: bool,
 ) -> Result<()> {
     fs::create_dir_all(output_dir)?;
 
@@ -92,8 +93,11 @@ pub fn emit_verification_script(
     let mut override_names: Vec<String> = Vec::new();
 
     // Inject a no-op override for `@llvm.var.annotation` intrinsics generated
-    // by SAL annotations on parameters (SAW can't simulate them).
-    let needs_var_annotation_ov = target_fn.params.iter().any(|p| !p.annotations.is_empty());
+    // by SAL annotations on parameters (SAW can't simulate them). Only emit
+    // when the source actually had SAL annotations — synthetic annotations
+    // added by gen-verify passes (length-binding, struct-shape) do NOT
+    // produce this intrinsic in the bitcode.
+    let needs_var_annotation_ov = has_source_sal_annotations;
     if needs_var_annotation_ov {
         step += 1;
         emit_var_annotation_override(&mut out, step, &mut override_names);
