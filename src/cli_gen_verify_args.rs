@@ -1,10 +1,63 @@
-//! Argument structs for the `gen-verify` and `gen-verify-rust` subcommands.
+//! Argument structs for the `verify`, `gen-verify`, and `gen-verify-rust`
+//! subcommands.
 //!
 //! Extracted from `cli.rs` so that each source file stays under the
 //! 500 non-whitespace line limit mandated by `.github/copilot-instructions.md`.
 
 use clap::Args;
 use std::path::PathBuf;
+
+/// Arguments for the native `verify` subcommand (C++).
+#[derive(Args)]
+pub struct VerifyArgs {
+    /// Path to the C++ source file.
+    #[arg(long = "cpp-file")]
+    pub cpp_file: PathBuf,
+
+    /// Path to the Cryptol spec file (.cry).
+    #[arg(long = "cryptol-spec")]
+    pub cryptol_spec: PathBuf,
+
+    /// Name of the Cryptol function to check against.
+    #[arg(long = "cryptol-fn")]
+    pub cryptol_fn: String,
+
+    /// Name of the C++ function to verify (unmangled source name).
+    #[arg(long)]
+    pub function: String,
+
+    /// Output directory for generated artifacts. Defaults to
+    /// `out_<basename>` next to `--cpp-file`.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+
+    /// Extra `-I` include directories passed to every clang invocation.
+    #[arg(long = "include-dir", num_args = 0.., action = clap::ArgAction::Append)]
+    pub include_dirs: Vec<PathBuf>,
+
+    /// Optional C++ standard passed as `-std=<value>`.
+    #[arg(long = "cxx-standard")]
+    pub cxx_standard: Option<String>,
+
+    /// Additional raw flags appended verbatim to every clang invocation.
+    #[arg(long = "clang-flag", num_args = 0.., action = clap::ArgAction::Append)]
+    pub clang_flags: Vec<String>,
+
+    /// Extra raw argv elements appended to the internal `gen-verify`
+    /// invocation. Use for buffer overrides and other advanced flags
+    /// without the outer `verify` subcommand needing to understand them.
+    #[arg(
+        long = "extra-spec-gen-arg",
+        num_args = 0..,
+        action = clap::ArgAction::Append
+    )]
+    pub extra_spec_gen_args: Vec<String>,
+
+    /// Soft-exit with a `result.json` status of `not_attempted` when the
+    /// target function has no matching implementation symbol.
+    #[arg(long = "spec-only-on-missing", default_value_t = false)]
+    pub spec_only_on_missing: bool,
+}
 
 /// Arguments for the `gen-verify` subcommand (C++ and unified C++/Rust path).
 #[derive(Args)]

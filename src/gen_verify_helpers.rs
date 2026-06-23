@@ -76,22 +76,11 @@ pub(crate) fn emit_spec_only_result(
     function: &str,
     reason: &str,
 ) -> Result<()> {
-    std::fs::create_dir_all(output)?;
-    let payload = serde_json::json!({
-        "cryptol_fn": cryptol_fn,
-        "function":   function,
-        "status":     "not_attempted",
-        "verdict":    "NOT_ATTEMPTED",
-        "reason":     reason,
-        "message":    reason,
-        "kind":       "spec_only",
-    });
-    let result_path = output.join("result.json");
-    std::fs::write(&result_path, serde_json::to_string_pretty(&payload)?)?;
+    crate::verify_result::write_spec_only_result(output, "cpp", function, cryptol_fn, reason)?;
     eprintln!(
         "spec-only: no implementation for '{}'; wrote {}",
         function,
-        result_path.display(),
+        output.join("result.json").display(),
     );
     Ok(())
 }

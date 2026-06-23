@@ -10,8 +10,36 @@ use std::path::PathBuf;
 
 use crate::{
     clang_ast, constraints, cryptol_emit, gen_verify, gen_verify_rust, llvm_ir, mir_json,
-    patch_llvm_ir, rust_trait_emit, saw_emit,
+    patch_llvm_ir, rust_trait_emit, saw_emit, verify_cpp,
 };
+
+#[allow(clippy::too_many_arguments)]
+pub fn verify_cmd(
+    cpp_file: PathBuf,
+    cryptol_spec: PathBuf,
+    cryptol_fn: String,
+    function: String,
+    output: Option<PathBuf>,
+    include_dirs: Vec<PathBuf>,
+    cxx_standard: Option<String>,
+    clang_flags: Vec<String>,
+    extra_spec_gen_args: Vec<String>,
+    spec_only_on_missing: bool,
+) -> Result<()> {
+    let outcome = verify_cpp::run(verify_cpp::VerifyRequest {
+        cpp_file,
+        cryptol_spec,
+        cryptol_fn,
+        function,
+        output,
+        include_dirs,
+        cxx_standard,
+        clang_flags,
+        extra_spec_gen_args,
+        spec_only_on_missing,
+    })?;
+    std::process::exit(outcome.exit_code);
+}
 
 pub fn from_clang_ast(
     input: PathBuf,
