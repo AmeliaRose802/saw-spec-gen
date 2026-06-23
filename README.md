@@ -24,9 +24,12 @@ pwsh -File ./verify.ps1 -CppFile tests/e2e/cases/01-tutorial/bounded_loop/add_on
   `clang → bitcode → AST → gen-verify → SAW`.
 - **`verify.ps1`** — thin PowerShell shim over `saw-spec-gen verify-cpp`
   for existing callers.
-- **`verify-rust.ps1`** — same, for a Rust function. `rustc → bitcode →
-  resolve mangled symbol → SAW`. No `#[no_mangle]` / `pub extern "C"`
-  required.
+- **`saw-spec-gen verify-rust`** — native Rust verification pipeline:
+  `rustc → bitcode → llvm-dis → gen-verify-rust → SAW`, with
+  DISPROVED counterexample replay + `result.json` output. No
+  `#[no_mangle]` / `pub extern "C"` required.
+- **`verify-rust.ps1`** — thin PowerShell shim over `saw-spec-gen
+  verify-rust` for existing callers.
 - **`verify-equiv.ps1`** — prove a C++ function and a Rust function
   both match the same Cryptol spec (and therefore each other). Reports
   `EQUIVALENT` / `NOT EQUIVALENT` with a side-by-side counterexample
@@ -70,9 +73,9 @@ pwsh -File ./verify.ps1 -CppFile tests/e2e/cases/01-tutorial/bounded_loop/add_on
                        -CryptolFn add_one_spec -Function add_one
 ```
 
-Swap `verify.ps1`+`-CppFile` for `verify-rust.ps1`+`-RustFile` for Rust,
-or use `verify-equiv.ps1` with both `-CppFile` and `-RustFile` for
-cross-language equivalence.
+For Rust, either call `saw-spec-gen verify-rust` directly or keep using
+`verify-rust.ps1` (which now forwards to the native subcommand).
+`verify-equiv.ps1` remains the C++/Rust equivalence entrypoint.
 
 The output directory (`out_<basename>/`) contains every intermediate
 file — the `.bc`, the AST JSON, every generated override spec, the

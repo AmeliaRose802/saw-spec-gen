@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use crate::{
     clang_ast, constraints, cryptol_emit, gen_verify, gen_verify_rust, llvm_ir, mir_json,
-    patch_llvm_ir, rust_trait_emit, saw_emit, verify_cpp,
+    patch_llvm_ir, rust_trait_emit, saw_emit, verify_cpp, verify_rust,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -442,6 +442,11 @@ pub fn gen_verify_rust_cmd(
         &overrides,
         &vmap,
     )
+}
+
+pub fn verify_rust_cmd(args: verify_rust::VerifyRustArgs) -> Result<i32> {
+    let outcome = verify_rust::run(args)?;
+    Ok(outcome.exit_code())
 }
 
 pub fn filter_ast(input: PathBuf, output: PathBuf, keep: Vec<PathBuf>) -> Result<()> {

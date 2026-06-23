@@ -18,9 +18,13 @@ pub mod gen_verify_rust;
 pub mod gen_verify_rust_emit;
 pub mod inventory;
 pub mod mangle;
+pub mod result_json;
+pub mod tool_discovery;
 pub mod verify_cache;
 pub mod verify_cpp;
 pub mod verify_result;
+pub mod verify_rust;
+pub mod verify_rust_helpers;
 pub mod verify_tools;
 
 // Grouped subsystems. Each is a folder under `src/` with its own
