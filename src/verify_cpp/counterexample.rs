@@ -61,7 +61,7 @@ pub(super) fn evaluate_counterexample(
     std::fs::write(
         &eval_script,
         format!(
-            "import \"{cry_name}\";\nlet r = eval_int {{ {cryptol_fn} {cryptol_args} }};\nprint (str_concat \"CRYPTOL_RESULT=\" (show r));\n"
+            "import \"{cry_name}\";\nlet r = eval_int {{{{ {cryptol_fn} {cryptol_args} }}}};\nprint (str_concat \"CRYPTOL_RESULT=\" (show r));\n"
         ),
     )?;
     let eval_out = run_saw(saw, output_dir, "_eval_cex.saw")?;

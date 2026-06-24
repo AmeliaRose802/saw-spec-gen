@@ -1,8 +1,9 @@
 # `result.json` — per-run verification record
 
-Every invocation of `verify.ps1`, `verify-rust.ps1`, or
+Every invocation of `verify.ps1`, `saw-spec-gen verify-rust`
+(`verify-rust.ps1` is now a shim to that subcommand), or
 `verify-equiv.ps1` writes a single `result.json` into the run's output
-directory.  The file is the machine-readable contract between SAW
+directory. The file is the machine-readable contract between SAW
 verification and downstream tooling (the e2e runner, the
 `saw-spec-gen collect-results` adapter, `pretty-specs` docs badges).
 
@@ -14,7 +15,7 @@ This document describes **schema version `1`**.
 <output-dir>/result.json
 ```
 
-For `verify.ps1` / `verify-rust.ps1`, `<output-dir>` defaults to
+For `verify.ps1` / `saw-spec-gen verify-rust`, `<output-dir>` defaults to
 `out_<basename>/` next to the source file (or whatever
 `-OutputDir <path>` overrides).  `verify-equiv.ps1` writes one file at
 `<output-dir>/result.json` (the combined verdict) plus per-side files
