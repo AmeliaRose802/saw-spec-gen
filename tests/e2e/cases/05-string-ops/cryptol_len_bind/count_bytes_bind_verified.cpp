@@ -8,16 +8,11 @@ The Cryptol spec for `count_bytes` is
 
 i.e. it is *length-polymorphic* in `n`, with an upper bound of 8.
 The C++ implementation reads exactly 8 bytes behind `s`. There is
-NO `_In_reads_(8)` SAL macro on the parameter on purpose — the
-test demonstrates that saw-spec-gen's `--bind-cryptol-lengths`
-flag extracts the upper bound `n <= 8` from the Cryptol signature
-and allocates an 8-byte buffer instead of the 1-byte fallback.
+NO `_In_reads_(8)` SAL macro on the parameter — saw-spec-gen reads
+the upper bound `n <= 8` directly from the Cryptol signature and
+allocates an 8-byte buffer automatically.
 
-Without the flag, gen-verify would emit an unsized `_In_z_`/TODO
-block, allocate `llvm_int 8`, and SAW would reject the read at
-offset 1 with "outside of the allocation" — DISPROVED.
-
-Expected RESULT: VERIFIED (with `--bind-cryptol-lengths`).
+Expected RESULT: VERIFIED.
 */
 
 #include <cstdint>

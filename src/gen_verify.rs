@@ -31,7 +31,6 @@ pub fn run(
     use_llvm_combine_modules: bool,
     spec_only_on_missing: bool,
     buffer_overrides: &crate::buffer_overrides::BufferOverrides,
-    bind_cryptol_lengths: bool,
     no_struct_shape_recognizer: bool,
     container_layouts: Option<&Path>,
 ) -> Result<()> {
@@ -52,6 +51,17 @@ pub fn run(
     };
     let mut all_functions = clang_ast::extract_functions(&parsed_ast, None)?;
     eprintln!("Found {} functions", all_functions.len());
+
+    // Remember which params had SOURCE-level SAL annotations before any
+    // synthetic pass (length-binding, struct-shape) injects its own. The
+    // emitter uses this to decide whether to emit a no-op override for
+    // `llvm.var.annotation.p0.p0`, which only exists in the bitcode when
+    // an `__attribute__((annotate(...)))` was actually present in the source.
+    let has_source_sal_annotations = all_functions
+        .iter()
+        .find(|f| f.name == function)
+        .map(|f| f.params.iter().any(|p| !p.annotations.is_empty()))
+        .unwrap_or(false);
 
     // ArrayView pre-derive passes (saw_spec_gen-rng umbrella).
     // Order matters: struct-shape recognizer first so the binding
@@ -75,7 +85,6 @@ pub fn run(
         crate::array_view_passes::load_container_catalog(container_layouts, &type_ctx.structs);
     crate::array_view_passes::apply_cryptol_length_binding(
         &mut all_functions,
-        bind_cryptol_lengths,
         cryptol_spec,
         cryptol_fn,
         function,
@@ -464,6 +473,7 @@ pub fn run(
         &ir_struct_defs,
         output,
         buffer_overrides,
+        has_source_sal_annotations,
     )?;
 
     // Post-processing: rewrite unresolved `llvm_alias "X"` references into

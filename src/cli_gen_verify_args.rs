@@ -227,13 +227,6 @@ pub struct GenVerifyArgs {
     #[arg(long = "variant-map", value_name = "PARAM=V1:D1,V2:D2,...", num_args = 0..)]
     pub variant_map: Vec<String>,
 
-    /// Bind Cryptol-signature type variables to the matching
-    /// C++/Rust pointer parameter lengths (ArrayView rule 1).
-    /// Parses the spec's binders + predicate context and injects
-    /// synthetic `_In_reads_(MAX)` annotations.
-    #[arg(long = "bind-cryptol-lengths", default_value_t = false)]
-    pub bind_cryptol_lengths: bool,
-
     /// Disable the struct-shape recognizer (ArrayView rule 4).
     /// The recognizer pairs adjacent `(T* buf, size_t len)`
     /// parameters and synthesizes `_In_reads_(len)` on the buffer
@@ -248,6 +241,20 @@ pub struct GenVerifyArgs {
     /// Passing this flag prints a stderr warning.
     #[arg(long = "container-layouts", value_name = "PATH")]
     pub container_layouts: Option<PathBuf>,
+
+    /// Path to a per-invocation config file (TOML).
+    ///
+    /// When omitted, saw-spec-gen looks for config in this order:
+    ///   1. `<cryptol-spec-stem>.toml` — sibling of the `--cryptol-spec` file,
+    ///      same name, `.toml` extension (e.g. `count_bytes_spec.toml` next to
+    ///      `count_bytes_spec.cry`).  Ideal for per-spec settings in a repo
+    ///      with multiple compositional specs.
+    ///   2. `saw-spec-gen.toml` walking up from the spec's directory.
+    ///   3. `saw-spec-gen.toml` walking up from the current working directory.
+    ///
+    /// Config values act as defaults; explicit CLI flags always override them.
+    #[arg(long = "config", value_name = "PATH")]
+    pub config: Option<PathBuf>,
 }
 
 /// Arguments for the `gen-verify-rust` subcommand (legacy Rust-only alias).

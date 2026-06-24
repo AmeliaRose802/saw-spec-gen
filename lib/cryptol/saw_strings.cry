@@ -9,9 +9,10 @@
 //
 // where `n is the buffer's Cryptol-side length. The companion
 // SAL macro `_In_z_(N)` (see `tests/e2e/cases/02-havoc-coverage/
-// saw_sal.h`) allocates an N-byte buffer; today saw-spec-gen emits
-// a TODO note pointing at this helper but does not yet auto-emit
-// the precondition itself (bd issue saw_spec_gen-5mt).
+// saw_sal.h`) now auto-emits a NUL-presence precondition in generated
+// SAW specs (`llvm_precond {{ any (\\b -> b == 0) s }}`). This module
+// remains useful for hand-written specs that want first-NUL indexing
+// (`findNul`) or a named helper predicate (`hasNul`).
 //
 // Pure Cryptol, no dependencies. Linear in `n`.
 

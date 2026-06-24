@@ -265,3 +265,33 @@ fn test_derive_single_pointer_with_unique_companion_is_not_ambiguous() {
     assert!(pre.contains("SAW_BUF"), "{pre}");
     assert!(pre.contains("sidecar"), "{pre}");
 }
+
+#[test]
+fn in_z_emits_null_terminator_precondition() {
+    let func = FunctionInfo {
+        name: "count_digits_z".into(),
+        mangled_name: None,
+        params: vec![ParamInfo {
+            name: "s".into(),
+            ty: TypeInfo::Pointer(Box::new(TypeInfo::UnsignedInt(8))),
+            mutability: Mutability::Readonly,
+            nullable: Nullability::NonNull,
+            annotations: vec![Annotation::InZ(8)],
+        }],
+        return_type: TypeInfo::UnsignedInt(32),
+        can_throw: false,
+        is_virtual: false,
+        has_body: true,
+        is_system: false,
+        called_functions: vec![],
+        referenced_globals: vec![],
+        annotations: vec![],
+    };
+    let specs = derive_constraints(&[func]).unwrap();
+    let pre = specs[0].params[0].preconditions.join("\n");
+    assert!(pre.contains("_In_z_(8)"), "missing InZ note: {pre}");
+    assert!(
+        pre.contains("llvm_precond {{ any (\\b -> b == 0) s }}"),
+        "missing NUL precondition: {pre}",
+    );
+}

@@ -5,10 +5,9 @@ for null-terminated input strings.
 The new macro `_In_z_(N)` declares that `s` is a NUL-terminated C
 string with at most `N` readable bytes. saw-spec-gen treats this
 as the same allocation shape as `_In_reads_(N)` (so the C++ body
-can safely read `s[0..N-1]`) and additionally emits a TODO note
-pointing at the `findNul` Cryptol helper in
-`lib/cryptol/saw_strings.cry` so callers can add a precondition
-when they need the NUL semantic.
+can safely read `s[0..N-1]`) and now auto-emits a NUL-content
+precondition (`any (\b -> b == 0) s`) so SAW only explores
+inputs that contain a terminator within the bound.
 
 Here we deliberately use a fixed-length read loop bounded by the
 SAL count (8 bytes); the function never looks past byte 7 even if

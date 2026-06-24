@@ -3,7 +3,7 @@
 //! Kept in a sibling file so that `verify_script_steps.rs` stays under
 //! the 500-non-whitespace-line repository limit.
 
-use super::super::verify_script::SretPrestate;
+use super::super::verify_script_sret::SretPrestate;
 use super::*;
 use crate::buffer_overrides::BufferOverrides;
 use crate::emit::saw_emit::cryptol_bridge::cryptol_return_for;

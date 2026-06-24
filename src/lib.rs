@@ -18,6 +18,7 @@ pub mod gen_verify_rust;
 pub mod gen_verify_rust_emit;
 pub mod inventory;
 pub mod mangle;
+pub mod project_config;
 pub mod result_json;
 pub mod tool_discovery;
 pub mod verify_cache;

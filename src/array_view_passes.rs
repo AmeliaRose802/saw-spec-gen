@@ -105,14 +105,10 @@ pub(crate) fn load_container_catalog(
 /// cannot be parsed.
 pub(crate) fn apply_cryptol_length_binding(
     all_functions: &mut [FunctionInfo],
-    enabled: bool,
     cryptol_spec: &Path,
     cryptol_fn: &str,
     function: &str,
 ) {
-    if !enabled {
-        return;
-    }
     let poly_sig = match cryptol_poly_sig::parse_poly_signature(cryptol_spec, cryptol_fn) {
         Some(s) => s,
         None => {

@@ -88,6 +88,7 @@ $defaultTags = @(
     'rust_adversarial'
     'string_ops'
     'strings'
+    'cryptol_len_bind'
     'int_ops'
 )
 if ($All) {

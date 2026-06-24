@@ -219,16 +219,15 @@ fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
                     preconditions.push(format!(
                         "// _In_z_({n}) -- NUL-terminated string, up to {n} bytes"
                     ));
-                    preconditions.push(
-                        "//   TODO[saw-spec-gen,saw_spec_gen-5mt]: add an explicit".to_string(),
-                    );
-                    preconditions.push(
-                        "//   `llvm_precond {{ findNul ... }}` once the Cryptol helper".to_string(),
-                    );
-                    preconditions.push(
-                        "//   `lib/cryptol/saw_strings.cry :: findNul` is imported".to_string(),
-                    );
-                    preconditions.push("//   into the spec module.".to_string());
+                    // `_In_z_(N)` means there exists a NUL byte inside the
+                    // first `N` elements. The parameter variable name is in
+                    // scope at both callsites (`verify.saw` equiv specs and
+                    // per-function auto specs), so we can emit this directly
+                    // with no additional helper imports.
+                    preconditions.push(format!(
+                        "llvm_precond {{{{ any (\\b -> b == 0) {} }}}}",
+                        param.name
+                    ));
                 }
                 Annotation::OutWrites(n) if *n > 0 => {
                     preconditions.push(format!(
