@@ -117,10 +117,10 @@ pub(crate) fn eval_cryptol_at_cex(
     fs::write(
         &eval_script,
         format!(
-            "import \"{cry_name}\";\nlet r = eval_int {{ {cryptol_fn} {cryptol_args} }};\nprint (str_concat \"CRYPTOL_RESULT=\" (show r));\n"
+            "import \"{cry_name}\";\nlet r = eval_int {{{{ {cryptol_fn} {cryptol_args} }}}};\nprint (str_concat \"CRYPTOL_RESULT=\" (show r));\n"
         ),
     )?;
-    let out = run_capture(
+    let out = run_capture_allow_failure(
         Command::new(saw)
             .arg("_eval_cex.saw")
             .current_dir(output_dir),
@@ -158,7 +158,17 @@ pub(crate) fn run_rust_harness_at_cex(
     }
     let harness = output_dir.join("_harness.rs");
     let harness_exe = output_dir.join(format!("_harness{exe_ext}"));
-    let rust_file_for_include = rust_file.to_string_lossy().replace('\\', "\\\\");
+    // `include!(r"...")` is a raw string: backslashes are already literal, so
+    // the path must NOT be backslash-doubled. Strip any Windows verbatim
+    // (`\\?\`) prefix as well, since `include!` chokes on it.
+    let rust_file_str = rust_file.to_string_lossy();
+    let rust_file_for_include = if let Some(rest) = rust_file_str.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = rust_file_str.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        rust_file_str.to_string()
+    };
     fs::write(
         &harness,
         format!(
@@ -212,7 +222,12 @@ pub(crate) fn run_rust_harness_at_cex(
     if !harness_exe.exists() {
         return Ok(None);
     }
-    let out = run_capture(&mut Command::new(&harness_exe))?;
+    // The harness is enrichment-only: it reports the implementation value at
+    // the counterexample input. If it aborts (e.g. the function hits
+    // `unreachable_unchecked`, an overflow panic, or other UB at the cex
+    // input) we still want to report DISPROVED, so a non-zero exit must not
+    // propagate as an error.
+    let out = run_capture_allow_failure(&mut Command::new(&harness_exe))?;
     for line in out.lines() {
         if let Some(v) = line.trim().strip_prefix("RUST_RESULT=") {
             return Ok(Some(v.trim().to_string()));
