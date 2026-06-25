@@ -152,3 +152,54 @@ pub(crate) fn apply_cryptol_length_binding(
         eprintln!("{w}");
     }
 }
+
+/// Post-derive pass: for every `AllocMutable` parameter in the target
+/// function's `SpecConstraint` that has an `_Out_writes_(N)` annotation
+/// AND a matching `<param>_post` function in the Cryptol spec file,
+/// populate `param.out_postcond` with the Cryptol function name.
+///
+/// This eliminates the need for `--out-buffer-param` and
+/// `--cryptol-fn-out` CLI flags when the source uses SAL annotations
+/// and follows the `<param>_post` naming convention.
+pub(crate) fn apply_out_postcond_autodetect(
+    target_spec: &mut crate::constraints::SpecConstraint,
+    target_fn: &FunctionInfo,
+    cryptol_spec: &Path,
+) {
+    use crate::constraints::types::{AllocType, Annotation};
+    let cry_text = match std::fs::read_to_string(cryptol_spec) {
+        Ok(t) => t,
+        Err(_) => return,
+    };
+    for (i, param) in target_spec.params.iter_mut().enumerate() {
+        if param.alloc_type != AllocType::AllocMutable || param.out_postcond.is_some() {
+            continue;
+        }
+        let has_out_writes = target_fn
+            .params
+            .get(i)
+            .map(|p| {
+                p.annotations
+                    .iter()
+                    .any(|a| matches!(a, Annotation::OutWrites(_) | Annotation::OutWritesParam(_)))
+            })
+            .unwrap_or(false);
+        if !has_out_writes {
+            continue;
+        }
+        let post_fn = format!("{}_post", param.name);
+        if cryptol_fn_exists(&cry_text, &post_fn) {
+            param.out_postcond = Some(post_fn);
+        }
+    }
+}
+
+/// Return true if `fn_name :` appears as a top-level definition in `text`.
+fn cryptol_fn_exists(text: &str, fn_name: &str) -> bool {
+    let prefix = format!("{fn_name} :");
+    let prefix_ns = format!("{fn_name}:");
+    text.lines().any(|l| {
+        let t = l.trim_start();
+        t.starts_with(prefix.as_str()) || t.starts_with(prefix_ns.as_str())
+    })
+}

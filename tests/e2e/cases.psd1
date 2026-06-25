@@ -199,6 +199,29 @@
         # *right* reason (real arithmetic bug).
         @{ Tag = 'struct_shape'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/struct_shape_recognizer'; File = 'sum_first_byte_disproved.cpp'; Cry = 'sum_first_byte_spec.cry'; CryptolFn = 'sum_first_byte_spec'; Function = 'sum_first_byte'; Expected = 'DISPROVED' }
 
+
+        # ── String content verification (string_content) ───────────────────
+        # Verifies the *actual byte contents* of output buffers, not just
+        # length/presence. The C++ source uses _Out_writes_(N) / _In_reads_(N)
+        # SAL annotations; saw-spec-gen auto-detects the <param>_post Cryptol
+        # convention and emits postconditions with no CLI flags.
+        #
+        # write_hello: fills a 5-byte _Out_writes_(5) buffer with "hello".
+        #   verified  -- writes exactly [0x68,0x65,0x6c,0x6c,0x6f]; postcondition holds.
+        #   disproved -- writes "world" instead; postcondition catches the mismatch.
+        @{ Tag = 'string_content'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/string_content'; File = 'write_hello_verified.cpp';  Expected = 'VERIFIED';
+           Cry = 'string_content_spec.cry'; CryptolFn = 'write_hello_ret'; Function = 'write_hello' }
+        @{ Tag = 'string_content'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/string_content'; File = 'write_hello_disproved.cpp'; Expected = 'DISPROVED';
+           Cry = 'string_content_spec.cry'; CryptolFn = 'write_hello_ret'; Function = 'write_hello' }
+        # to_lower_ascii: _In_reads_(6) src -> _Out_writes_(6) dst, A-Z -> a-z.
+        #   verified  -- correct lowercasing (A-Z -> a-z, others pass through).
+        #   disproved -- applies the shift to the wrong range; SAW finds
+        #               a counterexample at 'A' (expected 'a', got 'A').
+        @{ Tag = 'string_content'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/string_content'; File = 'to_lower_ascii_verified.cpp';  Expected = 'VERIFIED';
+           Cry = 'string_content_spec.cry'; CryptolFn = 'to_lower_ascii_ret'; Function = 'to_lower_ascii' }
+        @{ Tag = 'string_content'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/string_content'; File = 'to_lower_ascii_disproved.cpp'; Expected = 'DISPROVED';
+           Cry = 'string_content_spec.cry'; CryptolFn = 'to_lower_ascii_ret'; Function = 'to_lower_ascii' }
+
         # ── Bitcode-driven extern override tests ────────────────────────────
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/bump';                    File = 'bump_verified.cpp';          Cry = 'bump_spec.cry';          CryptolFn = 'bump_spec';          Function = 'bump';          Expected = 'VERIFIED'  }
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/use_helper';              File = 'use_helper_verified.cpp';    Cry = 'use_helper_spec.cry';    CryptolFn = 'use_helper_spec';    Function = 'use_helper';    Expected = 'VERIFIED'  }
@@ -266,8 +289,6 @@
         # it, so equivalence with `add_one_spec` is refuted.
         #
         # This block documents the gap so regressions stand out (any case
-        # that flips from DISPROVED to VERIFIED in the future is a real
-        # improvement to celebrate, not a regression to fix). See
         # tests/e2e/cases/10-stl-coverage/README.md for the matrix +
         # rationale. The `algorithm_clamp` case requires C++17.
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/algorithm_max';          File = 'add_one_verified.cpp';  Expected = 'VERIFIED' }

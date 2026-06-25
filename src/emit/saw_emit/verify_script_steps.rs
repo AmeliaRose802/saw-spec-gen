@@ -332,14 +332,21 @@ pub(super) fn emit_equiv_spec_body(
                     "llvm_alloc"
                 };
                 let ptr_name = format!("{}_ptr", param.name);
-                let val_name = param.name.clone();
+                // When the param has an auto-detected output postcondition,
+                // use `<name>_pre` for the pre-call value variable so the
+                // postcondition can distinguish pre/post state.
+                let val_name = if param.out_postcond.is_some() {
+                    format!("{}_pre", param.name)
+                } else {
+                    param.name.clone()
+                };
                 out.push_str(&format!(
                     "    {ptr_name} <- {alloc_fn} ({});\n",
                     param.saw_type,
                 ));
                 out.push_str(&format!(
                     "    {val_name} <- llvm_fresh_var \"{}\" ({});\n",
-                    param.name, param.saw_type,
+                    val_name, param.saw_type,
                 ));
                 out.push_str(&format!(
                     "    llvm_points_to {ptr_name} (llvm_term {val_name});\n",

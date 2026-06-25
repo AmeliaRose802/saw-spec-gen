@@ -216,6 +216,14 @@ pub struct ParamConstraint {
     /// concrete `llvm_array N (llvm_int 8)`.  None when no `dereferenceable`
     /// annotation was present on the parameter.
     pub dereferenceable_size: Option<usize>,
+    /// Auto-detected output-buffer postcondition: the name of a Cryptol
+    /// function `<param>_post` found in the spec file.  When set the
+    /// emitter uses `<param>_pre` naming for the pre-call value and
+    /// emits `llvm_points_to <param>_ptr (llvm_term {{ <fn> args }})` after
+    /// `llvm_execute_func`, without requiring `--out-buffer-param` or
+    /// `--cryptol-fn-out` CLI flags.  Populated by the
+    /// `apply_out_postcond_autodetect` pass in `array_view_passes`.
+    pub out_postcond: Option<String>,
 }
 
 /// How to allocate the parameter in the SAW spec.
