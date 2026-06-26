@@ -170,6 +170,42 @@ pub fn apply_to_function(func: &mut FunctionInfo, bindings: &[LengthBinding]) ->
     warnings
 }
 
+/// Infer `max_len_precond` entries — `(len_param_name, K)` — for the
+/// scalar length parameter that the struct-shape recognizer paired
+/// with a `[n][T]` buffer parameter.
+///
+/// For each binding produced by [`bind_lengths`] that carries a
+/// *concrete* Cryptol upper bound `K` (`is_open_ended == false`), if
+/// the matching buffer parameter also has a synthetic
+/// [`Annotation::InReadsParam`] naming a sibling length parameter
+/// (added earlier by
+/// [`crate::constraints::struct_shape_recognizer::recognize_and_annotate`]),
+/// emit `(len_name, K)`. The caller splices each pair into the
+/// generated spec as `llvm_precond {{ len_name <= K }}`.
+///
+/// This makes `--max-len-precond` unnecessary whenever the Cryptol
+/// signature already pins the buffer's upper bound and the C/Rust
+/// signature follows the `(T* buf, size_t len)` shape. Open-ended
+/// bindings (no `n <= K` predicate) are skipped — there is no sound
+/// `K` to assert.
+pub fn infer_len_preconds(sig: &PolyCrySig, func: &FunctionInfo) -> Vec<(String, u64)> {
+    let mut out = Vec::new();
+    for b in bind_lengths(sig, func) {
+        if b.is_open_ended {
+            continue;
+        }
+        let Some(p) = func.params.get(b.param_idx) else {
+            continue;
+        };
+        for a in &p.annotations {
+            if let Annotation::InReadsParam(len_name) = a {
+                out.push((len_name.clone(), b.max_length as u64));
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,5 +352,69 @@ mod tests {
         let _ = apply_to_function(&mut func, &bindings);
         // Scalar param must not have an InReads injected.
         assert!(func.params[1].annotations.is_empty());
+    }
+
+    #[test]
+    fn infers_len_precond_for_struct_shape_paired_buffer() {
+        // `copy : {n}(fin n, n <= 4) => [n][8] -> [64] -> [32]`
+        // C signature `(uint8_t* m, size_t nm)`. The struct-shape
+        // recognizer pairs them, putting `InReadsParam("nm")` on `m`.
+        let sig = parse_poly_signature_from_str(
+            "copy : {n}(fin n, n <= 4) => [n][8] -> [64] -> [32]",
+            "copy",
+        )
+        .unwrap();
+        let mut func = func_with_params(
+            "copy",
+            vec![
+                ptr_u8("m"),
+                ParamInfo {
+                    name: "nm".into(),
+                    ty: TypeInfo::UnsignedInt(64),
+                    mutability: Mutability::Readonly,
+                    nullable: Nullability::NonNull,
+                    annotations: vec![],
+                },
+            ],
+        );
+        func.params[0]
+            .annotations
+            .push(Annotation::InReadsParam("nm".into()));
+        let preconds = infer_len_preconds(&sig, &func);
+        assert_eq!(preconds, vec![("nm".to_string(), 4)]);
+    }
+
+    #[test]
+    fn open_ended_bound_yields_no_precond() {
+        let sig =
+            parse_poly_signature_from_str("f : {n}(fin n) => [n][8] -> [64] -> [32]", "f").unwrap();
+        let mut func = func_with_params(
+            "f",
+            vec![
+                ptr_u8("buf"),
+                ParamInfo {
+                    name: "len".into(),
+                    ty: TypeInfo::UnsignedInt(64),
+                    mutability: Mutability::Readonly,
+                    nullable: Nullability::NonNull,
+                    annotations: vec![],
+                },
+            ],
+        );
+        func.params[0]
+            .annotations
+            .push(Annotation::InReadsParam("len".into()));
+        // Open-ended `n` (no `<= K`) => no sound bound to assert.
+        assert!(infer_len_preconds(&sig, &func).is_empty());
+    }
+
+    #[test]
+    fn no_struct_shape_pairing_yields_no_precond() {
+        // Bounded `n <= 8` but the buffer was never paired with a
+        // length sibling (no InReadsParam), so nothing to assert on.
+        let sig =
+            parse_poly_signature_from_str("f : {n}(fin n, n <= 8) => [n][8] -> [32]", "f").unwrap();
+        let func = func_with_params("f", vec![ptr_u8("buf")]);
+        assert!(infer_len_preconds(&sig, &func).is_empty());
     }
 }

@@ -91,6 +91,17 @@ pub fn run(
         function,
     );
 
+    // Infer `max_len_precond` (len <= K) for struct-shape `(buf, len)`
+    // pairs from the Cryptol bound, joining any CLI/config-supplied ones.
+    let mut buffer_overrides = buffer_overrides.clone();
+    crate::array_view_passes::apply_inferred_len_preconds(
+        &mut buffer_overrides,
+        &all_functions,
+        cryptol_spec,
+        cryptol_fn,
+        function,
+    );
+
     // Optional LLVM IR: struct-size table + per-param `dereferenceable(N)`.
     // MSVC-clang fully qualifies struct symbols, so without the IR we can't
     // match short C++ names against `%\"struct.Foo::Bar::Baz\"`.
@@ -261,24 +272,8 @@ pub fn run(
     }
 
     // Warn about interfaces referenced by fields but missing from the merged
-    // AST.  These cause `extract_virtual_methods` to miss the interface,
-    // which in turn causes gen-verify to skip vtable stub generation and
-    // emit a spec that fails to verify (the indirect calls have no overrides).
-    let missing = clang_ast::detect_missing_interfaces(&parsed_ast);
-    if !missing.is_empty() {
-        eprintln!(
-            "warning: {} interface(s) referenced by class fields but missing from AST(s):",
-            missing.len(),
-        );
-        for m in &missing {
-            eprintln!(
-                "  - {}::{} : {}<{}> (interface AST not provided)",
-                m.owning_class, m.field_name, m.wrapper, m.interface_name,
-            );
-        }
-        eprintln!("  hint: pass additional --ast files containing each missing interface so");
-        eprintln!("        gen-verify can synthesize vtable stubs for their virtual methods.");
-    }
+    // AST (causes skipped vtable stubs → unverifiable spec). See helpers.
+    warn_missing_interfaces(&parsed_ast);
 
     std::fs::create_dir_all(output)?;
 
@@ -496,7 +491,7 @@ pub fn run(
         &bitcode_overrides,
         &ir_struct_defs,
         output,
-        buffer_overrides,
+        &buffer_overrides,
         has_source_sal_annotations && bitcode_has_var_annotation,
         &uninterpreted,
     )?;
@@ -539,4 +534,6 @@ pub fn run(
     Ok(())
 }
 
-use crate::gen_verify_helpers::{assemble_and_link_stubs, emit_spec_only_result};
+use crate::gen_verify_helpers::{
+    assemble_and_link_stubs, emit_spec_only_result, warn_missing_interfaces,
+};

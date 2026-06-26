@@ -333,13 +333,21 @@ pub fn gen_verify_cmd(
         }
     };
     let merged = cfg.apply(
-        no_struct_shape_recognizer,
-        use_llvm_combine_modules,
-        spec_only_on_missing,
-        alias_size,
-        alias_enum,
-        in_buffer_size,
-        max_len_precond,
+        &cryptol_fn,
+        crate::project_config::CliFlags {
+            no_struct_shape_recognizer,
+            use_llvm_combine_modules,
+            spec_only_on_missing,
+            alias_size,
+            alias_enum,
+            in_buffer_size,
+            max_len_precond,
+            out_buffer_param,
+            cryptol_fn_out,
+            cryptol_fn_pre,
+            cryptol_arg_order,
+            variant_map,
+        },
     );
 
     // Auto-detect language: Rust when --llvm-ir is provided without --ast
@@ -360,13 +368,13 @@ pub fn gen_verify_cmd(
         let ir_path = llvm_ir.ok_or_else(|| anyhow::anyhow!("--lang rust requires --llvm-ir"))?;
         let overrides = crate::buffer_overrides::BufferOverrides::from_cli(
             &merged.in_buffer_size,
-            &out_buffer_param,
-            &cryptol_fn_out,
+            &merged.out_buffer_param,
+            &merged.cryptol_fn_out,
             &merged.max_len_precond,
-            &cryptol_arg_order,
-            &cryptol_fn_pre,
+            &merged.cryptol_arg_order,
+            &merged.cryptol_fn_pre,
         )?;
-        let vmap = crate::gen_verify_rust_emit::VariantMap::parse_all(&variant_map)?;
+        let vmap = crate::gen_verify_rust_emit::VariantMap::parse_all(&merged.variant_map)?;
         return gen_verify_rust::run(
             &ir_path,
             &bitcode,
@@ -387,11 +395,11 @@ pub fn gen_verify_cmd(
     }
     let buffer_overrides = crate::buffer_overrides::BufferOverrides::from_cli(
         &merged.in_buffer_size,
-        &out_buffer_param,
-        &cryptol_fn_out,
+        &merged.out_buffer_param,
+        &merged.cryptol_fn_out,
         &merged.max_len_precond,
-        &cryptol_arg_order,
-        &cryptol_fn_pre,
+        &merged.cryptol_arg_order,
+        &merged.cryptol_fn_pre,
     )?;
     gen_verify::run(
         &ast,
