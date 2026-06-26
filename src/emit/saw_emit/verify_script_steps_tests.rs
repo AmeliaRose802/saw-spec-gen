@@ -78,6 +78,7 @@ fn emit_postcondition_wraps_bool_return() {
             return_type: &TypeInfo::Bool,
             is_sret: false,
             return_bridge: None,
+            auto_out_postconds: &[],
         },
         &BufferOverrides::default(),
     );
@@ -104,6 +105,7 @@ fn emit_postcondition_does_not_wrap_int_return() {
             return_type: &TypeInfo::SignedInt(32),
             is_sret: false,
             return_bridge: None,
+            auto_out_postconds: &[],
         },
         &BufferOverrides::default(),
     );
@@ -138,6 +140,7 @@ fn emit_postcondition_uses_points_to_for_sret_return() {
             },
             is_sret: true,
             return_bridge: None,
+            auto_out_postconds: &[],
         },
         &BufferOverrides::default(),
     );
@@ -169,6 +172,7 @@ fn emit_sret_prestate_threads_prebytes_into_cryptol_call() {
                 preconditions: vec![],
                 unchanged_after: false,
                 dereferenceable_size: None,
+                out_postcond: None,
             },
             ParamConstraint {
                 name: "hK".into(),
@@ -177,6 +181,7 @@ fn emit_sret_prestate_threads_prebytes_into_cryptol_call() {
                 preconditions: vec![],
                 unchanged_after: false,
                 dereferenceable_size: None,
+                out_postcond: None,
             },
             ParamConstraint {
                 name: "kA".into(),
@@ -185,6 +190,7 @@ fn emit_sret_prestate_threads_prebytes_into_cryptol_call() {
                 preconditions: vec![],
                 unchanged_after: false,
                 dereferenceable_size: None,
+                out_postcond: None,
             },
             ParamConstraint {
                 name: "keyId".into(),
@@ -193,6 +199,7 @@ fn emit_sret_prestate_threads_prebytes_into_cryptol_call() {
                 preconditions: vec![],
                 unchanged_after: false,
                 dereferenceable_size: None,
+                out_postcond: None,
             },
         ],
         return_constraint: ReturnConstraint {
@@ -314,6 +321,7 @@ fn emit_sret_prestate_threads_prebytes_into_cryptol_call() {
             },
             is_sret: true,
             return_bridge: None,
+            auto_out_postconds: &[],
         },
         &BufferOverrides::default(),
     );
@@ -339,6 +347,7 @@ fn emit_sret_no_prestate_omits_prebytes() {
             preconditions: vec![],
             unchanged_after: false,
             dereferenceable_size: None,
+            out_postcond: None,
         }],
         return_constraint: ReturnConstraint {
             saw_type: "llvm_array 20 (llvm_int 8)".into(),

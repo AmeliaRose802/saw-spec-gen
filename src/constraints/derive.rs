@@ -283,6 +283,7 @@ fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
                 Annotation::Dereferenceable(n) => Some(*n),
                 _ => None,
             }),
+            out_postcond: None,
         });
     }
 

@@ -90,6 +90,7 @@ $defaultTags = @(
     'strings'
     'cryptol_len_bind'
     'int_ops'
+        'string_content'
 )
 if ($All) {
     $selected = $cases

@@ -388,18 +388,28 @@ mod tests {
         }
     }
 
+    fn make_param(name: &str, alloc: AllocType, ty: &str, unchanged: bool) -> ParamConstraint {
+        ParamConstraint {
+            name: name.into(),
+            alloc_type: alloc,
+            saw_type: ty.into(),
+            preconditions: vec![],
+            unchanged_after: unchanged,
+            dereferenceable_size: None,
+            out_postcond: None,
+        }
+    }
+
     #[test]
     fn test_generate_llvm_spec_readonly() {
         let spec = make_spec(
             "test_fn",
-            vec![ParamConstraint {
-                name: "x".into(),
-                alloc_type: AllocType::AllocReadonly,
-                saw_type: "llvm_int 32".into(),
-                preconditions: vec![],
-                unchanged_after: true,
-                dereferenceable_size: None,
-            }],
+            vec![make_param(
+                "x",
+                AllocType::AllocReadonly,
+                "llvm_int 32",
+                true,
+            )],
             VOID_SAW_TYPE,
             false,
         );
@@ -414,14 +424,12 @@ mod tests {
     fn test_generate_llvm_spec_mutable() {
         let spec = make_spec(
             "mutate_fn",
-            vec![ParamConstraint {
-                name: "buf".into(),
-                alloc_type: AllocType::AllocMutable,
-                saw_type: "llvm_int 64".into(),
-                preconditions: vec![],
-                unchanged_after: false,
-                dereferenceable_size: None,
-            }],
+            vec![make_param(
+                "buf",
+                AllocType::AllocMutable,
+                "llvm_int 64",
+                false,
+            )],
             VOID_SAW_TYPE,
             false,
         );
@@ -435,22 +443,8 @@ mod tests {
         let spec = make_spec(
             "add",
             vec![
-                ParamConstraint {
-                    name: "a".into(),
-                    alloc_type: AllocType::FreshVar,
-                    saw_type: "llvm_int 32".into(),
-                    preconditions: vec![],
-                    unchanged_after: false,
-                    dereferenceable_size: None,
-                },
-                ParamConstraint {
-                    name: "b".into(),
-                    alloc_type: AllocType::FreshVar,
-                    saw_type: "llvm_int 32".into(),
-                    preconditions: vec![],
-                    unchanged_after: false,
-                    dereferenceable_size: None,
-                },
+                make_param("a", AllocType::FreshVar, "llvm_int 32", false),
+                make_param("b", AllocType::FreshVar, "llvm_int 32", false),
             ],
             "llvm_int 32",
             false,
@@ -503,14 +497,12 @@ mod tests {
         let spec = SpecConstraint {
             function_name: "read_fn".into(),
             mangled_name: None,
-            params: vec![ParamConstraint {
-                name: "data".into(),
-                alloc_type: AllocType::AllocReadonly,
-                saw_type: "llvm_int 32".into(),
-                preconditions: vec![],
-                unchanged_after: true,
-                dereferenceable_size: None,
-            }],
+            params: vec![make_param(
+                "data",
+                AllocType::AllocReadonly,
+                "llvm_int 32",
+                true,
+            )],
             return_constraint: ReturnConstraint {
                 saw_type: VOID_SAW_TYPE.into(),
                 value_constraints: vec![],

@@ -14,6 +14,7 @@ fn emit_equiv_spec_body_supports_auto_out_buffer_for_this() {
             preconditions: vec![],
             unchanged_after: false,
             dereferenceable_size: None,
+            out_postcond: None,
         }],
         return_constraint: ReturnConstraint {
             saw_type: "llvm_int 32".into(),
@@ -109,6 +110,7 @@ fn emit_equiv_spec_body_emits_cryptol_precondition_call() {
             preconditions: vec![],
             unchanged_after: false,
             dereferenceable_size: None,
+            out_postcond: None,
         }],
         return_constraint: ReturnConstraint {
             saw_type: "llvm_int 32".into(),

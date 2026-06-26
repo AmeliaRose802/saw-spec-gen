@@ -171,11 +171,17 @@ pub fn emit_verification_script(
         buffer_overrides,
     );
 
+    let auto_out_postconds: Vec<(String, String)> = target_spec
+        .params
+        .iter()
+        .filter_map(|p| p.out_postcond.as_ref().map(|f| (p.name.clone(), f.clone())))
+        .collect();
     let post_ctx = PostconditionCtx {
         sub_callee_specs,
         return_type: &target_fn.return_type,
         is_sret: target_spec.return_constraint.is_sret,
         return_bridge: None,
+        auto_out_postconds: &auto_out_postconds,
     };
     emit_postcondition_and_close(
         &mut out,

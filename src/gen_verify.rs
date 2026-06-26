@@ -197,6 +197,15 @@ pub fn run(
     // Detect sret pre-state threading from Cryptol arity.
     saw_emit::cryptol_bridge::detect_sret_prestate(&mut target_spec, cryptol_spec, cryptol_fn);
 
+    // Auto-detect _Out_writes_ params that have a matching <param>_post
+    // Cryptol function, and populate out_postcond so verify_script_steps
+    // emits the postcondition without needing --out-buffer-param / --cryptol-fn-out.
+    crate::array_view_passes::apply_out_postcond_autodetect(
+        &mut target_spec,
+        &target_fn,
+        cryptol_spec,
+    );
+
     // If the LLVM IR contains exception-lower globals (@__exclow_error_*),
     // inject them into the target spec so that SAW allocates them.
     // (Deferred until after `all_globals` is built below — see the call

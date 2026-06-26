@@ -17,6 +17,12 @@ pub(super) struct PostconditionCtx<'a> {
     /// Optional aggregate return bridge. When set, overrides the
     /// default scalar bridge for the return assertion.
     pub return_bridge: Option<&'a AbiReturnBridge>,
+    /// Auto-detected output-buffer postconditions: pairs of
+    /// `(param_name, cryptol_fn_name)` populated by the
+    /// `apply_out_postcond_autodetect` pass.  Each entry emits
+    /// `llvm_points_to <name>_ptr (llvm_term {{ <fn> args }})` after
+    /// `llvm_execute_func`.
+    pub auto_out_postconds: &'a [(String, String)],
 }
 
 pub(super) fn emit_postcondition_and_close(
@@ -52,6 +58,32 @@ pub(super) fn emit_postcondition_and_close(
         };
         out.push_str(&format!(
             "    // Postcondition: *{out_name}_ptr == Cryptol {fn_name}\n",
+        ));
+        out.push_str(&format!(
+            "    llvm_points_to {out_name}_ptr (llvm_term {{{{ {call} }}}});\n",
+        ));
+    }
+
+    // Auto-detected output-buffer postconditions from _Out_writes_ + <param>_post convention.
+    for (out_name, fn_name) in ctx.auto_out_postconds {
+        let pre_name = format!("{out_name}_pre");
+        let args: Vec<String> = cryptol_args
+            .iter()
+            .map(|a| {
+                if a == out_name {
+                    pre_name.clone()
+                } else {
+                    a.clone()
+                }
+            })
+            .collect();
+        let call = if args.is_empty() {
+            fn_name.clone()
+        } else {
+            format!("{} {}", fn_name, args.join(" "))
+        };
+        out.push_str(&format!(
+            "    // Postcondition: *{out_name}_ptr == Cryptol {fn_name} (auto from _Out_writes_)\n",
         ));
         out.push_str(&format!(
             "    llvm_points_to {out_name}_ptr (llvm_term {{{{ {call} }}}});\n",

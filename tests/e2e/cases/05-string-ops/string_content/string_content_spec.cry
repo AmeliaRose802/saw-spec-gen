@@ -1,0 +1,49 @@
+// Cryptol models for string-content verification tests.
+//
+// These specs verify that functions produce correct byte sequences in
+// output buffers — i.e. the *actual contents* of the output strings,
+// not just their lengths or null-byte presence.
+//
+// Two functions are covered:
+//
+// 1. `write_hello` — copies the literal bytes of "hello" into a 5-byte
+//    output buffer annotated `_Out_writes_(5)`. saw-spec-gen auto-detects
+//    the `buf_post` function below (naming convention: <param>_post) and
+//    emits the content postcondition without any CLI flags.
+//
+// 2. `to_lower_ascii` — converts each byte in a 6-byte `_In_reads_(6)`
+//    input buffer to ASCII lowercase into a 6-byte `_Out_writes_(6)` output
+//    buffer. saw-spec-gen auto-detects `dst_post` and `src` is picked up
+//    via the `_In_reads_(6)` annotation. No CLI flags needed.
+
+module string_content_spec where
+
+// ── write_hello ─────────────────────────────────────────────────────────
+
+// Post-state: the 5-byte output buffer must hold exactly "hello".
+// `buf_pre` is the symbolic pre-state (ignored — write_hello overwrites all bytes).
+// Named `buf_post` so saw-spec-gen auto-wires it from the `_Out_writes_(5)` annotation.
+buf_post : [5][8] -> [5][8]
+buf_post _ = [0x68, 0x65, 0x6c, 0x6c, 0x6f]    // 'h','e','l','l','o'
+
+// Return value: always 5 (number of bytes written).
+write_hello_ret : [5][8] -> [32]
+write_hello_ret _ = 5
+
+// ── to_lower_ascii ──────────────────────────────────────────────────────
+
+// Cryptol reference implementation of ASCII lowercasing.
+// A byte in ['A'..'Z'] (0x41–0x5A) is shifted down by 32; others pass through.
+to_lower_byte : [8] -> [8]
+to_lower_byte b = if b >= 0x41 /\ b <= 0x5A then b + 0x20 else b
+
+// Post-state of the 6-byte output buffer after lowercasing.
+// `dst_pre` is the symbolic pre-state (ignored — every byte is overwritten).
+// `src` is the input buffer.
+// Named `dst_post` so saw-spec-gen auto-wires it from the `_Out_writes_(6)` annotation.
+dst_post : [6][8] -> [6][8] -> [6][8]
+dst_post _ src = map to_lower_byte src
+
+// Return value: number of bytes written = 6.
+to_lower_ascii_ret : [6][8] -> [6][8] -> [32]
+to_lower_ascii_ret _ _ = 6
