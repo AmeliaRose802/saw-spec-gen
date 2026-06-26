@@ -367,6 +367,22 @@
                '--max-len-precond',   'nb=4'
            ) }
 
+        # ── Uninterpreted primitives (08-overrides/uninterpreted) ───────────
+        # Exercises the `@uninterpreted` Cryptol annotation surface: an
+        # opaque primitive `prim` is bound to its Cryptol model via
+        # `llvm_unsafe_assume_spec` instead of being symbolically
+        # executed. No CLI flag — the annotation in use_prim_spec.cry is
+        # the only declaration needed. See
+        # src/uninterpreted.rs and docs/uninterpreted-primitives-proposal.md.
+        #
+        # verified  : caller forwards the primitive result unchanged.
+        # disproved : caller perturbs the result (+1); the assumed
+        #             contract rejects it, proving it is not vacuous.
+        @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/uninterpreted'; File = 'use_prim_verified.cpp';  Expected = 'VERIFIED';
+           Cry = 'use_prim_spec.cry'; CryptolFn = 'use_prim_spec'; Function = 'use_prim' }
+        @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/uninterpreted'; File = 'use_prim_disproved.cpp'; Expected = 'DISPROVED';
+           Cry = 'use_prim_spec.cry'; CryptolFn = 'use_prim_spec'; Function = 'use_prim' }
+
         # ── Stateful methods: whole-object post-state via the ordinary
         #    --out-buffer-param / --cryptol-fn-out flags (no dedicated
         #    flag needed; see docs/03-stateful-method-specs.md).

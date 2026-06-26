@@ -45,6 +45,7 @@ pub fn emit_verification_script(
     output_dir: &Path,
     buffer_overrides: &BufferOverrides,
     has_source_sal_annotations: bool,
+    uninterpreted: &crate::uninterpreted::UninterpretedBlock,
 ) -> Result<()> {
     fs::create_dir_all(output_dir)?;
 
@@ -139,6 +140,20 @@ pub fn emit_verification_script(
         step += 1;
         out.push_str(&format!("// Step {step}: Import Cryptol spec\n"));
         out.push_str(&format!("import \"{}\";\n\n", cryptol_rel));
+    }
+
+    // Uninterpreted-primitive contracts (crypto / opaque callees) bound
+    // to their Cryptol model via `llvm_unsafe_assume_spec`. Spliced after
+    // the Cryptol spec is in scope (imported above for the no-interface
+    // path, or at the vtable-havoc step for the interface path) because
+    // the assume-spec bodies reference the Cryptol models directly.
+    if !uninterpreted.is_empty() {
+        step += 1;
+        out.push_str(&format!(
+            "// Step {step}: Uninterpreted primitive contracts\n",
+        ));
+        out.push_str(&uninterpreted.snippet);
+        override_names.extend(uninterpreted.override_names.iter().cloned());
     }
 
     // Detect sret prestate threading: if the Cryptol function has one

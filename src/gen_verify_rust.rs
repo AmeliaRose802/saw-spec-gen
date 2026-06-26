@@ -32,6 +32,7 @@ pub fn run(
     spec_only_on_missing: bool,
     overrides: &BufferOverrides,
     variant_map: &gen_verify_rust_emit::VariantMap,
+    uninterpreted_cfg: &[crate::uninterpreted::UninterpretedEntry],
 ) -> Result<()> {
     if overrides.has_auto_out_buffers() {
         bail!(
@@ -73,6 +74,9 @@ pub fn run(
         .into_owned();
 
     let saw_path = output.join("verify_rust.saw");
+    let uninterp_entries = crate::uninterpreted::gather(cryptol_spec, uninterpreted_cfg);
+    let uninterpreted =
+        crate::uninterpreted::emit_uninterpreted_block(&uninterp_entries, cryptol_spec);
     let saw_text = gen_verify_rust_emit::emit_saw_script(
         function,
         cryptol_fn,
@@ -81,6 +85,7 @@ pub fn run(
         &arts,
         overrides,
         variant_map,
+        &uninterpreted,
     );
     fs::write(&saw_path, saw_text).with_context(|| format!("writing {}", saw_path.display()))?;
 
