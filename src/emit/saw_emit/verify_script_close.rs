@@ -69,7 +69,13 @@ pub(super) fn emit_postcondition_and_close(
         let pre_name = format!("{out_name}_pre");
         let args: Vec<String> = cryptol_args
             .iter()
-            .map(|a| if a == out_name { pre_name.clone() } else { a.clone() })
+            .map(|a| {
+                if a == out_name {
+                    pre_name.clone()
+                } else {
+                    a.clone()
+                }
+            })
             .collect();
         let call = if args.is_empty() {
             fn_name.clone()

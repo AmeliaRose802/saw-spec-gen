@@ -404,7 +404,12 @@ mod tests {
     fn test_generate_llvm_spec_readonly() {
         let spec = make_spec(
             "test_fn",
-            vec![make_param("x", AllocType::AllocReadonly, "llvm_int 32", true)],
+            vec![make_param(
+                "x",
+                AllocType::AllocReadonly,
+                "llvm_int 32",
+                true,
+            )],
             VOID_SAW_TYPE,
             false,
         );
@@ -419,7 +424,12 @@ mod tests {
     fn test_generate_llvm_spec_mutable() {
         let spec = make_spec(
             "mutate_fn",
-            vec![make_param("buf", AllocType::AllocMutable, "llvm_int 64", false)],
+            vec![make_param(
+                "buf",
+                AllocType::AllocMutable,
+                "llvm_int 64",
+                false,
+            )],
             VOID_SAW_TYPE,
             false,
         );
@@ -487,7 +497,12 @@ mod tests {
         let spec = SpecConstraint {
             function_name: "read_fn".into(),
             mangled_name: None,
-            params: vec![make_param("data", AllocType::AllocReadonly, "llvm_int 32", true)],
+            params: vec![make_param(
+                "data",
+                AllocType::AllocReadonly,
+                "llvm_int 32",
+                true,
+            )],
             return_constraint: ReturnConstraint {
                 saw_type: VOID_SAW_TYPE.into(),
                 value_constraints: vec![],
