@@ -1,9 +1,35 @@
 //! Helpers extracted from [`super::gen_verify`] to stay under the
 //! 500-non-whitespace-line limit.
 
+use crate::clang_ast;
 use crate::saw_emit;
 use anyhow::Result;
 use std::path::Path;
+
+/// Warn (on stderr) about interfaces referenced by class fields but
+/// missing from the merged clang AST. A missing interface makes
+/// `extract_virtual_methods` skip its vtable stubs, so the generated
+/// spec fails to verify (the indirect calls have no overrides).
+/// Extracted from [`super::gen_verify::run`] to keep that file under
+/// the line limit.
+pub(crate) fn warn_missing_interfaces(parsed_ast: &clang_ast::AstNode) {
+    let missing = clang_ast::detect_missing_interfaces(parsed_ast);
+    if missing.is_empty() {
+        return;
+    }
+    eprintln!(
+        "warning: {} interface(s) referenced by class fields but missing from AST(s):",
+        missing.len(),
+    );
+    for m in &missing {
+        eprintln!(
+            "  - {}::{} : {}<{}> (interface AST not provided)",
+            m.owning_class, m.field_name, m.wrapper, m.interface_name,
+        );
+    }
+    eprintln!("  hint: pass additional --ast files containing each missing interface so");
+    eprintln!("        gen-verify can synthesize vtable stubs for their virtual methods.");
+}
 
 /// Assemble `vtable_stubs.ll` → `.bc` and optionally pre-link with the
 /// main bitcode. Extracted from [`super::gen_verify::run`] to keep that

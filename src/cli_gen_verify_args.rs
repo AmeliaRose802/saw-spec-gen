@@ -253,6 +253,11 @@ pub struct GenVerifyArgs {
     ///   3. `saw-spec-gen.toml` walking up from the current working directory.
     ///
     /// Config values act as defaults; explicit CLI flags always override them.
+    ///
+    /// Per-function shaping can be declared in `[functions.<cryptol_fn>]`
+    /// tables (keyed by `--cryptol-fn`), carrying the same buffer/shape
+    /// flags. Resolution order is per-function config → global config →
+    /// CLI, so a typed config replaces hand-coded driver-script flags.
     #[arg(long = "config", value_name = "PATH")]
     pub config: Option<PathBuf>,
 }

@@ -54,13 +54,14 @@ pub(super) fn emit_bitcode(
     user_flags: &[String],
     cpp_file: &Path,
     bc_file: &Path,
+    opt_level: &str,
 ) -> Result<()> {
     run_command(
         Command::new(clang)
             .args([
                 "-c",
                 "-emit-llvm",
-                "-O0",
+                opt_level,
                 "-fno-rtti",
                 "-target",
                 llvm_target,
@@ -79,12 +80,13 @@ pub(super) fn emit_llvm_ir(
     user_flags: &[String],
     cpp_file: &Path,
     ll_file: &Path,
+    opt_level: &str,
 ) -> Result<Option<PathBuf>> {
     let out = Command::new(clang)
         .args([
             "-S",
             "-emit-llvm",
-            "-O0",
+            opt_level,
             "-fno-rtti",
             "-target",
             llvm_target,
@@ -230,4 +232,73 @@ pub(super) fn is_spec_only_result(output_dir: &Path) -> Result<bool> {
     }
     let value: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(result_path)?)?;
     Ok(value.get("status").and_then(|v| v.as_str()) == Some("not_attempted"))
+}
+
+/// Inputs for the one-shot `-O1` recompile fallback ([`recompile_at_o1`]).
+pub(super) struct O1Recompile<'a> {
+    pub tools: &'a ToolPaths,
+    pub is_msvc: bool,
+    pub clang: &'a Path,
+    pub llvm_as: &'a Path,
+    pub output_dir: &'a Path,
+    pub base_name: &'a str,
+    pub user_flags: &'a [String],
+    pub cpp_file: &'a Path,
+    pub bc_file: &'a Path,
+    pub ll_file: &'a Path,
+    pub ast_file: &'a Path,
+    pub cry_dest: &'a Path,
+    pub cryptol_fn: &'a str,
+    pub function: &'a str,
+    pub extra_spec_gen_args: &'a [String],
+    pub spec_only_on_missing: bool,
+}
+
+/// Recompile the C++ target at `-O1` and regenerate the verify script.
+///
+/// Used as a single defensive fallback when the `-O0` build produced
+/// SAW IR that the simulator cannot load — typically the empty-struct
+/// global loads emitted by `std::optional` / `std::nullopt_t` /
+/// `std::in_place_t` constructors that `-O1` inlines into plain byte
+/// stores. The clang AST is opt-level-independent, so it is reused.
+pub(super) fn recompile_at_o1(ctx: &O1Recompile) -> Result<()> {
+    let target = ctx.tools.llvm_target;
+    emit_bitcode(
+        ctx.clang,
+        target,
+        ctx.user_flags,
+        ctx.cpp_file,
+        ctx.bc_file,
+        "-O1",
+    )?;
+    let ll = emit_llvm_ir(
+        ctx.clang,
+        target,
+        ctx.user_flags,
+        ctx.cpp_file,
+        ctx.ll_file,
+        "-O1",
+    )?;
+    maybe_lower_exceptions(
+        ctx.tools,
+        ctx.is_msvc,
+        ctx.output_dir,
+        ctx.base_name,
+        ctx.bc_file,
+        ll.as_deref(),
+    )?;
+    if ll.is_some() {
+        patch_ir_and_reassemble(ctx.llvm_as, ctx.ll_file, ctx.bc_file)?;
+    }
+    run_gen_verify(
+        ctx.output_dir,
+        ctx.bc_file,
+        ll.as_deref(),
+        ctx.ast_file,
+        ctx.cry_dest,
+        ctx.cryptol_fn,
+        ctx.function,
+        ctx.extra_spec_gen_args,
+        ctx.spec_only_on_missing,
+    )
 }

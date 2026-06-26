@@ -153,6 +153,46 @@ pub(crate) fn apply_cryptol_length_binding(
     }
 }
 
+/// Infer `max_len_precond` entries from the Cryptol signature's upper
+/// bounds for struct-shape-recognized `(buf, len)` pairs, and merge
+/// them into `overrides`. User-supplied preconditions win: a length
+/// parameter already named in `overrides.max_len_preconds` is left
+/// untouched. Runs after [`apply_struct_shape_recognizer`] and
+/// [`apply_cryptol_length_binding`] so the synthetic `InReadsParam`
+/// annotations are present.
+pub(crate) fn apply_inferred_len_preconds(
+    overrides: &mut crate::buffer_overrides::BufferOverrides,
+    all_functions: &[FunctionInfo],
+    cryptol_spec: &Path,
+    cryptol_fn: &str,
+    function: &str,
+) {
+    let Some(sig) = cryptol_poly_sig::parse_poly_signature(cryptol_spec, cryptol_fn) else {
+        return;
+    };
+    let Some(fi) = all_functions.iter().find(|f| f.name == function) else {
+        return;
+    };
+    let existing: std::collections::HashSet<String> = overrides
+        .max_len_preconds
+        .iter()
+        .map(|(n, _)| n.clone())
+        .collect();
+    let mut to_add: Vec<(String, u64)> = Vec::new();
+    for (name, k) in length_binding::infer_len_preconds(&sig, fi) {
+        if existing.contains(&name) || to_add.iter().any(|(n, _)| *n == name) {
+            continue;
+        }
+        eprintln!(
+            "info[saw-spec-gen]: inferred `llvm_precond {{{{ {name} <= {k} }}}}` for \
+             `{function}` from the Cryptol upper bound on `{cryptol_fn}` \
+             (no --max-len-precond needed)."
+        );
+        to_add.push((name, k));
+    }
+    overrides.max_len_preconds.extend(to_add);
+}
+
 /// Post-derive pass: for every `AllocMutable` parameter in the target
 /// function's `SpecConstraint` that has an `_Out_writes_(N)` annotation
 /// AND a matching `<param>_post` function in the Cryptol spec file,

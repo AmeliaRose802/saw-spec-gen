@@ -10,7 +10,7 @@ use crate::verify_tools::ToolPaths;
 use anyhow::{bail, Context, Result};
 use compile::{
     build_clang_flags, dump_ast, emit_bitcode, emit_llvm_ir, is_spec_only_result, maybe_filter_ast,
-    maybe_lower_exceptions, patch_ir_and_reassemble, run_gen_verify,
+    maybe_lower_exceptions, patch_ir_and_reassemble, recompile_at_o1, run_gen_verify, O1Recompile,
 };
 use counterexample::{evaluate_counterexample, parse_counterexample, report_disproved};
 use std::ffi::OsStr;
@@ -110,6 +110,7 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
             &user_clang_flags,
             &cpp_file,
             &bc_file,
+            "-O0",
         )?;
         ll_for_gen = emit_llvm_ir(
             clang,
@@ -117,6 +118,7 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
             &user_clang_flags,
             &cpp_file,
             &ll_file,
+            "-O0",
         )?;
         maybe_lower_exceptions(
             &tools,
@@ -166,7 +168,41 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
     }
 
     let saw_started = Instant::now();
-    let saw_output = run_saw(saw, &output_dir, "verify.saw")?;
+    let mut saw_output = run_saw(saw, &output_dir, "verify.saw")?;
+    // Part 2 (§2): one-shot `-O0` → `-O1` fallback. The `-O0` STL
+    // build can emit empty-struct global loads (e.g. from
+    // `std::optional` / `std::nullopt_t` ctors) that SAW's simulator
+    // cannot load; `-O1` inlines them into plain byte stores. Only
+    // fires on a non-conclusive result, so a real VERIFIED/DISPROVED
+    // verdict is never overridden.
+    if !saw_output.contains("VERIFIED")
+        && !saw_output.contains("Counterexample")
+        && is_empty_struct_load_failure(&saw_output)
+    {
+        eprintln!(
+            "note: SAW could not load the -O0 build (empty-struct global load); \
+             retrying once at -O1."
+        );
+        recompile_at_o1(&O1Recompile {
+            tools: &tools,
+            is_msvc,
+            clang,
+            llvm_as,
+            output_dir: &output_dir,
+            base_name: &base_name,
+            user_flags: &user_clang_flags,
+            cpp_file: &cpp_file,
+            bc_file: &bc_file,
+            ll_file: &ll_file,
+            ast_file: &ast_file,
+            cry_dest: &cry_dest,
+            cryptol_fn: &req.cryptol_fn,
+            function: &req.function,
+            extra_spec_gen_args: &req.extra_spec_gen_args,
+            spec_only_on_missing: req.spec_only_on_missing,
+        })?;
+        saw_output = run_saw(saw, &output_dir, "verify.saw")?;
+    }
     let time_secs = saw_started.elapsed().as_secs_f64();
     let impl_file = cpp_file.file_name().and_then(OsStr::to_str);
     if saw_output.contains("Counterexample") {
@@ -255,6 +291,16 @@ fn run_saw(saw: &Path, output_dir: &Path, script_name: &str) -> Result<String> {
     Ok(text)
 }
 
+/// Heuristic: does this SAW transcript look like the `-O0` empty-struct
+/// global-load failure that a `-O1` rebuild fixes? Used only to gate the
+/// one-shot recompile fallback, and only on an otherwise non-conclusive
+/// run, so a false positive merely costs one extra `-O1` attempt.
+fn is_empty_struct_load_failure(saw_output: &str) -> bool {
+    saw_output.contains("Error during memory load")
+        || saw_output.contains("Cannot load through pointer")
+        || saw_output.contains("Unexpected zero-sized")
+}
+
 fn update_inventory(output_dir: &Path) -> Result<()> {
     let root = output_dir.parent().unwrap_or(output_dir);
     inventory::aggregate_inventory(root, &root.join("implementation_inventory.json"))
@@ -270,4 +316,27 @@ fn run_command(cmd: &mut Command, label: &str) -> Result<()> {
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_empty_struct_load_failure;
+
+    #[test]
+    fn detects_memory_load_failure_signatures() {
+        assert!(is_empty_struct_load_failure(
+            "saw: Error during memory load"
+        ));
+        assert!(is_empty_struct_load_failure(
+            "Cannot load through pointer to empty struct"
+        ));
+        assert!(is_empty_struct_load_failure("Unexpected zero-sized type"));
+    }
+
+    #[test]
+    fn ignores_conclusive_or_unrelated_output() {
+        assert!(!is_empty_struct_load_failure("RESULT: VERIFIED"));
+        assert!(!is_empty_struct_load_failure("Counterexample: x = 3"));
+        assert!(!is_empty_struct_load_failure("z3: unknown"));
+    }
 }
