@@ -21,6 +21,7 @@ pub mod mangle;
 pub mod project_config;
 pub mod result_json;
 pub mod tool_discovery;
+pub mod uninterpreted;
 pub mod verify_cache;
 pub mod verify_cpp;
 pub mod verify_result;

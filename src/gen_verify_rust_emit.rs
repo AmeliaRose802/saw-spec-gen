@@ -112,6 +112,7 @@ impl RustVerifyArtifacts {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn emit_saw_script(
     function: &str,
     cryptol_fn: &str,
@@ -120,6 +121,7 @@ pub fn emit_saw_script(
     arts: &RustVerifyArtifacts,
     overrides: &BufferOverrides,
     variant_map: &VariantMap,
+    uninterpreted: &crate::uninterpreted::UninterpretedBlock,
 ) -> String {
     let mut buf = String::new();
     buf.push_str(&format!(
@@ -132,6 +134,12 @@ pub fn emit_saw_script(
          import \"{cry_name}\";\n\n",
         mangled = arts.mangled_name,
     ));
+    // Uninterpreted-primitive contracts bound via `llvm_unsafe_assume_spec`.
+    if !uninterpreted.is_empty() {
+        buf.push_str("// Uninterpreted primitive contracts\n");
+        buf.push_str(&uninterpreted.snippet);
+        buf.push('\n');
+    }
     buf.push_str(&format!("let {function}_equiv_spec = do {{\n"));
 
     // Globals
@@ -278,12 +286,13 @@ pub fn emit_saw_script(
     buf.push_str("};\n\n");
 
     // Proof markers + verify
+    let ov_list = uninterpreted.override_names.join(", ");
     buf.push_str(&format!(
         "print \"BEGIN_PROOF {function}\";\n\
-         llvm_verify m \"{}\" [] true {}_equiv_spec z3;\n\
+         llvm_verify m \"{}\" [{}] true {}_equiv_spec z3;\n\
          print \"PROVED {function}\";\n\
          print \"VERIFIED\";\n",
-        arts.mangled_name, function,
+        arts.mangled_name, ov_list, function,
     ));
     buf
 }

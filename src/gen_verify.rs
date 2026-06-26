@@ -33,6 +33,7 @@ pub fn run(
     buffer_overrides: &crate::buffer_overrides::BufferOverrides,
     no_struct_shape_recognizer: bool,
     container_layouts: Option<&Path>,
+    uninterpreted_cfg: &[crate::uninterpreted::UninterpretedEntry],
 ) -> Result<()> {
     if ast.is_empty() {
         anyhow::bail!("At least one --ast file is required");
@@ -105,6 +106,13 @@ pub fn run(
         .unwrap_or_default();
     let mut safety = SafetyAnalyzer::new(&ir_text);
     let no_system_recursion = std::env::var_os("SAW_SPEC_GEN_NO_SYSTEM_RECURSION").is_some();
+
+    // llvm.var.annotation is only present in the bitcode when clang lowered
+    // an __attribute__((annotate)); SAL in the source is necessary but not
+    // sufficient (e.g. _In_reads_ buffer macros do not emit it at -O0). Gate
+    // the no-op override on actual IR presence so SAW does not abort with
+    // "Could not find definition for function named llvm.var.annotation.p0.p0".
+    let bitcode_has_var_annotation = ir_text.contains("llvm.var.annotation");
 
     // Sniff the bitcode's `target triple = "..."` line so vtable stub
     // generation can pick the correct ABI layout. Without this, an
@@ -454,6 +462,13 @@ pub fn run(
         &container_catalog,
     );
 
+    // Uninterpreted-primitive contracts: `@uninterpreted` annotations in
+    // the Cryptol spec plus `[[uninterpreted]]` config entries become
+    // `llvm_unsafe_assume_spec` bindings spliced into the verify script.
+    let uninterp_entries = crate::uninterpreted::gather(cryptol_spec, uninterpreted_cfg);
+    let uninterpreted =
+        crate::uninterpreted::emit_uninterpreted_block(&uninterp_entries, cryptol_spec);
+
     saw_emit::emit_verification_script(
         bitcode,
         cryptol_spec,
@@ -473,7 +488,8 @@ pub fn run(
         &ir_struct_defs,
         output,
         buffer_overrides,
-        has_source_sal_annotations,
+        has_source_sal_annotations && bitcode_has_var_annotation,
+        &uninterpreted,
     )?;
 
     // Post-processing: rewrite unresolved `llvm_alias "X"` references into

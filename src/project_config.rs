@@ -18,6 +18,7 @@
 //! alias_size = ["MyOpaque=16"]
 //! ```
 
+use crate::uninterpreted::UninterpretedEntry;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -50,6 +51,14 @@ pub struct ProjectConfig {
     /// Equivalent to repeated `--max-len-precond NAME=VAL`.
     #[serde(default)]
     pub max_len_precond: Vec<String>,
+
+    /// `[[uninterpreted]]` blocks: opaque callees (crypto primitives,
+    /// etc.) bound to a Cryptol contract via `llvm_unsafe_assume_spec`
+    /// instead of being symbolically executed. See
+    /// [`crate::uninterpreted`]. No CLI flag — config + Cryptol
+    /// `@uninterpreted` annotations are the only declaration surfaces.
+    #[serde(default)]
+    pub uninterpreted: Vec<UninterpretedEntry>,
 }
 
 impl ProjectConfig {
@@ -149,6 +158,7 @@ impl ProjectConfig {
             alias_enum,
             in_buffer_size,
             max_len_precond,
+            uninterpreted: self.uninterpreted.clone(),
         }
     }
 }
@@ -162,4 +172,6 @@ pub struct MergedConfig {
     pub alias_enum: Vec<String>,
     pub in_buffer_size: Vec<String>,
     pub max_len_precond: Vec<String>,
+    /// `[[uninterpreted]]` entries (config-only; no CLI equivalent).
+    pub uninterpreted: Vec<UninterpretedEntry>,
 }

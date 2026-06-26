@@ -38,6 +38,7 @@ entry:
         &arts,
         &BufferOverrides::default(),
         &gen_verify_rust_emit::VariantMap::default(),
+        &crate::uninterpreted::UninterpretedBlock::default(),
     );
     assert!(saw.contains("(x0 ! 0)"), "missing Bit bridge:\n{saw}");
 }
@@ -94,6 +95,7 @@ fn emit_saw_script_emits_begin_proof_before_llvm_verify() {
         &arts,
         &BufferOverrides::default(),
         &gen_verify_rust_emit::VariantMap::default(),
+        &crate::uninterpreted::UninterpretedBlock::default(),
     );
     assert!(saw.contains("print \"BEGIN_PROOF add_one\";"));
     let begin_idx = saw.find("print \"BEGIN_PROOF add_one\";").unwrap();
@@ -112,6 +114,7 @@ fn emit_saw_script_emits_proved_after_llvm_verify() {
         &arts,
         &BufferOverrides::default(),
         &gen_verify_rust_emit::VariantMap::default(),
+        &crate::uninterpreted::UninterpretedBlock::default(),
     );
     assert!(saw.contains("print \"PROVED add_one\";"));
     let verify_idx = saw.find("llvm_verify").unwrap();
@@ -130,6 +133,7 @@ fn emit_saw_script_keeps_legacy_verified_token() {
         &arts,
         &BufferOverrides::default(),
         &gen_verify_rust_emit::VariantMap::default(),
+        &crate::uninterpreted::UninterpretedBlock::default(),
     );
     assert!(saw.contains("VERIFIED"), "lost legacy VERIFIED token");
 }
@@ -181,6 +185,7 @@ entry:
         &arts,
         &BufferOverrides::default(),
         &gen_verify_rust_emit::VariantMap::default(),
+        &crate::uninterpreted::UninterpretedBlock::default(),
     );
     assert!(
         saw.contains("llvm_precond {{ x0 <= (2 : [8]) }}"),
@@ -217,6 +222,7 @@ entry:
         true,
         &BufferOverrides::default(),
         &crate::gen_verify_rust_emit::VariantMap::default(),
+        &[],
     );
     assert!(
         result.is_ok(),
@@ -262,6 +268,7 @@ entry:
         false,
         &BufferOverrides::default(),
         &crate::gen_verify_rust_emit::VariantMap::default(),
+        &[],
     )
     .unwrap();
 
@@ -308,6 +315,7 @@ entry:
         &arts,
         &BufferOverrides::default(),
         &vmap,
+        &crate::uninterpreted::UninterpretedBlock::default(),
     );
     assert!(
         saw.contains("x0 == (0 : [8]) \\/ x0 == (1 : [8]) \\/ x0 == (3 : [8])"),
@@ -335,6 +343,7 @@ entry:
         &arts,
         &BufferOverrides::default(),
         &vmap,
+        &crate::uninterpreted::UninterpretedBlock::default(),
     );
     // Two-variant return: should emit VariantRemap bridge adapter
     assert!(

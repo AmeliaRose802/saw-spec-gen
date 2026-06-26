@@ -1,0 +1,15 @@
+// Cryptol spec for the `@uninterpreted` end-to-end case.
+//
+// `prim` is an opaque primitive (think SHA-256 / HMAC): saw-spec-gen
+// must NOT try to unfold it. The `@uninterpreted` annotation binds the
+// implementation symbol `prim` to this Cryptol model via
+// `llvm_unsafe_assume_spec`, so the caller `use_prim` is verified
+// compositionally against the primitive's contract.
+
+/** @uninterpreted */
+prim : [8] -> [8]
+prim x = x ^ 0x5a   // body is irrelevant; the symbol is assumed, not unfolded
+
+// The caller's spec: apply the primitive once.
+use_prim_spec : [8] -> [8]
+use_prim_spec x = prim x

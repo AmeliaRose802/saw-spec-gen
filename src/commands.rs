@@ -377,6 +377,7 @@ pub fn gen_verify_cmd(
             merged.spec_only_on_missing,
             &overrides,
             &vmap,
+            &merged.uninterpreted,
         );
     }
 
@@ -407,6 +408,7 @@ pub fn gen_verify_cmd(
         &buffer_overrides,
         merged.no_struct_shape_recognizer,
         container_layouts.as_deref(),
+        &merged.uninterpreted,
     )
 }
 
@@ -458,6 +460,7 @@ pub fn gen_verify_rust_cmd(
         spec_only_on_missing,
         &overrides,
         &vmap,
+        &[],
     )
 }
 
