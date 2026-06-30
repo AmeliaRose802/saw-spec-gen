@@ -1,49 +1,105 @@
 name: Release
 
-# Build cross-platform release binaries and publish a GitHub Release
-# whenever a push to main changes the version in Cargo.toml.
+# Cut a new version automatically on every merge to master.
+#
+# Flow:
+#   1. `version` job computes the next semantic version (patch bump by
+#      default), writes it into Cargo.toml, commits, tags it, and pushes.
+#      The push uses GITHUB_TOKEN — pushes made with that token do NOT
+#      re-trigger workflows, and the commit message also carries
+#      `[skip ci]`, so there is no risk of an infinite release loop.
+#   2. `build` job compiles the cross-platform release binaries from the
+#      freshly-tagged commit.
+#   3. `publish` job creates the GitHub Release and attaches the binaries.
+#
+# A manual run (workflow_dispatch) lets you pick the bump level so you
+# can cut a minor or major release when needed.
 
 on:
   push:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump level'
+        type: choice
+        default: patch
+        options: [patch, minor, major]
 
 permissions:
   contents: write
 
+concurrency:
+  # Never run two releases at once — they would race on the tag/commit.
+  group: release
+  cancel-in-progress: false
+
 jobs:
-  # ── 1. Read Cargo.toml version and decide whether to release ──────
-  check-version:
+  # ── 1. Compute next version, bump Cargo.toml, tag, and push ───────
+  version:
+    # Skip the run that the bump commit itself produces (belt-and-braces;
+    # GITHUB_TOKEN pushes already don't trigger workflows).
+    if: ${{ !contains(github.event.head_commit.message, 'chore(release):') }}
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.meta.outputs.version }}
-      tag:     ${{ steps.meta.outputs.tag }}
-      release: ${{ steps.meta.outputs.release }}
+      version: ${{ steps.bump.outputs.version }}
+      tag:     ${{ steps.bump.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0          # need tags to check for duplicates
+          fetch-depth: 0          # need full tag history to find latest
 
-      - name: Extract version and check tag
-        id: meta
+      - name: Compute and apply next version
+        id: bump
         run: |
-          version=$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)
+          set -euo pipefail
+
+          bump="${{ github.event.inputs.bump || 'patch' }}"
+
+          # Base version: highest existing v* tag, else the Cargo.toml value.
+          latest_tag=$(git tag --list 'v*' --sort=-v:refname | head -n1 || true)
+          if [ -n "${latest_tag}" ]; then
+            base="${latest_tag#v}"
+          else
+            base=$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -n1)
+          fi
+          echo "Base version: ${base} (bump: ${bump})"
+
+          IFS='.' read -r major minor patch <<< "${base}"
+          case "${bump}" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+            *) echo "Unknown bump level: ${bump}" >&2; exit 1 ;;
+          esac
+          version="${major}.${minor}.${patch}"
           tag="v${version}"
+
+          if git rev-parse "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "Tag ${tag} already exists — aborting." >&2
+            exit 1
+          fi
+
+          echo "New version: ${version} (${tag})"
+
+          # Rewrite the first version = "..." line in [package].
+          sed -i "0,/^version *= *\".*\"/s//version = \"${version}\"/" Cargo.toml
+          grep -n '^version' Cargo.toml | head -n1
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml
+          git commit -m "chore(release): ${tag} [skip ci]"
+          git tag "${tag}"
+          git push origin HEAD:master
+          git push origin "${tag}"
+
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "tag=${tag}"         >> "$GITHUB_OUTPUT"
 
-          if git rev-parse "refs/tags/${tag}" >/dev/null 2>&1; then
-            echo "Tag ${tag} already exists — skipping release."
-            echo "release=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "New version ${version} — will release."
-            echo "release=true"  >> "$GITHUB_OUTPUT"
-          fi
-
   # ── 2. Build release binaries on each platform ────────────────────
   build:
-    needs: check-version
-    if: needs.check-version.outputs.release == 'true'
+    needs: version
     strategy:
       fail-fast: false
       matrix:
@@ -60,6 +116,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag }}   # build the tagged commit
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -106,10 +164,12 @@ jobs:
 
   # ── 3. Create the GitHub Release and attach all binaries ──────────
   publish:
-    needs: [check-version, build]
+    needs: [version, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag }}
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -120,7 +180,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.check-version.outputs.tag }}
-          name: saw-spec-gen ${{ needs.check-version.outputs.tag }}
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: saw-spec-gen ${{ needs.version.outputs.tag }}
           generate_release_notes: true
           files: artifacts/*
