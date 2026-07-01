@@ -361,10 +361,27 @@ fn emit_one(
             // No `llvm_return`.
         }
         ReturnSetup::Int(bits) => {
-            out.push_str(&format!(
-                "    rv <- llvm_fresh_var \"rv\" (llvm_int {bits});\n"
-            ));
-            out.push_str("    llvm_return (llvm_term rv);\n");
+            // Known threading status primitives (`_Mtx_lock`/`_Mtx_unlock`
+            // and friends) return `_Thrd_result`, whose success value
+            // `_Thrd_success` is `0`. A fresh-symbolic return lets the
+            // solver pick a failure code, which sends `_Mutex_base::lock`
+            // down its `_Throw_Cpp_error` → LLVM `unreachable` path and
+            // fails the subgoal. Pin the success sentinel so the
+            // lock/unlock pair is transparent to a lock-guarded body.
+            if let Some(sentinel) = super::status_primitives::success_sentinel(&t.symbol) {
+                out.push_str(&format!(
+                    "    // status primitive: pin success sentinel \
+                     ({sentinel} = _Thrd_success) instead of a fresh return\n"
+                ));
+                out.push_str(&format!(
+                    "    llvm_return (llvm_term {{{{ {sentinel} : [{bits}] }}}});\n"
+                ));
+            } else {
+                out.push_str(&format!(
+                    "    rv <- llvm_fresh_var \"rv\" (llvm_int {bits});\n"
+                ));
+                out.push_str("    llvm_return (llvm_term rv);\n");
+            }
         }
         ReturnSetup::Pointer => {
             out.push_str("    rv <- llvm_fresh_pointer (llvm_int 8);\n");
