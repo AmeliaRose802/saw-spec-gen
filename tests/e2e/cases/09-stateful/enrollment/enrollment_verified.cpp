@@ -27,5 +27,5 @@ std::uint32_t enroll_key(EnrollmentKey* k) noexcept {
     std::uint8_t engaged = k->engaged;
     k->createdAt = 42;
     k->engaged = engaged;
-    return engaged;
+    return static_cast<std::uint32_t>(engaged);
 }

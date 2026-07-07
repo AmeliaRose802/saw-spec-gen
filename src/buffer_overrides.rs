@@ -491,6 +491,7 @@ mod tests {
             ov.override_saw_type("pk"),
             Some("llvm_packed_struct_type [llvm_int 64, llvm_int 8]".into())
         );
+        assert!(ov.is_out_buffer("key"));
         assert!(ov.is_out_buffer("pk"));
         assert!(ov.has_in_buffer_size("hdr"));
     }
