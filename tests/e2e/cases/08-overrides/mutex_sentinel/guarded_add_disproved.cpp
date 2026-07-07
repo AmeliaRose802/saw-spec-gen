@@ -1,24 +1,20 @@
 // Companion to guarded_add_verified.cpp: confirms the mutex
-// success-sentinel override does NOT mask a genuine bug.
+// success-sentinel override does NOT mask a genuine bug, again against
+// a REAL `std::mutex`.
 //
-// Same lock-guarded shape, and the lock/unlock returns are still pinned
-// to `_Thrd_success`, but the success path returns `x + 2` while the
+// Same lock-guarded shape — the `_Mtx_lock` / `_Mtx_unlock` returns are
+// still pinned to `_Thrd_success` and `g_mtx` is still seeded from its
+// static initializer — but the guarded body returns `x + 2` while the
 // Cryptol spec `guarded_add_spec` is `x + 1`. The proof must therefore
-// still DISPROVE with a counterexample — the sentinel only removes the
+// DISPROVE with a counterexample: the sentinel only removes the
 // spurious lock-failure branch, it does not make every path pass.
 
 #include <cstdint>
+#include <mutex>
 
-extern "C" int _Mtx_lock(int* m);
-extern "C" int _Mtx_unlock(int* m);
+static std::mutex g_mtx_disproved;
 
-uint32_t guarded_add_disproved(uint32_t x) {
-    int mtx_state = 0;
-
-    if (_Mtx_lock(&mtx_state) != 0) {
-        return 0xDEADBEEFu;
-    }
-    uint32_t r = x + 2;  // BUG: off by one versus the spec's x + 1.
-    _Mtx_unlock(&mtx_state);
-    return r;
+extern "C" uint32_t guarded_add_disproved(uint32_t x) {
+    std::lock_guard<std::mutex> guard(g_mtx_disproved);
+    return x + 2;  // BUG: off by one versus the spec's x + 1.
 }

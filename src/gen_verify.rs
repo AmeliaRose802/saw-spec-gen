@@ -248,6 +248,7 @@ pub fn run(
                 );
                 all_globals.extend(extra);
             }
+            crate::transform::ir_globals::mark_static_initializers(&mut all_globals, &ir_text);
             llvm_ir::struct_defs(&ir_text)
         } else {
             HashMap::new()

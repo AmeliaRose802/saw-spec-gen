@@ -1,40 +1,32 @@
 // E2E coverage for the mutex success-sentinel override (doc item 5 of
-// docs/03-stateful-method-specs.md).
+// docs/03-stateful-method-specs.md), exercised against a REAL
+// `std::mutex` — not a hand-declared stand-in.
 //
-// `_Mtx_lock` / `_Mtx_unlock` are declare-only MSVC/UCRT threading
-// status primitives returning `_Thrd_result`, whose success value
-// `_Thrd_success` is 0. saw-spec-gen emits an assumed override for each
-// (an `_auto_spec.saw` for the declared prototype here) and, via
+// `std::lock_guard<std::mutex>` lowers (on the MSVC/UCRT toolchain) to
+// calls into the declare-only threading status primitives `_Mtx_lock`
+// / `_Mtx_unlock`, which return `_Thrd_result` (success == 0).
+// saw-spec-gen emits an assumed override for each and, via
 // `status_primitives::success_sentinel`, pins the return to that
-// sentinel instead of a fresh symbolic value.
+// sentinel instead of a fresh symbolic value. It also seeds the
+// file-scope `g_mtx` global from its own compile-time static
+// initializer (`llvm_global_initializer`) so the mutex's internal
+// recursion-count field reads back its real freshly-constructed value.
 //
-// This function's VERIFIED verdict DEPENDS on the pin: on a nonzero
-// (failure) status code it takes an error path returning a value that
-// does not equal the Cryptol spec `x + 1`. With a fresh symbolic
-// return the failure branch is reachable and the proof would DISPROVE;
-// with the success sentinel it is dead and the proof VERIFIES. Remove
-// the sentinel rule and this case flips to DISPROVED — that is the
-// regression it guards.
+// This VERIFIED verdict DEPENDS on the sentinel pin: with a fresh
+// symbolic status the lock-failure path (which `_Throw_Cpp_error`s and
+// diverges) would be reachable and the proof would fail to close;
+// pinned to success it is dead and the proof VERIFIES against the
+// Cryptol spec `guarded_add_spec x = x + 1`. Remove the sentinel rule
+// and this case stops verifying — that is the regression it guards.
 
 #include <cstdint>
+#include <mutex>
 
-// Declare-only status primitives (no body in this TU). `extern "C"`
-// keeps the symbol names exactly `_Mtx_lock` / `_Mtx_unlock`, which is
-// what the curated sentinel set matches. The mutex handle is a typed
-// pointer (as the real `_Mtx_t` is), so the override's pre-state binds
-// it as a pointer rather than a scalar.
-extern "C" int _Mtx_lock(int* m);
-extern "C" int _Mtx_unlock(int* m);
+// A real std::mutex member, guarded by std::lock_guard — the exact
+// production shape the sentinel + global-initializer support exists for.
+static std::mutex g_mtx;
 
-uint32_t guarded_add(uint32_t x) {
-    // Stand-in for the object's mutex member.
-    int mtx_state = 0;
-
-    if (_Mtx_lock(&mtx_state) != 0) {
-        // Error path — dead only because the override pins success.
-        return 0xDEADBEEFu;
-    }
-    uint32_t r = x + 1;
-    _Mtx_unlock(&mtx_state);
-    return r;
+extern "C" uint32_t guarded_add(uint32_t x) {
+    std::lock_guard<std::mutex> guard(g_mtx);
+    return x + 1;
 }

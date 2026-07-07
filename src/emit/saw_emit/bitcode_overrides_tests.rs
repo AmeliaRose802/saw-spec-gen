@@ -272,12 +272,14 @@ fn globals_get_adversarial_post_clobber() {
             mangled_name: "?g_counter@@3IA".to_string(),
             ty: TypeInfo::UnsignedInt(32),
             init_value: Some("0".to_string()),
+            has_static_initializer: false,
         },
         GlobalVarInfo {
             name: "g_flag".to_string(),
             mangled_name: "?g_flag@@3_NA".to_string(),
             ty: TypeInfo::Bool,
             init_value: None,
+            has_static_initializer: false,
         },
     ];
     let out = emit_overrides(&[t], &[], &globals, &Default::default());
@@ -366,6 +368,7 @@ fn target_writes_no_globals_means_no_global_clobber() {
         mangled_name: "?super_important@@3HA".to_string(),
         ty: TypeInfo::SignedInt(32),
         init_value: Some("7".to_string()),
+        has_static_initializer: false,
     }];
     let out = emit_overrides(&[t], &[], &globals, &Default::default());
     assert!(
@@ -403,6 +406,7 @@ fn declare_only_extern_clobbers_globals_in_written_set() {
         mangled_name: "?user_state@@3HA".to_string(),
         ty: TypeInfo::SignedInt(32),
         init_value: None,
+        has_static_initializer: false,
     }];
     let out = emit_overrides(&[t], &[], &globals, &Default::default());
     assert!(
