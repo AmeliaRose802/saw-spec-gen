@@ -1,31 +1,31 @@
-// enrollment — a *heterogeneous mixed-width struct* post-state. The
-// EnrollmentKey object models a `std::optional<uint32_t>`-style record:
-// a wide `uint32_t id` payload (accessed as a single i32 load/store)
-// next to a byte-granular `engaged` flag. Neither the byte-array nor
-// the homogeneous `iW`/`NxiW` out-buffer shapes can describe this
-// layout — a `[N x i8]` allocation rejects the i32 access, and a
-// single `iW`/`NxiW` can't carry two different field widths.
+// enrollment — a *heterogeneous mixed-width struct* post-state with
+// alignment padding. The object carries a byte-granular `engaged` flag
+// followed by an 8-byte `createdAt` word, so LLVM inserts 7 bytes of
+// padding between them. A flat byte array fails the i64 store, and a
+// homogeneous `iW`/`NxiW` shape can't also model the byte field.
 //
-// The struct out-buffer shape allocates the object as
-// `llvm_struct_type [ llvm_int 32, llvm_int 8 ]`, so SAW presents the
-// pre-state as a Cryptol tuple ([32],[8]) and both the wide and the
-// byte field type-check:
+// `--out-buffer-param k=struct:EnrollmentKey` emits
+// `llvm_alloc (llvm_struct "struct.EnrollmentKey")`, so SAW uses the
+// loaded LLVM layout: typed i8/i64 fields with implicit padding bytes
+// left unconstrained. The Cryptol model sees only the typed fields as
+// the tuple ([8],[64]):
 //
-//   --out-buffer-param k={i32,i8}  --cryptol-fn-out k=enroll_key_post
+//   --out-buffer-param k=struct:EnrollmentKey
+//   --cryptol-fn-out   k=enroll_key_post
 //
-// verified : `id` is incremented by one and the `engaged` flag is
-//            preserved. The Cryptol model maps (id, engaged) ->
-//            (id + 1, engaged); SAW proves equality (the add wraps mod
-//            2^32, matching unsigned C++ overflow semantics).
+// verified : `createdAt` is overwritten with a fixed i64 constant and
+//            `engaged` is preserved.
 
 #include <cstdint>
 
 struct EnrollmentKey {
-    std::uint32_t id;
     std::uint8_t engaged;
+    std::int64_t createdAt;
 };
 
 std::uint32_t enroll_key(EnrollmentKey* k) noexcept {
-    k->id = k->id + 1;
-    return 1;
+    std::uint8_t engaged = k->engaged;
+    k->createdAt = 42;
+    k->engaged = engaged;
+    return engaged;
 }

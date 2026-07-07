@@ -176,3 +176,90 @@ fn emit_equiv_spec_body_emits_cryptol_precondition_call() {
         "expected Cryptol precondition call; got:\n{out}"
     );
 }
+
+#[test]
+fn emit_equiv_spec_body_supports_named_struct_out_buffer() {
+    let target_spec = SpecConstraint {
+        function_name: "enroll_key".into(),
+        mangled_name: Some("?enroll_key@@YAIPEAUEnrollmentKey@@@Z".into()),
+        params: vec![ParamConstraint {
+            name: "k".into(),
+            saw_type: "llvm_alias \"struct.EnrollmentKey\"".into(),
+            alloc_type: AllocType::AllocMutable,
+            preconditions: vec![],
+            unchanged_after: false,
+            dereferenceable_size: None,
+            out_postcond: None,
+        }],
+        return_constraint: ReturnConstraint {
+            saw_type: "llvm_int 32".into(),
+            value_constraints: vec![],
+            is_sret: false,
+            returns_pointer: false,
+            sret_prestate: false,
+        },
+        referenced_globals: vec![],
+        has_body: true,
+        is_virtual: false,
+        can_throw: false,
+        postconditions: vec![],
+    };
+    let target_fn = FunctionInfo {
+        name: "enroll_key".into(),
+        mangled_name: Some("?enroll_key@@YAIPEAUEnrollmentKey@@@Z".into()),
+        return_type: TypeInfo::UnsignedInt(32),
+        params: vec![ParamInfo {
+            name: "k".into(),
+            ty: TypeInfo::Pointer(Box::new(TypeInfo::Struct {
+                name: "EnrollmentKey".into(),
+                size_bytes: None,
+                fields: vec![],
+            })),
+            mutability: Mutability::Mutable,
+            nullable: Nullability::NonNull,
+            annotations: vec![],
+        }],
+        called_functions: vec![],
+        has_body: true,
+        is_virtual: false,
+        is_system: false,
+        can_throw: false,
+        annotations: vec![],
+        referenced_globals: vec![],
+    };
+    let interface_classes = HashSet::new();
+    let interface_of = |_: &TypeInfo| -> Option<String> { None };
+    let overrides = BufferOverrides::from_cli(
+        &[],
+        &["k=struct:EnrollmentKey".into()],
+        &["k=enroll_key_post".into()],
+        &[],
+        &[],
+        &[],
+    )
+    .unwrap();
+
+    let mut out = String::new();
+    let _ = emit_equiv_spec_body(
+        &mut out,
+        1,
+        "enroll_key",
+        "enroll_key_ret",
+        &target_spec,
+        &target_fn,
+        &interface_classes,
+        &interface_of,
+        &[],
+        None,
+        &overrides,
+    );
+
+    assert!(
+        out.contains("k_ptr <- llvm_alloc (llvm_struct \"struct.EnrollmentKey\")"),
+        "expected named llvm_struct allocation; got:\n{out}"
+    );
+    assert!(
+        out.contains("k_pre <- llvm_fresh_var \"k_pre\" (llvm_struct \"struct.EnrollmentKey\")"),
+        "expected named llvm_struct pre-state; got:\n{out}"
+    );
+}

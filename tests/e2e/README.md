@@ -47,7 +47,7 @@ $env:SKIP_SAW_TESTS = '1'
 | `strings`            | `tests/e2e/cases/05-string-ops/count_digits/**` — C-string `count_digits` over `_In_reads_(8) const char*` (C++).          |
 | `cryptol_len_bind`   | `tests/e2e/cases/05-string-ops/cryptol_len_bind/**` — ArrayView rule 1: buffer size derived automatically from a length-polymorphic Cryptol signature. |
 | `int_ops`            | `tests/e2e/cases/06-int-ops/**` — integer-op coverage fillers (multi-arg signed min, predicate bit-trick, byte swap, u8 popcount). |
-| `cpp_stateful`       | `tests/e2e/cases/09-stateful/**` — stateful-method whole-object post-state via `--out-buffer-param` + `--cryptol-fn-out`, incl. byte buffers and typed wide fields (`i32`).  |
+| `cpp_stateful`       | `tests/e2e/cases/09-stateful/**` — stateful-method whole-object post-state via `--out-buffer-param` + `--cryptol-fn-out`, incl. byte buffers, typed wide fields (`i32`), and named heterogeneous structs with padding (`llvm_struct`).  |
 | `rust_adversarial`   | `tests/e2e/cases/99-research/rust_adversarial/**` — research cases for known verifier blind spots.  |
 | `box_allocator`      | `tests/e2e/cases/99-research/box_allocator` — excluded by default; produces `UNKNOWN` under the current pipeline. |
 
