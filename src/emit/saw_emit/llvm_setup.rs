@@ -74,6 +74,14 @@ pub fn emit_llvm_globals_setup(out: &mut String, globals: &[GlobalVarInfo]) {
                 "    llvm_points_to (llvm_global \"{}\") (llvm_term {{{{ {} : [{}] }}}});\n",
                 global.mangled_name, init_val, bits,
             ));
+        } else if global.has_static_initializer {
+            // Aggregate global with a compile-time initializer we can't
+            // render as a scalar (e.g. `static std::mutex g_mtx;`) — seed
+            // its pre-state from the module's own static initializer.
+            out.push_str(&format!(
+                "    llvm_points_to (llvm_global \"{name}\") (llvm_global_initializer \"{name}\");\n",
+                name = global.mangled_name,
+            ));
         } else {
             out.push_str(&format!(
                 "    {safe_name}_global <- llvm_fresh_var \"{safe_name}\" ({saw_type});\n",

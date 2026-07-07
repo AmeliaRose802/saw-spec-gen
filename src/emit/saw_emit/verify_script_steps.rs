@@ -481,6 +481,16 @@ pub(super) fn emit_equiv_spec_body(
                 "    llvm_points_to (llvm_global \"{}\") (llvm_term {{{{ {} : [{}] }}}});\n",
                 global.mangled_name, init, bits,
             ));
+        } else if global.has_static_initializer {
+            // Aggregate globals (e.g. `static std::mutex g_mtx;`) carry
+            // a compile-time initializer we can't render as a scalar.
+            // Seed the pre-state with the module's own static
+            // initializer so reads of internal fields (mutex recursion
+            // count, etc.) see their real freshly-constructed values.
+            out.push_str(&format!(
+                "    llvm_points_to (llvm_global \"{name}\") (llvm_global_initializer \"{name}\");\n",
+                name = global.mangled_name,
+            ));
         }
         out.push('\n');
     }

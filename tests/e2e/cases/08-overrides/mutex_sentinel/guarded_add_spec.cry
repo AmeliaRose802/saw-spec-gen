@@ -1,0 +1,8 @@
+module guarded_add_spec where
+
+// A lock-guarded increment. The success path returns x + 1; the spec
+// deliberately says nothing about the lock/unlock status codes because
+// the mutex is uncontended in a sequential proof (the generator pins
+// `_Mtx_lock` / `_Mtx_unlock` to the `_Thrd_success` sentinel).
+guarded_add_spec : [32] -> [32]
+guarded_add_spec x = x + 1
