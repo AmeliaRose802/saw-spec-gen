@@ -271,7 +271,7 @@ fn parse_cry_arg(tok: &str) -> CryArg {
 fn parse_buf_saw_type(value: &str, flag: &str) -> Result<String> {
     let value = value.trim();
     if let Some(name) = value.strip_prefix("struct:") {
-        let llvm_name = normalize_llvm_struct_name(name, flag, value)?;
+        let llvm_name = ensure_llvm_struct_prefix(name, flag, value)?;
         return Ok(format!("llvm_struct \"{llvm_name}\""));
     }
     // Struct shapes must be checked before the `x`/`i` scalar forms:
@@ -304,7 +304,7 @@ fn parse_buf_saw_type(value: &str, flag: &str) -> Result<String> {
     Ok(format!("llvm_array {n} (llvm_int 8)"))
 }
 
-fn normalize_llvm_struct_name(name: &str, flag: &str, value: &str) -> Result<String> {
+fn ensure_llvm_struct_prefix(name: &str, flag: &str, value: &str) -> Result<String> {
     let name = name.trim();
     if name.is_empty() {
         bail!("{flag} value '{value}': struct:<Type> requires a non-empty LLVM type name");

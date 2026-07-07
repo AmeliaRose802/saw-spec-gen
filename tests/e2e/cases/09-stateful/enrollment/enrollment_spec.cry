@@ -21,8 +21,8 @@ type Key = ([8], [64])
 
 // Post-state: engaged kept, createdAt overwritten with 42.
 enroll_key_post : Key -> Key
-enroll_key_post (engaged, createdAt) = (engaged, 42)
+enroll_key_post (engaged, _) = (engaged, 42)
 
 // Return value: report the original engaged byte.
 enroll_key_ret : Key -> [32]
-enroll_key_ret (engaged, createdAt) = zero # engaged
+enroll_key_ret (engaged, _) = zero # engaged
