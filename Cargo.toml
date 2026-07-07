@@ -1,6 +1,6 @@
 [package]
 name = "saw-spec-gen"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 rust-version = "1.85"
 description = "Auto-generate SAW verification specs from C++ AST and Rust MIR type information"
