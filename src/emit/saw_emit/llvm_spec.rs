@@ -330,7 +330,7 @@ pub fn generate_unspecified_spec(spec: &SpecConstraint, all_globals: &[GlobalVar
             // because SAW verifies the sequential (uncontended)
             // transition. See `super::status_primitives`.
             match super::status_primitives::success_sentinel(target_name)
-                .and_then(|s| int_bits(&spec.return_constraint.saw_type).map(|b| (s, b)))
+                .zip(int_bits(&spec.return_constraint.saw_type))
             {
                 Some((sentinel, bits)) => {
                     out.push_str(&format!(
