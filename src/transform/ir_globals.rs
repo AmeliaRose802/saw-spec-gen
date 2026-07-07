@@ -162,9 +162,79 @@ pub(crate) fn discover_ir_only_globals(
             mangled_name: sym.to_string(),
             ty,
             init_value,
+            has_static_initializer: false,
         });
     }
     out
+}
+
+/// Scan LLVM IR text for the set of global symbols that are **defined
+/// with a static initializer** in this module — i.e. `global`/`constant`
+/// definitions whose linkage is *not* `external`/`extern_weak`. These
+/// are exactly the globals for which SAW's `llvm_global_initializer`
+/// works: it reads the compile-time initializer straight from the
+/// module. External declarations (`@g = external global TY`, no
+/// in-module initializer) are excluded because they have nothing to
+/// seed from.
+///
+/// Used to mark [`GlobalVarInfo::has_static_initializer`] so the spec
+/// emitter can seed aggregate globals (e.g. `static std::mutex g_mtx;`)
+/// with their real static-initialized pre-state instead of leaving the
+/// allocation uninitialized.
+pub(crate) fn defined_global_symbols(ir: &str) -> HashSet<String> {
+    let mut out = HashSet::new();
+    for line in ir.lines() {
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with('@') {
+            continue;
+        }
+        let Some(eq) = trimmed.find(" = ") else {
+            continue;
+        };
+        let lhs = &trimmed[..eq];
+        let rhs = &trimmed[eq + 3..];
+        // Locate the ` global ` / ` constant ` keyword (whichever comes
+        // first). The tokens before it are the linkage / attribute list.
+        let needle = format!(" {rhs}");
+        let kw_pos = match (needle.find(" global "), needle.find(" constant ")) {
+            (Some(g), Some(c)) => g.min(c),
+            (Some(g), None) => g,
+            (None, Some(c)) => c,
+            (None, None) => continue,
+        };
+        let prefix = &needle[..kw_pos];
+        // `external`/`extern_weak` globals are declarations with no
+        // in-module initializer, so `llvm_global_initializer` cannot
+        // seed them — skip.
+        if prefix
+            .split_whitespace()
+            .any(|t| t == "external" || t == "extern_weak")
+        {
+            continue;
+        }
+        let sym = lhs.trim_start_matches('@').trim().trim_matches('"');
+        if sym.is_empty() {
+            continue;
+        }
+        out.insert(sym.to_string());
+    }
+    out
+}
+
+/// Set [`GlobalVarInfo::has_static_initializer`] on every global that is
+/// defined with a compile-time initializer in `ir` but for which we
+/// couldn't render a scalar `init_value`. The spec emitter then seeds
+/// such globals from their module static initializer
+/// (`llvm_global_initializer`) instead of leaving the allocation
+/// uninitialized — required for aggregate globals like
+/// `static std::mutex g_mtx;`.
+pub(crate) fn mark_static_initializers(globals: &mut [GlobalVarInfo], ir: &str) {
+    let defined = defined_global_symbols(ir);
+    for g in globals {
+        if g.init_value.is_none() && defined.contains(&g.mangled_name) {
+            g.has_static_initializer = true;
+        }
+    }
 }
 
 /// Match `store TY VALUE, ptr @NAME, ...` and return the bare global
@@ -210,5 +280,92 @@ pub(crate) fn extract_store_global_target(line: &str) -> Option<String> {
         None
     } else {
         Some(name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defined_globals_include_internal_and_exclude_external() {
+        let ir = "\
+@g_mtx = internal global { i32, i32 } { i32 2, i32 0 }, align 8\n\
+@user_state = global i32 0\n\
+@extern_decl = external global i32\n\
+@weak_decl = extern_weak global i32\n\
+@vtbl = private unnamed_addr constant [2 x ptr] [ptr null, ptr null]\n";
+        let defined = defined_global_symbols(ir);
+        assert!(
+            defined.contains("g_mtx"),
+            "internal-with-init global missing"
+        );
+        assert!(
+            defined.contains("user_state"),
+            "plain defined global missing"
+        );
+        assert!(defined.contains("vtbl"), "private constant missing");
+        assert!(
+            !defined.contains("extern_decl"),
+            "external declaration must be excluded (no in-module initializer)"
+        );
+        assert!(
+            !defined.contains("weak_decl"),
+            "extern_weak declaration must be excluded"
+        );
+    }
+
+    #[test]
+    fn defined_globals_ignore_non_global_lines() {
+        let ir = "\
+define i32 @f() {\n\
+  ret i32 0\n\
+}\n\
+%struct.Foo = type { i32 }\n";
+        assert!(defined_global_symbols(ir).is_empty());
+    }
+
+    #[test]
+    fn mark_static_initializers_only_flags_defined_no_scalar_globals() {
+        let ir = "\
+@g_mtx = internal global { i32, i32 } { i32 2, i32 0 }, align 8\n\
+@scalar = internal global i32 7\n\
+@ext = external global { i32 }\n";
+        let mut globals = vec![
+            GlobalVarInfo {
+                name: "g_mtx".into(),
+                mangled_name: "g_mtx".into(),
+                ty: TypeInfo::UnsignedInt(32),
+                init_value: None,
+                has_static_initializer: false,
+            },
+            // Has a scalar init_value already — must stay unflagged so the
+            // emitter keeps rendering the concrete term.
+            GlobalVarInfo {
+                name: "scalar".into(),
+                mangled_name: "scalar".into(),
+                ty: TypeInfo::SignedInt(32),
+                init_value: Some("7".into()),
+                has_static_initializer: false,
+            },
+            // External declaration — no in-module initializer to seed.
+            GlobalVarInfo {
+                name: "ext".into(),
+                mangled_name: "ext".into(),
+                ty: TypeInfo::UnsignedInt(32),
+                init_value: None,
+                has_static_initializer: false,
+            },
+        ];
+        mark_static_initializers(&mut globals, ir);
+        assert!(globals[0].has_static_initializer, "g_mtx should be flagged");
+        assert!(
+            !globals[1].has_static_initializer,
+            "scalar-init global must not be flagged"
+        );
+        assert!(
+            !globals[2].has_static_initializer,
+            "external declaration must not be flagged"
+        );
     }
 }

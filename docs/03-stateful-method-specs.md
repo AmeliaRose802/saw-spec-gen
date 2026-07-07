@@ -140,9 +140,17 @@ targets modellable as plain byte regions, so the whole-object form suffices.
 - **Concurrency is out of scope.** The real `KeyStore` is mutex-guarded; SAW
   verifies the *sequential* transition. The "no two threads race the
   provision/activate window" claim (G30) is a separate argument and must not be
-  implied by this proof.
+  implied by this proof. Concretely, the assumed overrides for the declare-only
+  mutex status primitives (`_Mtx_lock`/`_Mtx_unlock`/`_Mtx_init`/`_Mtx_destroy`,
+  `_Thrd_result` where `_Thrd_success == 0`) pin the success sentinel `0`
+  instead of a fresh symbolic return, so a lock-guarded body's error path
+  (`_Throw_Cpp_error` → `unreachable`) is dead. This is sound *only* for the
+  uncontended sequential model; `_Mtx_trylock` is deliberately left symbolic.
+  The rule lives in `src/emit/saw_emit/status_primitives.rs` and is covered
+  end-to-end by `tests/e2e/cases/08-overrides/mutex_sentinel/`.
 - **Optional/STL layout may still need care at `-O0`.** Struct-typed
   out-buffers solve the mixed-width heap-types problem, but large STL wrappers
   can still be awkward when the compiled body touches compiler-specific helper
-  state. The `-O1`-inlined-state workaround remains useful for those cases and
-  should be documented as a modeling assumption, not hidden.
+  state. Getting SAW to see through `std::optional`'s engaged flag at `-O0` is
+  the same heap-types wall; the `-O1`-inlined-state workaround remains useful
+  for those cases and should be documented as a modeling assumption, not hidden.

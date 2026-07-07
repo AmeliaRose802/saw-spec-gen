@@ -64,6 +64,7 @@ pub fn collect_globals(ast: &AstNode, ctx: &TypeContext) -> GlobalIndex {
                 mangled_name: mangled.to_string(),
                 ty,
                 init_value,
+                has_static_initializer: false,
             },
         );
     }

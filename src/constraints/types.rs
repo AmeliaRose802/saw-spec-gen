@@ -53,6 +53,14 @@ pub struct GlobalVarInfo {
     pub ty: TypeInfo,
     /// Initial value as a string (e.g. "7" for int super_important = 7)
     pub init_value: Option<String>,
+    /// True when the module defines this global with a compile-time
+    /// static initializer (an `internal`/`private` — i.e. non-`external`
+    /// — `global`/`constant` definition in the LLVM IR). Aggregate
+    /// globals such as `static std::mutex g_mtx;` carry an initializer
+    /// we can't render as a scalar `init_value`, so the emitter seeds
+    /// their pre-state with `llvm_global_initializer` instead. External
+    /// declarations (no in-module initializer) leave this `false`.
+    pub has_static_initializer: bool,
 }
 
 /// One discriminant of an enum.

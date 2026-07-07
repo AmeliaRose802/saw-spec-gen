@@ -228,6 +228,13 @@
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/user_variadic';           File = 'bump_with_log_verified.cpp'; Cry = 'bump_with_log_spec.cry'; CryptolFn = 'bump_with_log_spec'; Function = 'bump_with_log'; Expected = 'VERIFIED'  }
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/variadic_clobber';        File = 'add_one_disproved.cpp';      Cry = 'add_one_spec.cry';       CryptolFn = 'add_one_spec';       Function = 'add_one_disproved';       Expected = 'DISPROVED' }
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/variadic_global_clobber'; File = 'add_one_disproved.cpp';      Cry = 'add_one_spec.cry';       CryptolFn = 'add_one_spec';       Function = 'add_one_disproved';       Expected = 'DISPROVED' }
+        # Mutex success-sentinel: `_Mtx_lock`/`_Mtx_unlock` are declare-only
+        # `_Thrd_result` primitives whose override pins the `_Thrd_success` (0)
+        # sentinel instead of a fresh return. The verified case only proves
+        # because the spurious lock-failure branch is dead; the disproved case
+        # shows the pin still lets a genuine off-by-one bug surface.
+        @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/mutex_sentinel';          File = 'guarded_add_verified.cpp';   Cry = 'guarded_add_spec.cry';   CryptolFn = 'guarded_add_spec';   Function = 'guarded_add';             Expected = 'VERIFIED'  }
+        @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/mutex_sentinel';          File = 'guarded_add_disproved.cpp';  Cry = 'guarded_add_spec.cry';   CryptolFn = 'guarded_add_spec';   Function = 'guarded_add_disproved';   Expected = 'DISPROVED' }
 
         # ── C++/Rust equivalence tests (verify-equiv.ps1) ───────────────────
         @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'tests/e2e/cases/04-cpp-rust-equivalence/compute_fee_reordered';         Cpp = 'compute_fee.cpp'; Rust = 'compute_fee_verified.rs';  Cry = 'compute_fee_spec.cry'; CryptolFn = 'compute_fee_spec'; Function = 'compute_fee'; Expected = 'EQUIVALENT'     }

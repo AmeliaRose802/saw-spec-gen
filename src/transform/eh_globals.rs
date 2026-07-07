@@ -210,18 +210,21 @@ pub fn inject_exclow_globals(
             mangled_name: "__exclow_error_flag".into(),
             ty: TypeInfo::Bool,
             init_value: Some("0".into()),
+            has_static_initializer: false,
         },
         GlobalVarInfo {
             name: "__exclow_error_typeinfo".into(),
             mangled_name: "__exclow_error_typeinfo".into(),
             ty: TypeInfo::Pointer(Box::new(TypeInfo::UnsignedInt(8))),
             init_value: None,
+            has_static_initializer: false,
         },
         GlobalVarInfo {
             name: "__exclow_error_value".into(),
             mangled_name: "__exclow_error_value".into(),
             ty: TypeInfo::Pointer(Box::new(TypeInfo::UnsignedInt(8))),
             init_value: None,
+            has_static_initializer: false,
         },
     ];
 
