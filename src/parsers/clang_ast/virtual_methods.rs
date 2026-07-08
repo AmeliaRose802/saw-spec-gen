@@ -198,21 +198,29 @@ impl<'a> Visitor for VMethodVisitor<'a> {
                     parse_function_decl(node, true, self.ctx, self.id_to_name, self.stack.current())
                 {
                     if self.filter.map(|f| func.name.contains(f)).unwrap_or(true) {
+                        // Resolve the declaring class. If neither the AST
+                        // parent-context id nor the enclosing class stack
+                        // yields a name we cannot emit a coherent vtable /
+                        // stub set for it — an "Unknown"-classed method
+                        // produces `unknown_*_stub` symbols and a vtable
+                        // that can reference a stub we never define
+                        // (undefined-symbol at assemble time). Skip it.
                         let class_name = node
                             .parent_decl_context_id
                             .as_deref()
                             .and_then(|id| self.id_to_name.get(id))
                             .map(|s| s.as_str())
                             .or(self.stack.current())
-                            .unwrap_or("Unknown")
-                            .to_string();
-                        self.out.push(InterfaceMethod {
-                            class_name,
-                            method: func,
-                            is_pure,
-                            is_override: has_override,
-                            source_offset: node.source_offset(),
-                        });
+                            .map(|s| s.to_string());
+                        if let Some(class_name) = class_name {
+                            self.out.push(InterfaceMethod {
+                                class_name,
+                                method: func,
+                                is_pure,
+                                is_override: has_override,
+                                source_offset: node.source_offset(),
+                            });
+                        }
                     }
                 }
             }
@@ -390,5 +398,26 @@ mod tests {
         let m = extract_virtual_methods(&ast, None).unwrap();
         assert_eq!(m.len(), 1, "system-header virtual methods must be skipped");
         assert_eq!(m[0].method.name, "process");
+    }
+
+    #[test]
+    fn skips_virtual_method_with_unresolvable_class() {
+        // A virtual `CXXMethodDecl` with no enclosing `CXXRecordDecl`
+        // and no `parentDeclContextId` cannot be attributed to a class.
+        // Emitting it would fall back to an "Unknown" class name and
+        // produce incoherent `unknown_*_stub` symbols / a vtable that
+        // references an undefined stub (issue #57). It must be dropped.
+        let ast = parse(json!({
+            "kind": "TranslationUnitDecl",
+            "inner": [{
+                "kind": "CXXMethodDecl", "name": "orphan",
+                "type": {"qualType": "void ()"},
+                "virtual": true
+            }]
+        }));
+        assert!(
+            extract_virtual_methods(&ast, None).unwrap().is_empty(),
+            "virtual method with unresolvable class must be skipped, not tagged Unknown"
+        );
     }
 }

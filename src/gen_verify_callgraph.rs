@@ -57,6 +57,113 @@ pub fn collect_external_call_specs<'s, 'f>(
     )
 }
 
+/// Return `true` when any virtual method in `vmethods` is reachable as a
+/// call target from `target_fn`.
+///
+/// The clang AST records a virtual dispatch (`p->foo()`,
+/// `obj.foo()`) as a `called_function` whose `mangled_name` is the
+/// statically-resolved method's symbol, so a target that never
+/// dispatches virtually reaches none of the interface methods. In that
+/// case the whole vtable-stub machinery (stub module, `_vtable`
+/// globals, `interface_overrides.saw`, the pre-linked `code.combined.bc`
+/// load path) is dead weight — worse, it can reference stub symbols the
+/// target never needs and block the generated script from running. This
+/// gate lets [`crate::gen_verify`] skip stub emission entirely for
+/// non-virtual targets even when the translation unit incidentally
+/// contains polymorphic types.
+///
+/// Emission is all-or-nothing: dropping *some* methods of a reachable
+/// class would shift its remaining vtable slots and mis-resolve
+/// dispatch, so once any interface method is reachable the caller keeps
+/// the full method set.
+pub fn any_interface_reachable(
+    target_fn: &constraints::FunctionInfo,
+    all_functions: &[constraints::FunctionInfo],
+    vmethods: &[crate::clang_ast::InterfaceMethod],
+) -> bool {
+    if vmethods.is_empty() {
+        return false;
+    }
+    let reached = reachable_call_targets(target_fn, all_functions);
+    vmethods.iter().any(|m| {
+        m.method
+            .mangled_name
+            .as_deref()
+            .is_some_and(|mn| reached.contains(mn))
+    })
+}
+
+/// Return the virtual methods for which vtable stubs should be emitted.
+///
+/// Keeps `all_vmethods` when the target reaches any virtual dispatch
+/// (see [`any_interface_reachable`]); otherwise drops the lot and logs a
+/// note, since emitting stubs for polymorphic types the target never
+/// touches yields an unusable script (issue #57).
+pub fn select_reachable_vmethods(
+    target_fn: &constraints::FunctionInfo,
+    all_functions: &[constraints::FunctionInfo],
+    all_vmethods: Vec<crate::clang_ast::InterfaceMethod>,
+    function: &str,
+) -> Vec<crate::clang_ast::InterfaceMethod> {
+    if any_interface_reachable(target_fn, all_functions, &all_vmethods) {
+        return all_vmethods;
+    }
+    if !all_vmethods.is_empty() {
+        eprintln!(
+            "note: target '{function}' reaches no virtual dispatch; \
+             skipping vtable-stub emission for {} polymorphic method(s) \
+             in the translation unit",
+            all_vmethods.len(),
+        );
+    }
+    Vec::new()
+}
+
+/// Collect the set of call-target symbols (mangled names) reachable from
+/// `target_fn` by descending through every in-module callee that has a
+/// body.
+///
+/// Unlike [`collect_external_call_specs`] this ignores crucible-safety
+/// gating — the goal is a *complete* reachability set so callers can
+/// decide whether the target dispatches to any virtual method.
+fn reachable_call_targets(
+    target_fn: &constraints::FunctionInfo,
+    all_functions: &[constraints::FunctionInfo],
+) -> HashSet<String> {
+    let fn_by_mangled: HashMap<&str, &constraints::FunctionInfo> = all_functions
+        .iter()
+        .filter_map(|f| f.mangled_name.as_deref().map(|m| (m, f)))
+        .collect();
+    let fn_by_name: HashMap<&str, &constraints::FunctionInfo> =
+        all_functions.iter().map(|f| (f.name.as_str(), f)).collect();
+
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut reached: HashSet<String> = HashSet::new();
+    let mut worklist: Vec<&constraints::FunctionInfo> = vec![target_fn];
+    while let Some(f) = worklist.pop() {
+        let key = f.mangled_name.clone().unwrap_or_else(|| f.name.clone());
+        if !visited.insert(key) {
+            continue;
+        }
+        for c in &f.called_functions {
+            if !c.mangled_name.is_empty() {
+                reached.insert(c.mangled_name.clone());
+            }
+            if !c.name.is_empty() {
+                reached.insert(c.name.clone());
+            }
+            let callee = fn_by_mangled
+                .get(c.mangled_name.as_str())
+                .or_else(|| fn_by_name.get(c.name.as_str()))
+                .copied();
+            if let Some(callee) = callee {
+                worklist.push(callee);
+            }
+        }
+    }
+    reached
+}
+
 /// Transitive worklist walk from `target_fn`. Returns the set of
 /// mangled-name strings that were observed as call targets anywhere
 /// in the reachable subgraph (whether or not the walk descended into
@@ -211,4 +318,78 @@ fn stl_override_matches(callee: &constraints::FunctionInfo) -> bool {
         }
     }
     stl_overrides::matches(callee.name.as_str())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::clang_ast::InterfaceMethod;
+    use crate::constraints::{CalledFunction, FunctionInfo, TypeInfo};
+
+    fn func(name: &str, mangled: &str, calls: &[(&str, &str)]) -> FunctionInfo {
+        FunctionInfo {
+            name: name.into(),
+            mangled_name: Some(mangled.into()),
+            params: vec![],
+            return_type: TypeInfo::Void,
+            can_throw: false,
+            is_virtual: false,
+            has_body: true,
+            is_system: false,
+            annotations: vec![],
+            referenced_globals: vec![],
+            called_functions: calls
+                .iter()
+                .map(|(n, m)| CalledFunction {
+                    name: (*n).into(),
+                    mangled_name: (*m).into(),
+                    has_body: false,
+                })
+                .collect(),
+        }
+    }
+
+    fn vmethod(class: &str, name: &str, mangled: &str) -> InterfaceMethod {
+        InterfaceMethod {
+            class_name: class.into(),
+            method: func(name, mangled, &[]),
+            is_pure: false,
+            is_override: false,
+            source_offset: 0,
+        }
+    }
+
+    #[test]
+    fn reachable_when_target_dispatches_to_vmethod() {
+        let target = func("activate", "?activate@@", &[("log", "?log@ILog@@")]);
+        let all = vec![target.clone()];
+        let vmethods = vec![vmethod("ILog", "log", "?log@ILog@@")];
+        assert!(any_interface_reachable(&target, &all, &vmethods));
+    }
+
+    #[test]
+    fn reachable_transitively_through_in_module_callee() {
+        let target = func("activate", "?activate@@", &[("helper", "?helper@@")]);
+        let helper = func("helper", "?helper@@", &[("log", "?log@ILog@@")]);
+        let all = vec![target.clone(), helper];
+        let vmethods = vec![vmethod("ILog", "log", "?log@ILog@@")];
+        assert!(any_interface_reachable(&target, &all, &vmethods));
+    }
+
+    #[test]
+    fn not_reachable_when_target_ignores_polymorphic_types() {
+        // Issue #57: the TU has a virtual method but `activate` never
+        // dispatches to it — no stubs should be emitted.
+        let target = func("activate", "?activate@@", &[("strlen", "strlen")]);
+        let all = vec![target.clone()];
+        let vmethods = vec![vmethod("ILog", "log", "?log@ILog@@")];
+        assert!(!any_interface_reachable(&target, &all, &vmethods));
+    }
+
+    #[test]
+    fn empty_vmethods_is_not_reachable() {
+        let target = func("activate", "?activate@@", &[]);
+        let all = vec![target.clone()];
+        assert!(!any_interface_reachable(&target, &all, &[]));
+    }
 }
