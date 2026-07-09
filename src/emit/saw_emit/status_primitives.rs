@@ -37,7 +37,7 @@ pub fn success_sentinel(symbol: &str) -> Option<i64> {
     SUCCESS_SENTINEL_PRIMITIVES.contains(&symbol).then_some(0)
 }
 
-/// Substring patterns that identify MSVC `_Mutex_base` internal helpers.
+/// Substring patterns that identify MSVC `std::_Mutex_base` internal helpers.
 ///
 /// These functions are defined in-module with `linkonce_odr` linkage (not
 /// `declare`-only) and perform typed reads on `_Mutex_base` fields
@@ -46,10 +46,16 @@ pub fn success_sentinel(symbol: &str) -> Option<i64> {
 /// symbolic execution. In a sequential proof the mutex is always
 /// uncontended, so abstracting them as no-ops returning a success value
 /// is sound.
+///
+/// The pattern `_Mutex_base@std` appears in every MSVC-mangled method of
+/// `std::_Mutex_base` (e.g. `?_Verify_ownership_levels@_Mutex_base@std@@...`,
+/// `?_Stl_critical_section_begin@_Mutex_base@std@@...`), so it future-proofs
+/// detection of all sibling helpers without an explicit per-method list.
 const MSVC_MUTEX_HELPER_PATTERNS: &[&str] = &[
-    // `std::_Mutex_base::_Verify_ownership_levels` — MSVC-mangled as
-    // `?_Verify_ownership_levels@_Mutex_base@std@@...`
-    "_Verify_ownership_levels",
+    // Matches any method of `std::_Mutex_base` in MSVC-mangled form.
+    // MSVC encodes class and namespace as `@ClassName@Namespace@`, so every
+    // method of `std::_Mutex_base` contains this exact substring.
+    "_Mutex_base@std",
 ];
 
 /// Whether `symbol` (mangled or unmangled) is a known MSVC `_Mutex_base`
@@ -63,10 +69,11 @@ pub fn is_msvc_mutex_helper(symbol: &str) -> bool {
 /// No-op return value to pin for a known MSVC mutex helper, or `None` for
 /// any other symbol.  The value is an integer suitable for
 /// `llvm_term {{ <val> : [<bits>] }}` — e.g. `1` (true) for the
-/// `bool`-returning `_Verify_ownership_levels`.
+/// `bool`-returning helpers like `_Verify_ownership_levels`.
 pub fn msvc_mutex_noop_return(symbol: &str) -> Option<i64> {
-    // `_Verify_ownership_levels` returns `bool` (i1). In a sequential proof
-    // the mutex ownership levels are always valid — pin `true` (1).
+    // All `std::_Mutex_base` ownership helpers return `bool` (i1). In a
+    // sequential proof the mutex is always uncontended and ownership levels
+    // are always valid — pin `true` (1).
     if is_msvc_mutex_helper(symbol) {
         Some(1)
     } else {
@@ -97,13 +104,17 @@ mod tests {
     }
 
     #[test]
-    fn verify_ownership_levels_is_msvc_mutex_helper() {
-        // Exact MSVC-mangled name for `std::_Mutex_base::_Verify_ownership_levels`.
+    fn msvc_mutex_base_methods_are_helpers() {
+        // `_Mutex_base@std` appears in every MSVC-mangled method of
+        // `std::_Mutex_base` — verify a few representative names.
         assert!(is_msvc_mutex_helper(
             "?_Verify_ownership_levels@_Mutex_base@std@@IEAA_NXZ"
         ));
-        // Plain unmangled name also matches (used in unit tests).
-        assert!(is_msvc_mutex_helper("_Verify_ownership_levels"));
+        // A hypothetical sibling method is also caught without a dedicated
+        // pattern entry — this is the future-proofing the change provides.
+        assert!(is_msvc_mutex_helper(
+            "?_Stl_critical_section_begin@_Mutex_base@std@@IEAAXXZ"
+        ));
     }
 
     #[test]
@@ -111,6 +122,11 @@ mod tests {
         assert!(!is_msvc_mutex_helper("_Mtx_lock"));
         assert!(!is_msvc_mutex_helper("compute_checksum"));
         assert!(!is_msvc_mutex_helper("printf"));
+        // GCC-mangled name for a simulation struct does NOT match — the
+        // pattern is MSVC-specific (`@ClassName@Namespace@` encoding).
+        assert!(!is_msvc_mutex_helper(
+            "_ZN15_Mutex_base_sim24_Verify_ownership_levelsEv"
+        ));
     }
 
     #[test]
