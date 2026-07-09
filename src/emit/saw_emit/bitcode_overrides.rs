@@ -385,7 +385,7 @@ fn emit_one(
                 // no-op return (true for bool-returning helpers).
                 out.push_str(&format!(
                     "    // msvc-mutex-helper: pin no-op return \
-                     ({val}) — ownership always valid in sequential proof\n"
+                     ({val}) -- ownership always valid in sequential proof\n"
                 ));
                 out.push_str(&format!(
                     "    llvm_return (llvm_term {{{{ {val} : [{bits}] }}}});\n"
