@@ -208,7 +208,11 @@ fn unspecified_spec_sret_includes_result_ptr_in_execute_func() {
     // this fix, SAW fails with "Argument 1 unspecified".
     let mut spec = SpecConstraint {
         function_name: "canonicalizePayload".into(),
-        mangled_name: Some("?canonicalizePayload@sdep@@YA?AV...".into()),
+        mangled_name: Some(
+            "?canonicalizePayload@sdep@@YA?AV?$basic_string@DU?$char_traits@D@std@@\
+             V?$allocator@D@2@@std@@AEBUDeviceRequest@1@@Z"
+                .into(),
+        ),
         params: vec![make_param(
             "request",
             AllocType::AllocReadonly,
