@@ -239,6 +239,7 @@ fn emit_one(
         BrokenReason::DeclareOnly => "declare-only",
         BrokenReason::UsesVarargsIntrinsic => "body uses llvm.va_*",
         BrokenReason::StlOverride => "stl-override",
+        BrokenReason::MsvcMutexHelper => "msvc-mutex-helper",
     };
     let variadic_tag = if t.is_variadic { "; variadic" } else { "" };
     out.push_str(&format!(
@@ -463,3 +464,7 @@ fn ir_return_setup(ir_ty: &str) -> ReturnSetup {
 #[cfg(test)]
 #[path = "bitcode_overrides_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "bitcode_overrides_mutex_tests.rs"]
+mod mutex_tests;

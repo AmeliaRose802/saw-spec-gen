@@ -468,3 +468,61 @@ declare void @user_helper()
         log.globals_written,
     );
 }
+
+// ── MSVC _Mutex_base helper tests ─────────────────────────────────────
+
+#[test]
+fn scan_flags_defined_mutex_base_helper_as_msvc_mutex_helper() {
+    // `_Verify_ownership_levels` is the primary failure symbol from
+    // issue #65. It is defined in-module as `linkonce_odr` (MSVC STL
+    // headers emit it that way), so it is NOT a declare-only extern.
+    // The scanner must still flag it for override because its body
+    // performs typed `_Mutex_base` reads on unconstrained memory.
+    let ir = r#"
+define i32 @"?activate@@YAHXZ"() {
+  %1 = call i1 @"?_Verify_ownership_levels@_Mutex_base@std@@IEAA_NXZ"(ptr null)
+  ret i32 0
+}
+
+define linkonce_odr i1 @"?_Verify_ownership_levels@_Mutex_base@std@@IEAA_NXZ"(ptr %this) {
+  %2 = load i32, ptr %this, align 4
+  %3 = icmp ne i32 %2, 0
+  ret i1 %3
+}
+"#;
+    let targets = scan(ir, "?activate@@YAHXZ");
+    let helper = targets
+        .iter()
+        .find(|t| t.symbol == "?_Verify_ownership_levels@_Mutex_base@std@@IEAA_NXZ")
+        .expect(
+            "defined linkonce_odr _Mutex_base helper must be flagged \
+             as MsvcMutexHelper (issue #65)",
+        );
+    assert_eq!(
+        helper.reason,
+        BrokenReason::MsvcMutexHelper,
+        "reason must be MsvcMutexHelper, not DeclareOnly or other"
+    );
+    assert_eq!(helper.return_ir_type, "i1");
+    assert_eq!(helper.fixed_param_ir_types, vec!["ptr"]);
+}
+
+#[test]
+fn scan_does_not_flag_ordinary_defined_non_varargs_as_msvc_mutex_helper() {
+    // Sanity: a defined, non-variadic function that does NOT match
+    // the _Mutex_base pattern must still be skipped (tractable body).
+    let ir = r#"
+define i32 @target() {
+  %1 = call i32 @helper()
+  ret i32 %1
+}
+define i32 @helper() {
+  ret i32 42
+}
+"#;
+    let targets = scan(ir, "target");
+    assert!(
+        targets.is_empty(),
+        "ordinary defined non-varargs helper must not be overridden"
+    );
+}

@@ -240,6 +240,22 @@
         # shows the pin still lets a genuine off-by-one bug surface.
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/mutex_sentinel';          File = 'guarded_add_verified.cpp';   Cry = 'guarded_add_spec.cry';   CryptolFn = 'guarded_add_spec';   Function = 'guarded_add';             Expected = 'VERIFIED'  }
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/mutex_sentinel';          File = 'guarded_add_disproved.cpp';  Cry = 'guarded_add_spec.cry';   CryptolFn = 'guarded_add_spec';   Function = 'guarded_add_disproved';   Expected = 'DISPROVED' }
+        # MSVC mutex-helper abstraction (issue #65): `_Verify_ownership_levels`
+        # and other `std::_Mutex_base` methods are defined `linkonce_odr` in
+        # MSVC-compiled bitcode and cause "Error during memory load" in SAW
+        # because their bodies perform typed reads of unconstrained mutex-
+        # internal fields. The scanner now detects symbols whose mangled name
+        # contains `_Mutex_base@std` (MSVC mangling) and emits an
+        # llvm_unsafe_assume_spec override tagged `[msvc-mutex-helper]` so the
+        # proof can proceed without manual .saw edits.
+        #
+        # An end-to-end regression for this scenario requires MSVC/UCRT because
+        # the `_Mutex_base@std` substring only appears in MSVC-mangled IR — on
+        # Linux/Clang, std::mutex uses pthreads and the helper is absent. The
+        # behavioral regression is covered by the unit tests in:
+        #   src/emit/saw_emit/mutex_helpers.rs          (pattern matching)
+        #   src/transform/extern_override_scan_tests.rs  (scanner detection)
+        #   src/emit/saw_emit/bitcode_overrides_mutex_tests.rs (emitter output)
 
         # ── C++/Rust equivalence tests (verify-equiv.ps1) ───────────────────
         @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'tests/e2e/cases/04-cpp-rust-equivalence/compute_fee_reordered';         Cpp = 'compute_fee.cpp'; Rust = 'compute_fee_verified.rs';  Cry = 'compute_fee_spec.cry'; CryptolFn = 'compute_fee_spec'; Function = 'compute_fee'; Expected = 'EQUIVALENT'     }

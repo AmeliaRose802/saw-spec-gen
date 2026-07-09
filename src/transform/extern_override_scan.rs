@@ -90,6 +90,14 @@ pub enum BrokenReason {
     /// body but tends to panic deep inside libstdc++ allocator
     /// helpers (`Cannot mux LLVM values`). Force-havoc instead.
     StlOverride,
+    /// The symbol is an MSVC `std::_Mutex_base` internal helper
+    /// whose defined `linkonce_odr` body performs typed reads of
+    /// unconstrained mutex ownership/level fields, causing SAW to
+    /// abort with "Error during memory load". Override with an
+    /// adversarial havoc spec so the proof can proceed without
+    /// manually patching the generated `.saw` file. See
+    /// [`crate::emit::saw_emit::mutex_helpers`].
+    MsvcMutexHelper,
 }
 
 /// Per-function parsed snapshot used internally by [`scan`].
@@ -159,6 +167,8 @@ pub fn scan(ir: &str, target_symbol: &str) -> Vec<OverrideTarget> {
             BrokenReason::UsesVarargsIntrinsic
         } else if crate::emit::saw_emit::stl_overrides::matches(&f.name) {
             BrokenReason::StlOverride
+        } else if crate::emit::saw_emit::mutex_helpers::is_msvc_mutex_helper(&f.name) {
+            BrokenReason::MsvcMutexHelper
         } else {
             continue;
         };

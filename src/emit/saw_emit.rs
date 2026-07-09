@@ -30,6 +30,7 @@ mod llvm_return;
 mod llvm_setup;
 mod llvm_spec;
 mod mir_spec;
+pub mod mutex_helpers;
 mod names;
 mod overrides;
 mod path_utils;
