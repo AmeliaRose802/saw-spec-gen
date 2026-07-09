@@ -43,9 +43,24 @@ pub struct VerifyArgs {
     #[arg(long = "clang-flag", num_args = 0.., action = clap::ArgAction::Append)]
     pub clang_flags: Vec<String>,
 
+    /// Path to a per-invocation config file (TOML) forwarded to
+    /// `gen-verify`.
+    ///
+    /// When omitted, `verify-cpp` preserves `gen-verify`'s normal
+    /// spec-relative auto-discovery by passing the original
+    /// `--cryptol-spec` path through unchanged. Prefer versioned
+    /// config files for shaping; keep `--extra-spec-gen-arg` only for
+    /// backward compatibility.
+    #[arg(long = "config", value_name = "PATH")]
+    pub config: Option<PathBuf>,
+
     /// Extra raw argv elements appended to the internal `gen-verify`
-    /// invocation. Use for buffer overrides and other advanced flags
-    /// without the outer `verify` subcommand needing to understand them.
+    /// invocation.
+    ///
+    /// Backward-compatibility escape hatch for advanced flags that
+    /// have not yet been lifted to `verify-cpp`. Prefer `--config`
+    /// for shaping so behavior lives in versioned repo files instead
+    /// of ad hoc shell history.
     #[arg(
         long = "extra-spec-gen-arg",
         num_args = 0..,

@@ -17,6 +17,7 @@ param(
     [string[]]$IncludeDirs = @(),
     [string]$CxxStandard,
     [string[]]$ClangFlags = @(),
+    [string]$Config,
     [string[]]$ExtraSpecGenArgs = @(),
     [switch]$SpecOnlyOnMissing
 )
@@ -47,6 +48,9 @@ if ($CxxStandard) {
 }
 foreach ($flag in $ClangFlags) {
     $args += @('--clang-flag', $flag)
+}
+if ($Config) {
+    $args += @('--config', $Config)
 }
 foreach ($flag in $ExtraSpecGenArgs) {
     $args += @('--extra-spec-gen-arg', $flag)

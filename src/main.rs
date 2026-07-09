@@ -20,6 +20,7 @@ fn main() -> Result<()> {
             args.include_dirs,
             args.cxx_standard,
             args.clang_flags,
+            args.config,
             args.extra_spec_gen_args,
             args.spec_only_on_missing,
         ),

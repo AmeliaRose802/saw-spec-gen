@@ -31,6 +31,7 @@ pub struct VerifyRequest {
     pub include_dirs: Vec<PathBuf>,
     pub cxx_standard: Option<String>,
     pub clang_flags: Vec<String>,
+    pub config: Option<PathBuf>,
     pub extra_spec_gen_args: Vec<String>,
     pub spec_only_on_missing: bool,
 }
@@ -44,6 +45,14 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
         .cryptol_spec
         .canonicalize()
         .with_context(|| format!("failed to resolve {}", req.cryptol_spec.display()))?;
+    let config = req
+        .config
+        .as_ref()
+        .map(|p| {
+            p.canonicalize()
+                .with_context(|| format!("failed to resolve config {}", p.display()))
+        })
+        .transpose()?;
     let include_dirs = req
         .include_dirs
         .iter()
@@ -153,9 +162,10 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
         &bc_file,
         ll_for_gen.as_deref(),
         &ast_file,
-        &cry_dest,
+        &cryptol_spec,
         &req.cryptol_fn,
         &req.function,
+        config.as_deref(),
         &req.extra_spec_gen_args,
         req.spec_only_on_missing,
     )?;
@@ -195,9 +205,10 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
             bc_file: &bc_file,
             ll_file: &ll_file,
             ast_file: &ast_file,
-            cry_dest: &cry_dest,
+            cryptol_spec: &cryptol_spec,
             cryptol_fn: &req.cryptol_fn,
             function: &req.function,
+            config: config.as_deref(),
             extra_spec_gen_args: &req.extra_spec_gen_args,
             spec_only_on_missing: req.spec_only_on_missing,
         })?;

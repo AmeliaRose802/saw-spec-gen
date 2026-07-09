@@ -23,6 +23,7 @@ pub fn verify_cmd(
     include_dirs: Vec<PathBuf>,
     cxx_standard: Option<String>,
     clang_flags: Vec<String>,
+    config: Option<PathBuf>,
     extra_spec_gen_args: Vec<String>,
     spec_only_on_missing: bool,
 ) -> Result<()> {
@@ -35,6 +36,7 @@ pub fn verify_cmd(
         include_dirs,
         cxx_standard,
         clang_flags,
+        config,
         extra_spec_gen_args,
         spec_only_on_missing,
     })?;

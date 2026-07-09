@@ -197,6 +197,7 @@ pub(super) fn run_gen_verify(
     cryptol_spec: &Path,
     cryptol_fn: &str,
     function: &str,
+    config: Option<&Path>,
     extra_spec_gen_args: &[String],
     spec_only_on_missing: bool,
 ) -> Result<()> {
@@ -217,6 +218,9 @@ pub(super) fn run_gen_verify(
         .arg(output_dir);
     if let Some(ll_file) = ll_file {
         cmd.arg("--llvm-ir").arg(ll_file);
+    }
+    if let Some(config) = config {
+        cmd.arg("--config").arg(config);
     }
     if spec_only_on_missing {
         cmd.arg("--spec-only-on-missing");
@@ -247,9 +251,10 @@ pub(super) struct O1Recompile<'a> {
     pub bc_file: &'a Path,
     pub ll_file: &'a Path,
     pub ast_file: &'a Path,
-    pub cry_dest: &'a Path,
+    pub cryptol_spec: &'a Path,
     pub cryptol_fn: &'a str,
     pub function: &'a str,
+    pub config: Option<&'a Path>,
     pub extra_spec_gen_args: &'a [String],
     pub spec_only_on_missing: bool,
 }
@@ -295,9 +300,10 @@ pub(super) fn recompile_at_o1(ctx: &O1Recompile) -> Result<()> {
         ctx.bc_file,
         ll.as_deref(),
         ctx.ast_file,
-        ctx.cry_dest,
+        ctx.cryptol_spec,
         ctx.cryptol_fn,
         ctx.function,
+        ctx.config,
         ctx.extra_spec_gen_args,
         ctx.spec_only_on_missing,
     )
