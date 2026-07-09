@@ -134,7 +134,7 @@ impl BufferOverrides {
         // matching --out-buffer-param NAME (otherwise there's no
         // allocated pointer to post-assert against).
         for (name, fn_) in &me.cryptol_fn_out {
-            if !me.is_out_buffer(name) {
+            if name != "this" && !me.is_out_buffer(name) {
                 bail!("--cryptol-fn-out {name}={fn_}: no matching --out-buffer-param {name}=...");
             }
         }

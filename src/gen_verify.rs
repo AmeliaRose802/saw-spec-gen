@@ -209,26 +209,25 @@ pub fn run(
         llvm_ir_path.is_some(),
     );
 
-    // Correct sret misclassification: small trivially-copyable structs
-    // on MSVC are returned in registers, not via sret pointer.
+    // Correct sret misclassification: small trivially-copyable MSVC structs return in registers.
     constraints::correct_sret_from_ir(&mut target_spec, &ir_funcs);
 
     // Detect sret pre-state threading from Cryptol arity.
     saw_emit::cryptol_bridge::detect_sret_prestate(&mut target_spec, cryptol_spec, cryptol_fn);
 
-    // Auto-detect _Out_writes_ params that have a matching <param>_post
-    // Cryptol function, and populate out_postcond so verify_script_steps
-    // emits the postcondition without needing --out-buffer-param / --cryptol-fn-out.
+    // Receiver/state + _Out_writes_ post-state inference.
+    crate::array_view_passes::apply_receiver_state_inference(
+        &mut target_spec,
+        &target_fn,
+        &mut buffer_overrides,
+    )?;
     crate::array_view_passes::apply_out_postcond_autodetect(
         &mut target_spec,
         &target_fn,
         cryptol_spec,
     );
 
-    // If the LLVM IR contains exception-lower globals (@__exclow_error_*),
-    // inject them into the target spec so that SAW allocates them.
-    // (Deferred until after `all_globals` is built below — see the call
-    // to `inject_exclow_globals` further down.)
+    // If the LLVM IR contains exception-lower globals (@__exclow_error_*), inject them later.
 
     let mut all_globals = clang_ast::extract_all_globals(&parsed_ast)?;
 
