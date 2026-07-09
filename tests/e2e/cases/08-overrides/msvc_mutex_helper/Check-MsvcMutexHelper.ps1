@@ -85,12 +85,15 @@ Set-Content -Path $cppStub -Encoding UTF8 -Value @'
 extern "C" uint32_t add_one(uint32_t x) { return x + 1; }
 '@
 
-$astFile = Join-Path $outDir 'ast.json'
-# Capture stdout (AST JSON); discard stderr (clang warnings are irrelevant here).
-$astLines = & $clang -Xclang '-ast-dump=json' -fsyntax-only $cppStub 2>$null
+$astFile    = Join-Path $outDir 'ast.json'
+$clangErrF  = Join-Path $outDir 'clang_ast_err.txt'
+# Capture stdout (AST JSON) only; stderr (warnings) goes to a temp file so we
+# can show it if the dump fails rather than swallowing genuine errors.
+$astLines = & $clang -Xclang '-ast-dump=json' -fsyntax-only $cppStub 2>$clangErrF
 $astLines | Set-Content -Path $astFile -Encoding UTF8
 if (-not (Test-Path $astFile) -or (Get-Item $astFile).Length -eq 0) {
     Write-Error 'clang AST dump produced no output'
+    if (Test-Path $clangErrF) { Get-Content $clangErrF | Write-Host }
     Write-Host 'RESULT: DISPROVED'
     exit 1
 }
