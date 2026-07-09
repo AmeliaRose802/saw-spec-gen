@@ -236,6 +236,21 @@ fn emit_return(out: &mut String, return_type: &TypeInfo, sret_saw_type: Option<&
             "    ret <- llvm_fresh_var \"ret\" ({saw_type});\n"
         ));
         out.push_str("    llvm_points_to result_ptr (llvm_term ret);\n");
+    } else if let TypeInfo::Pointer(inner) = return_type {
+        // A pointer return must be an actual `ptr` in the emitted LLVM IR
+        // stub, so it cannot be modeled with `llvm_return (llvm_term …)`
+        // over a scalar `llvm_fresh_var`. (`type_to_saw` collapses a
+        // `Pointer(T)` to `type_to_saw(T)`, which is correct for pointee
+        // slots but would mis-type a *return* — e.g. `const char*` → i8.)
+        // Model it as a pointer to fresh, solver-chosen memory instead.
+        let pointee = pointee_saw_type(inner);
+        out.push_str("\n    // Return: pointer to fresh (havoc'd) memory\n");
+        out.push_str(&format!("    ret_ptr <- llvm_alloc ({pointee});\n"));
+        out.push_str(&format!(
+            "    ret_val <- llvm_fresh_var \"ret_val\" ({pointee});\n"
+        ));
+        out.push_str("    llvm_points_to ret_ptr (llvm_term ret_val);\n");
+        out.push_str("    llvm_return ret_ptr;\n");
     } else {
         let ret_saw = type_to_saw(return_type);
         if !is_void_saw_type(&ret_saw) {
@@ -340,6 +355,31 @@ mod tests {
         let this_pos = exec_line.find("this_ptr").expect("this_ptr missing");
         let result_pos = exec_line.find("result_ptr").expect("result_ptr missing");
         assert!(this_pos < result_pos);
+    }
+
+    #[test]
+    fn test_havoc_spec_pointer_return_is_a_pointer_not_pointee() {
+        // Regression: `const char*`-returning virtuals (e.g.
+        // `std::exception::what`) must be modeled with an actual `ptr`
+        // return. Previously `type_to_saw` collapsed `Pointer(char)` to
+        // `llvm_int 8`, so the havoc spec emitted
+        // `llvm_return (llvm_term <i8>)` while the IR stub returned `ptr`,
+        // producing an "Incompatible types for return value" SAW failure.
+        let char_ptr = TypeInfo::Pointer(Box::new(TypeInfo::SignedInt(8)));
+        let method = make_iface_method("AppError", "what", char_ptr, 0);
+        let spec = generate_havoc_spec(&method, &[], None, None);
+        assert!(
+            spec.contains("ret_ptr <- llvm_alloc"),
+            "pointer return must allocate a pointee:\n{spec}"
+        );
+        assert!(
+            spec.contains("llvm_return ret_ptr;"),
+            "pointer return must return the pointer, not a scalar:\n{spec}"
+        );
+        assert!(
+            !spec.contains("llvm_return (llvm_term ret);"),
+            "pointer return must not be modeled as a scalar term:\n{spec}"
+        );
     }
 
     #[test]
