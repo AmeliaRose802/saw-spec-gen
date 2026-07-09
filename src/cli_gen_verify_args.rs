@@ -54,18 +54,26 @@ pub struct VerifyArgs {
     pub config: Option<PathBuf>,
 
     /// Declare a read-only input buffer override.
+    ///
+    /// Format: `NAME=SHAPE` (for example `src=32` or `data=4xi8`).
     #[arg(long = "in-buffer-size", value_name = "NAME=SHAPE", num_args = 0..)]
     pub in_buffer_size: Vec<String>,
 
     /// Declare a writable output buffer override.
+    ///
+    /// Format: `NAME=SHAPE` or `NAME=auto` (for example `out=32`).
     #[arg(long = "out-buffer-param", value_name = "NAME=SHAPE|auto", num_args = 0..)]
     pub out_buffer_param: Vec<String>,
 
     /// Bind an out-buffer to a Cryptol postcondition function.
+    ///
+    /// Format: `OUT_PARAM=FN` (for example `out=bounded_copy_post`).
     #[arg(long = "cryptol-fn-out", value_name = "OUT_PARAM=FN", num_args = 0..)]
     pub cryptol_fn_out: Vec<String>,
 
     /// Emit a scalar length precondition before the call.
+    ///
+    /// Format: `NAME=VAL` (for example `len=32`).
     #[arg(long = "max-len-precond", value_name = "NAME=VAL", num_args = 0..)]
     pub max_len_precond: Vec<String>,
 
