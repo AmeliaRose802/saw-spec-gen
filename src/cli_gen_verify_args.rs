@@ -49,24 +49,29 @@ pub struct VerifyArgs {
     /// When omitted, `verify-cpp` preserves `gen-verify`'s normal
     /// spec-relative auto-discovery by passing the original
     /// `--cryptol-spec` path through unchanged. Prefer versioned
-    /// config files for shaping; keep `--extra-spec-gen-arg` only for
-    /// backward compatibility.
+    /// config files for shaping.
     #[arg(long = "config", value_name = "PATH")]
     pub config: Option<PathBuf>,
 
-    /// Extra raw argv elements appended to the internal `gen-verify`
-    /// invocation.
-    ///
-    /// Backward-compatibility escape hatch for advanced flags that
-    /// have not yet been lifted to `verify-cpp`. Prefer `--config`
-    /// for shaping so behavior lives in versioned repo files instead
-    /// of ad hoc shell history.
-    #[arg(
-        long = "extra-spec-gen-arg",
-        num_args = 0..,
-        action = clap::ArgAction::Append
-    )]
-    pub extra_spec_gen_args: Vec<String>,
+    /// Declare a read-only input buffer override.
+    #[arg(long = "in-buffer-size", value_name = "NAME=SHAPE", num_args = 0..)]
+    pub in_buffer_size: Vec<String>,
+
+    /// Declare a writable output buffer override.
+    #[arg(long = "out-buffer-param", value_name = "NAME=SHAPE|auto", num_args = 0..)]
+    pub out_buffer_param: Vec<String>,
+
+    /// Bind an out-buffer to a Cryptol postcondition function.
+    #[arg(long = "cryptol-fn-out", value_name = "OUT_PARAM=FN", num_args = 0..)]
+    pub cryptol_fn_out: Vec<String>,
+
+    /// Emit a scalar length precondition before the call.
+    #[arg(long = "max-len-precond", value_name = "NAME=VAL", num_args = 0..)]
+    pub max_len_precond: Vec<String>,
+
+    /// Disable the struct-shape recognizer.
+    #[arg(long = "no-struct-shape-recognizer", default_value_t = false)]
+    pub no_struct_shape_recognizer: bool,
 
     /// Soft-exit with a `result.json` status of `not_attempted` when the
     /// target function has no matching implementation symbol.

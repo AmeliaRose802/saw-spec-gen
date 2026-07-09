@@ -18,7 +18,11 @@ param(
     [string]$CxxStandard,
     [string[]]$ClangFlags = @(),
     [string]$Config,
-    [string[]]$ExtraSpecGenArgs = @(),
+    [string[]]$InBufferSize = @(),
+    [string[]]$OutBufferParam = @(),
+    [string[]]$CryptolFnOut = @(),
+    [string[]]$MaxLenPrecond = @(),
+    [switch]$NoStructShapeRecognizer,
     [switch]$SpecOnlyOnMissing
 )
 
@@ -52,8 +56,20 @@ foreach ($flag in $ClangFlags) {
 if ($Config) {
     $args += @('--config', $Config)
 }
-foreach ($flag in $ExtraSpecGenArgs) {
-    $args += @('--extra-spec-gen-arg', $flag)
+foreach ($arg in $InBufferSize) {
+    $args += @('--in-buffer-size', $arg)
+}
+foreach ($arg in $OutBufferParam) {
+    $args += @('--out-buffer-param', $arg)
+}
+foreach ($arg in $CryptolFnOut) {
+    $args += @('--cryptol-fn-out', $arg)
+}
+foreach ($arg in $MaxLenPrecond) {
+    $args += @('--max-len-precond', $arg)
+}
+if ($NoStructShapeRecognizer) {
+    $args += '--no-struct-shape-recognizer'
 }
 if ($SpecOnlyOnMissing) {
     $args += '--spec-only-on-missing'

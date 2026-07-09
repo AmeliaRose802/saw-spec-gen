@@ -32,7 +32,11 @@ pub struct VerifyRequest {
     pub cxx_standard: Option<String>,
     pub clang_flags: Vec<String>,
     pub config: Option<PathBuf>,
-    pub extra_spec_gen_args: Vec<String>,
+    pub in_buffer_size: Vec<String>,
+    pub out_buffer_param: Vec<String>,
+    pub cryptol_fn_out: Vec<String>,
+    pub max_len_precond: Vec<String>,
+    pub no_struct_shape_recognizer: bool,
     pub spec_only_on_missing: bool,
 }
 
@@ -166,7 +170,11 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
         &req.cryptol_fn,
         &req.function,
         config.as_deref(),
-        &req.extra_spec_gen_args,
+        &req.in_buffer_size,
+        &req.out_buffer_param,
+        &req.cryptol_fn_out,
+        &req.max_len_precond,
+        req.no_struct_shape_recognizer,
         req.spec_only_on_missing,
     )?;
     if req.spec_only_on_missing && is_spec_only_result(&output_dir)? {
@@ -209,7 +217,11 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
             cryptol_fn: &req.cryptol_fn,
             function: &req.function,
             config: config.as_deref(),
-            extra_spec_gen_args: &req.extra_spec_gen_args,
+            in_buffer_size: &req.in_buffer_size,
+            out_buffer_param: &req.out_buffer_param,
+            cryptol_fn_out: &req.cryptol_fn_out,
+            max_len_precond: &req.max_len_precond,
+            no_struct_shape_recognizer: req.no_struct_shape_recognizer,
             spec_only_on_missing: req.spec_only_on_missing,
         })?;
         saw_output = run_saw(saw, &output_dir, "verify.saw")?;

@@ -82,9 +82,9 @@ file — the `.bc`, the AST JSON, every generated override spec, the
 `verify.saw` script, and a structured `result.json`
 ([schema](docs/result-json.md)).
 
-For `verify-cpp`, prefer versioned TOML config over ad hoc
-`--extra-spec-gen-arg` shaping flags. Put per-spec settings in a
-`<spec>.toml` sibling or repo-wide defaults in `saw-spec-gen.toml`:
+For `verify-cpp`, use versioned TOML config for shaping. Put per-spec
+settings in a `<spec>.toml` sibling or repo-wide defaults in
+`saw-spec-gen.toml`:
 
 ```toml
 [functions.add_one_spec]
@@ -100,8 +100,7 @@ pwsh -File ./verify.ps1 -CppFile .\add_one.cpp `
 
 `verify-cpp` preserves `gen-verify`'s normal config auto-discovery from
 the original spec path, and also accepts `--config PATH` / `-Config
-PATH` when you want to point at an explicit TOML file. Keep
-`--extra-spec-gen-arg` only as a backward-compatibility escape hatch.
+PATH` when you want to point at an explicit TOML file.
 
 ## The verification model
 

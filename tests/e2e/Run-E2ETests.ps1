@@ -141,7 +141,11 @@ function Invoke-Case($c) {
                 CryptolFn   = $d.CryptolFn
                 Function    = $d.Function
             }
-            if ($c.ExtraSpecGenArgs) { $verifyArgs.ExtraSpecGenArgs = $c.ExtraSpecGenArgs }
+            if ($c.InBufferSize) { $verifyArgs.InBufferSize = $c.InBufferSize }
+            if ($c.OutBufferParam) { $verifyArgs.OutBufferParam = $c.OutBufferParam }
+            if ($c.CryptolFnOut) { $verifyArgs.CryptolFnOut = $c.CryptolFnOut }
+            if ($c.MaxLenPrecond) { $verifyArgs.MaxLenPrecond = $c.MaxLenPrecond }
+            if ($c.NoStructShapeRecognizer) { $verifyArgs.NoStructShapeRecognizer = $true }
             & (Join-Path $RepoRoot 'verify.ps1') @verifyArgs *>&1 | Out-String
         }
         'rust' {

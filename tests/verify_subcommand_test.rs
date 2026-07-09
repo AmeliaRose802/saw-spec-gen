@@ -118,6 +118,30 @@ max_len_precond = ["length=64"]
     );
 }
 
+#[test]
+fn verify_subcommand_forwards_shaping_flags_without_passthrough() {
+    let env = FakeVerifyEnv::new(SawMode::Verified);
+    let out_dir = env.root.path().join("out_shaping_flags");
+
+    let status = env.run_verify_with_args(
+        &out_dir,
+        &[
+            "--in-buffer-size",
+            "data=32",
+            "--max-len-precond",
+            "length=32",
+            "--no-struct-shape-recognizer",
+        ],
+    );
+    assert!(status.success(), "verify failed: {status:?}");
+
+    let saw = std::fs::read_to_string(out_dir.join("verify.saw")).unwrap();
+    assert!(
+        saw.contains("llvm_precond {{ `32 >= length }};"),
+        "expected direct shaping flags to reach gen-verify, got:\n{saw}"
+    );
+}
+
 struct FakeVerifyEnv {
     root: TempDir,
     cpp_file: PathBuf,
