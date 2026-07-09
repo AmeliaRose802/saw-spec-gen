@@ -200,3 +200,91 @@ fn unspecified_spec_leaves_ordinary_return_symbolic() {
     assert!(output.contains("ret <- llvm_fresh_var \"ret\" (llvm_int 32)"));
     assert!(!output.contains("_Thrd_success"));
 }
+
+#[test]
+fn unspecified_spec_sret_includes_result_ptr_in_execute_func() {
+    // A sub-callee that returns std::string by value (sret ABI) must have
+    // `result_ptr` as the first argument in `llvm_execute_func`. Without
+    // this fix, SAW fails with "Argument 1 unspecified".
+    let mut spec = SpecConstraint {
+        function_name: "canonicalizePayload".into(),
+        mangled_name: Some("?canonicalizePayload@sdep@@YA?AV...".into()),
+        params: vec![make_param(
+            "request",
+            AllocType::AllocReadonly,
+            "llvm_alias \"%struct.Req\"",
+            true,
+        )],
+        return_constraint: ReturnConstraint {
+            saw_type: "llvm_alias \"%class.std__basic_string\"".into(),
+            value_constraints: vec![],
+            is_sret: true,
+            returns_pointer: false,
+            sret_prestate: false,
+        },
+        can_throw: false,
+        is_virtual: false,
+        has_body: false,
+        referenced_globals: vec![],
+        postconditions: vec![],
+    };
+    spec.has_body = false;
+    let output = generate_unspecified_spec(&spec, &spec.referenced_globals);
+    // The hidden sret pointer must be allocated in the pre-state.
+    assert!(
+        output.contains("result_ptr <- llvm_alloc (llvm_alias \"%class.std__basic_string\")"),
+        "expected result_ptr alloc, got:\n{output}",
+    );
+    // result_ptr must be the FIRST argument in llvm_execute_func.
+    let exec_line = output
+        .lines()
+        .find(|l| l.contains("llvm_execute_func"))
+        .expect("missing llvm_execute_func");
+    let result_pos = exec_line
+        .find("result_ptr")
+        .expect("result_ptr not in exec args");
+    let request_pos = exec_line
+        .find("request_ptr")
+        .expect("request_ptr not in exec args");
+    assert!(
+        result_pos < request_pos,
+        "result_ptr must precede request_ptr in llvm_execute_func: {exec_line}",
+    );
+    // Post-state must write via llvm_points_to, not llvm_return.
+    assert!(
+        output.contains("llvm_points_to result_ptr (llvm_term ret)"),
+        "expected llvm_points_to result_ptr, got:\n{output}",
+    );
+    assert!(
+        !output.contains("llvm_return (llvm_term ret)"),
+        "sret spec must not emit llvm_return for the struct return, got:\n{output}",
+    );
+}
+
+#[test]
+fn unspecified_spec_sret_with_no_params_still_has_result_ptr() {
+    // Even when there are no explicit parameters, sret must still supply
+    // result_ptr as the sole argument to llvm_execute_func.
+    let spec = SpecConstraint {
+        function_name: "makeDefault".into(),
+        mangled_name: None,
+        params: vec![],
+        return_constraint: ReturnConstraint {
+            saw_type: "llvm_alias \"%struct.Point\"".into(),
+            value_constraints: vec![],
+            is_sret: true,
+            returns_pointer: false,
+            sret_prestate: false,
+        },
+        can_throw: false,
+        is_virtual: false,
+        has_body: false,
+        referenced_globals: vec![],
+        postconditions: vec![],
+    };
+    let output = generate_unspecified_spec(&spec, &spec.referenced_globals);
+    assert!(
+        output.contains("llvm_execute_func [result_ptr]"),
+        "expected exactly result_ptr in exec args, got:\n{output}",
+    );
+}
