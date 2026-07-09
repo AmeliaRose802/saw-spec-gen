@@ -240,22 +240,20 @@
         # shows the pin still lets a genuine off-by-one bug surface.
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/mutex_sentinel';          File = 'guarded_add_verified.cpp';   Cry = 'guarded_add_spec.cry';   CryptolFn = 'guarded_add_spec';   Function = 'guarded_add';             Expected = 'VERIFIED'  }
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/mutex_sentinel';          File = 'guarded_add_disproved.cpp';  Cry = 'guarded_add_spec.cry';   CryptolFn = 'guarded_add_spec';   Function = 'guarded_add_disproved';   Expected = 'DISPROVED' }
-        # MSVC mutex-helper abstraction (issue #65): `_Verify_ownership_levels`
-        # and other `std::_Mutex_base` methods are defined `linkonce_odr` in
-        # MSVC-compiled bitcode and cause "Error during memory load" in SAW
-        # because their bodies perform typed reads of unconstrained mutex-
-        # internal fields. The scanner now detects symbols whose mangled name
-        # contains `_Mutex_base@std` (MSVC mangling) and emits an
-        # llvm_unsafe_assume_spec override tagged `[msvc-mutex-helper]` so the
-        # proof can proceed without manual .saw edits.
+        # MSVC mutex-helper abstraction (issue #65): defined linkonce_odr
+        # std::_Mutex_base methods (e.g. ?_Verify_ownership_levels@_Mutex_base@std)
+        # perform typed reads of unconstrained mutex-ownership fields, causing SAW
+        # to abort with "Error during memory load". The scanner detects symbols
+        # containing `_Mutex_base@std` (MSVC mangling) and emits an
+        # llvm_unsafe_assume_spec override tagged [msvc-mutex-helper].
         #
-        # An end-to-end regression for this scenario requires MSVC/UCRT because
-        # the `_Mutex_base@std` substring only appears in MSVC-mangled IR — on
-        # Linux/Clang, std::mutex uses pthreads and the helper is absent. The
-        # behavioral regression is covered by the unit tests in:
-        #   src/emit/saw_emit/mutex_helpers.rs          (pattern matching)
-        #   src/transform/extern_override_scan_tests.rs  (scanner detection)
-        #   src/emit/saw_emit/bitcode_overrides_mutex_tests.rs (emitter output)
+        # The custom script below uses synthetic LLVM IR with MSVC-mangled names
+        # to exercise the BrokenReason::MsvcMutexHelper scanner path cross-platform
+        # (no MSVC toolchain required). It runs gen-verify and asserts that the
+        # generated verify.saw contains the expected [msvc-mutex-helper] tag.
+        @{ Tag = 'cpp_overrides'; Runner = 'custom'; Expected = 'VERIFIED';
+           Script = 'tests/e2e/cases/08-overrides/msvc_mutex_helper/Check-MsvcMutexHelper.ps1';
+           ScriptArgs = @{} }
 
         # ── C++/Rust equivalence tests (verify-equiv.ps1) ───────────────────
         @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'tests/e2e/cases/04-cpp-rust-equivalence/compute_fee_reordered';         Cpp = 'compute_fee.cpp'; Rust = 'compute_fee_verified.rs';  Cry = 'compute_fee_spec.cry'; CryptolFn = 'compute_fee_spec'; Function = 'compute_fee'; Expected = 'EQUIVALENT'     }
