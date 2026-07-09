@@ -24,6 +24,7 @@ use crate::constraints::container_layouts::ContainerCatalog;
 use crate::constraints::container_layouts_derive::derive_catalog_from_structs;
 use crate::constraints::{length_binding, struct_shape_recognizer, FunctionInfo, TypeInfo};
 use crate::parsers::cryptol_poly_sig;
+use anyhow::{bail, Result};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -234,6 +235,58 @@ pub(crate) fn apply_out_postcond_autodetect(
     }
 }
 
+/// Infer a non-static C++ method receiver as the logical state parameter.
+///
+/// Mutable receivers default to `this=auto`, so the generated spec uses
+/// `this_pre` and can wire post-state Cryptol functions without an explicit
+/// `--out-buffer-param this=...`. Const receivers stay read-only unless the
+/// user explicitly overrides them with `--out-buffer-param this=...`.
+pub(crate) fn apply_receiver_state_inference(
+    target_spec: &mut crate::constraints::SpecConstraint,
+    target_fn: &FunctionInfo,
+    overrides: &mut crate::buffer_overrides::BufferOverrides,
+) -> Result<()> {
+    use crate::constraints::{AllocType, Mutability};
+
+    if overrides.is_out_buffer("this") || overrides.has_in_buffer_size("this") {
+        return Ok(());
+    }
+    let Some(receiver) = target_fn.params.first().filter(|p| p.name == "this") else {
+        if let Some(post_fn) = overrides.cryptol_fn_out.get("this") {
+            bail!(
+                "receiver inference for `{}` could not bind `this` to `{post_fn}`: \
+                 target has no implicit receiver parameter. Use an explicit \
+                 --out-buffer-param NAME=... / --cryptol-fn-out NAME=... mapping instead.",
+                target_fn.name
+            );
+        }
+        return Ok(());
+    };
+    let Some(receiver_spec) = target_spec.params.first() else {
+        return Ok(());
+    };
+    if receiver_spec.alloc_type != AllocType::AllocMutable
+        || receiver.mutability == Mutability::Readonly
+    {
+        if let Some(post_fn) = overrides.cryptol_fn_out.get("this") {
+            bail!(
+                "receiver inference for `{}` refused to make `this` writable for `{post_fn}`: \
+                 the method receiver is read-only. Pass an explicit \
+                 --out-buffer-param this=... only if you intentionally want to override that.",
+                target_fn.name
+            );
+        }
+        return Ok(());
+    }
+    overrides.out_buffer_auto.insert("this".into());
+    eprintln!(
+        "info[saw-spec-gen]: inferred mutable receiver `this` as the state parameter for `{}` \
+         (no --out-buffer-param this=auto needed).",
+        target_fn.name
+    );
+    Ok(())
+}
+
 /// Return true if `fn_name :` appears as a top-level definition in `text`.
 fn cryptol_fn_exists(text: &str, fn_name: &str) -> bool {
     let prefix = format!("{fn_name} :");
@@ -242,4 +295,164 @@ fn cryptol_fn_exists(text: &str, fn_name: &str) -> bool {
         let t = l.trim_start();
         t.starts_with(prefix.as_str()) || t.starts_with(prefix_ns.as_str())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::buffer_overrides::BufferOverrides;
+    use crate::constraints::{
+        AllocType, Nullability, ParamConstraint, ParamInfo, ReturnConstraint, SpecConstraint,
+    };
+
+    fn receiver_target(
+        mutability: crate::constraints::Mutability,
+    ) -> (FunctionInfo, SpecConstraint) {
+        let target_fn = FunctionInfo {
+            name: "activate".into(),
+            mangled_name: Some("?activate@KeyStore@@QEAAHXZ".into()),
+            params: vec![ParamInfo {
+                name: "this".into(),
+                ty: TypeInfo::Pointer(Box::new(TypeInfo::Opaque {
+                    name: "class.KeyStore".into(),
+                    size_bytes: 16,
+                })),
+                mutability,
+                nullable: Nullability::NonNull,
+                annotations: vec![],
+            }],
+            return_type: TypeInfo::SignedInt(32),
+            can_throw: false,
+            is_virtual: false,
+            has_body: true,
+            is_system: false,
+            annotations: vec![],
+            referenced_globals: vec![],
+            called_functions: vec![],
+        };
+        let target_spec = SpecConstraint {
+            function_name: "activate".into(),
+            mangled_name: target_fn.mangled_name.clone(),
+            params: vec![ParamConstraint {
+                name: "this".into(),
+                alloc_type: AllocType::AllocMutable,
+                saw_type: "llvm_alias \"class.KeyStore\"".into(),
+                preconditions: vec![],
+                unchanged_after: false,
+                dereferenceable_size: None,
+                out_postcond: None,
+            }],
+            return_constraint: ReturnConstraint {
+                saw_type: "llvm_int 32".into(),
+                value_constraints: vec![],
+                is_sret: false,
+                returns_pointer: false,
+                sret_prestate: false,
+            },
+            can_throw: false,
+            is_virtual: false,
+            has_body: true,
+            postconditions: vec![],
+            referenced_globals: vec![],
+        };
+        (target_fn, target_spec)
+    }
+
+    #[test]
+    fn infers_mutable_receiver_as_auto_out_buffer() {
+        let (target_fn, mut target_spec) = receiver_target(crate::constraints::Mutability::Mutable);
+        let mut overrides =
+            BufferOverrides::from_cli(&[], &[], &["this=activate_post".into()], &[], &[], &[])
+                .unwrap();
+
+        apply_receiver_state_inference(&mut target_spec, &target_fn, &mut overrides).unwrap();
+
+        assert!(overrides.out_buffer_auto.contains("this"));
+        assert_eq!(
+            overrides.cryptol_fn_out.get("this").map(String::as_str),
+            Some("activate_post")
+        );
+    }
+
+    #[test]
+    fn const_receiver_stays_readonly_without_override() {
+        let (target_fn, mut target_spec) =
+            receiver_target(crate::constraints::Mutability::Readonly);
+        let mut overrides = BufferOverrides::default();
+
+        apply_receiver_state_inference(&mut target_spec, &target_fn, &mut overrides).unwrap();
+
+        assert!(!overrides.out_buffer_auto.contains("this"));
+    }
+
+    #[test]
+    fn const_receiver_poststate_binding_requires_explicit_override() {
+        let (target_fn, mut target_spec) =
+            receiver_target(crate::constraints::Mutability::Readonly);
+        let mut overrides =
+            BufferOverrides::from_cli(&[], &[], &["this=activate_post".into()], &[], &[], &[])
+                .unwrap();
+
+        let err = apply_receiver_state_inference(&mut target_spec, &target_fn, &mut overrides)
+            .unwrap_err();
+
+        assert!(format!("{err:#}").contains("read-only"));
+        assert!(format!("{err:#}").contains("--out-buffer-param this=..."));
+    }
+
+    #[test]
+    fn this_poststate_binding_requires_member_receiver() {
+        let target_fn = FunctionInfo {
+            name: "activate".into(),
+            mangled_name: Some("_Z8activatePi".into()),
+            params: vec![ParamInfo {
+                name: "state".into(),
+                ty: TypeInfo::Pointer(Box::new(TypeInfo::SignedInt(32))),
+                mutability: crate::constraints::Mutability::Mutable,
+                nullable: Nullability::Nullable,
+                annotations: vec![],
+            }],
+            return_type: TypeInfo::SignedInt(32),
+            can_throw: false,
+            is_virtual: false,
+            has_body: true,
+            is_system: false,
+            annotations: vec![],
+            referenced_globals: vec![],
+            called_functions: vec![],
+        };
+        let mut target_spec = SpecConstraint {
+            function_name: "activate".into(),
+            mangled_name: target_fn.mangled_name.clone(),
+            params: vec![ParamConstraint {
+                name: "state".into(),
+                alloc_type: AllocType::AllocMutable,
+                saw_type: "llvm_int 32".into(),
+                preconditions: vec![],
+                unchanged_after: false,
+                dereferenceable_size: None,
+                out_postcond: None,
+            }],
+            return_constraint: ReturnConstraint {
+                saw_type: "llvm_int 32".into(),
+                value_constraints: vec![],
+                is_sret: false,
+                returns_pointer: false,
+                sret_prestate: false,
+            },
+            can_throw: false,
+            is_virtual: false,
+            has_body: true,
+            postconditions: vec![],
+            referenced_globals: vec![],
+        };
+        let mut overrides =
+            BufferOverrides::from_cli(&[], &[], &["this=activate_post".into()], &[], &[], &[])
+                .unwrap();
+
+        let err = apply_receiver_state_inference(&mut target_spec, &target_fn, &mut overrides)
+            .unwrap_err();
+
+        assert!(format!("{err:#}").contains("implicit receiver parameter"));
+    }
 }

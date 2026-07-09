@@ -1,0 +1,13 @@
+// Cryptol model for a non-static C++ method whose mutable receiver is
+// inferred as the state parameter. The receiver layout is a single
+// 64-bit word, so the inferred `this=auto` model reaches Cryptol as
+// `[64]`. The spec-local TOML binds `this=activate_post`, so no
+// explicit `--out-buffer-param this=auto` CLI shaping is needed.
+
+module member_receiver_spec where
+
+activate_post : [64] -> [64]
+activate_post _ = 0x1122334455667788
+
+activate_ret : [64] -> [8]
+activate_ret _ = 1

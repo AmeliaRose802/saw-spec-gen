@@ -153,7 +153,7 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
         &bc_file,
         ll_for_gen.as_deref(),
         &ast_file,
-        &cry_dest,
+        &cryptol_spec,
         &req.cryptol_fn,
         &req.function,
         &req.extra_spec_gen_args,

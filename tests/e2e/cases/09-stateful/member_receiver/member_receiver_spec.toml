@@ -1,0 +1,2 @@
+[functions.activate_ret]
+cryptol_fn_out = ["this=activate_post"]
