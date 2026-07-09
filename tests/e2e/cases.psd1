@@ -35,6 +35,11 @@
         # BFS traces all stores, none touch super_important → VERIFIED.
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/concrete_type_safe';         File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/concrete_type_safe';         File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
+        # Non-virtual target in a TU that *incidentally* declares a
+        # polymorphic hierarchy (issue #57). add_one never dispatches
+        # through the vtable, so the reachability gate skips interface
+        # emission and the script uses the single-module load path.
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/incidental_polymorphic_type'; File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/class_member_clobbered';     File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/class_member_clobbered';     File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/global_memory_clobbered';    File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
@@ -467,24 +472,23 @@
                '--out-buffer-param', 'c=i32',
                '--cryptol-fn-out',   'c=counter_inc_post'
            ) }
-        # enrollment : a *heterogeneous mixed-width struct* — a wide
-        #             uint32 `id` next to a byte `engaged` flag, modelling
-        #             a std::optional<uint32>-style record. The i32 field
-        #             rejects a byte-array object model and the two field
-        #             widths can't share a single `iW`/`NxiW` shape, so
-        #             the object is typed via the struct out-buffer shape
-        #             (`--out-buffer-param k={i32,i8}`), which SAW
-        #             presents to Cryptol as the tuple ([32],[8]).
+        # enrollment : a named heterogeneous struct with padding — byte
+        #             `engaged` at offset 0, then 7 pad bytes, then an
+        #             aligned i64 `createdAt` at offset 8. The case uses
+        #             `--out-buffer-param k=struct:EnrollmentKey`, which
+        #             emits `llvm_alloc (llvm_struct "struct.EnrollmentKey")`
+        #             so SAW keeps typed i8/i64 cells and leaves padding
+        #             bytes unconstrained.
         @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/enrollment'; File = 'enrollment_verified.cpp';  Expected = 'VERIFIED';
            Cry = 'enrollment_spec.cry'; CryptolFn = 'enroll_key_ret'; Function = 'enroll_key';
            ExtraSpecGenArgs = @(
-               '--out-buffer-param', 'k={i32,i8}',
+               '--out-buffer-param', 'k=struct:EnrollmentKey',
                '--cryptol-fn-out',   'k=enroll_key_post'
            ) }
         @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/enrollment'; File = 'enrollment_disproved.cpp'; Expected = 'DISPROVED';
            Cry = 'enrollment_spec.cry'; CryptolFn = 'enroll_key_ret'; Function = 'enroll_key';
            ExtraSpecGenArgs = @(
-               '--out-buffer-param', 'k={i32,i8}',
+               '--out-buffer-param', 'k=struct:EnrollmentKey',
                '--cryptol-fn-out',   'k=enroll_key_post'
            ) }
 

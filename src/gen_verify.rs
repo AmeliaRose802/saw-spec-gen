@@ -8,7 +8,7 @@
 //!   4. Emit the top-level `verify.saw` script that wires everything together
 
 use crate::alias_fallbacks::{apply_cli_overrides, dump_fallback_diagnostics};
-use crate::gen_verify_callgraph::collect_external_call_specs;
+use crate::gen_verify_callgraph::{collect_external_call_specs, select_reachable_vmethods};
 use crate::spec_rewrite::{apply_alias_rewrites, collect_type_sizes};
 use crate::transform::crucible_safety::SafetyAnalyzer;
 use crate::type_resolve::resolve_spec_types_quiet;
@@ -291,9 +291,9 @@ pub fn run(
         no_system_recursion,
     );
 
-    // Extract interface info first so external spec generation can detect
-    // functions whose return type is an interface pointer.
-    let vmethods = clang_ast::extract_virtual_methods(&parsed_ast, None)?;
+    // See `select_reachable_vmethods` (issue #57).
+    let all_vmethods = clang_ast::extract_virtual_methods(&parsed_ast, None)?;
+    let vmethods = select_reachable_vmethods(&target_fn, &all_functions, all_vmethods, function);
     let has_interfaces = !vmethods.is_empty();
     let interface_classes: HashSet<String> =
         vmethods.iter().map(|m| m.class_name.clone()).collect();

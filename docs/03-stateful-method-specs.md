@@ -100,11 +100,19 @@ load`). Declaring the shape as `iW` allocates `llvm_int W`, so the wide access
 type-checks and the Cryptol model operates on a `[W]` word — see the `counter`
 fixture (`--out-buffer-param c=i32`, `counter_inc_post pre = pre + 1`).
 
-The remaining gap is a **heterogeneous** struct (mixed widths, e.g. `uint8` +
-`uint32`): there is no single `iW`/byte shape that matches every field, and the
-out-buffer machinery does not yet emit a struct-typed allocation (`llvm_alloc
-(llvm_struct ...)`). Split such an object into byte lanes where the body permits,
-or hand-write the struct-typed spec.
+For a **heterogeneous** struct (mixed widths, e.g. `uint8` + `int64_t`), use a
+struct-typed out-buffer instead of flattening the object:
+
+```text
+--out-buffer-param obj=struct:MyType
+--cryptol-fn-out   obj=my_type_post
+```
+
+This emits `llvm_alloc (llvm_struct "struct.MyType")`, so SAW uses the LLVM
+field layout from the loaded bitcode: typed cells per field, natural alignment,
+and implicit padding bytes left unconstrained. The paired `--cryptol-fn-out`
+model sees the typed fields as a Cryptol tuple in field order, which is enough
+to express mixed-width whole-object post-states without pinning padding.
 
 ## When a partial, per-field assertion would help
 
@@ -140,8 +148,9 @@ targets modellable as plain byte regions, so the whole-object form suffices.
   uncontended sequential model; `_Mtx_trylock` is deliberately left symbolic.
   The rule lives in `src/emit/saw_emit/status_primitives.rs` and is covered
   end-to-end by `tests/e2e/cases/08-overrides/mutex_sentinel/`.
-- **Optional/STL layout is the practical blocker (R2), not the spec form.** The
-  stateful spec is straightforward; getting SAW to see through
-  `std::optional`'s engaged flag at `-O0` is the same heap-types wall. The
-  `-O1`-inlined-state workaround keeps this tractable for the demo but should be
-  documented as a modeling assumption, not hidden.
+- **Optional/STL layout may still need care at `-O0`.** Struct-typed
+  out-buffers solve the mixed-width heap-types problem, but large STL wrappers
+  can still be awkward when the compiled body touches compiler-specific helper
+  state. Getting SAW to see through `std::optional`'s engaged flag at `-O0` is
+  the same heap-types wall; the `-O1`-inlined-state workaround remains useful
+  for those cases and should be documented as a modeling assumption, not hidden.

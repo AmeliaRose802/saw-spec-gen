@@ -162,8 +162,9 @@ pub struct GenVerifyArgs {
     ///
     /// Format: `NAME=SHAPE`, SHAPE = `BYTES` (byte buffer) |
     /// `iW` (single wide scalar field) | `NxiW` (wide array) |
-    /// `{f1,f2,...}` (heterogeneous struct, fields are themselves
-    /// SHAPEs) | `<{f1,f2,...}>` (packed struct, no padding).
+    /// `struct:Type` (named LLVM struct) | `{f1,f2,...}`
+    /// (heterogeneous struct, fields are themselves SHAPEs) |
+    /// `<{f1,f2,...}>` (packed struct, no padding).
     #[arg(long = "in-buffer-size", value_name = "NAME=SHAPE", num_args = 0..)]
     pub in_buffer_size: Vec<String>,
 
@@ -177,9 +178,11 @@ pub struct GenVerifyArgs {
     /// (byte buffer, for byte-granular fields) | `iW` (a single
     /// wide scalar field, e.g. a `uint32` loaded as one i32 a byte
     /// array can't model) | `NxiW` (wide array, e.g. `4xi32`) |
-    /// `{f1,f2,...}` (heterogeneous struct for mixed-width
-    /// layouts, e.g. `{16xi8,i8}` for a Uuid+bool) | `<{f1,f2,...}>`
-    /// (packed struct). `auto` keeps the inferred pointee type.
+    /// `struct:Type` (named LLVM struct, e.g.
+    /// `struct:EnrollmentKey`) | `{f1,f2,...}` (heterogeneous struct
+    /// for mixed-width layouts, e.g. `{16xi8,i8}` for a Uuid+bool) |
+    /// `<{f1,f2,...}>` (packed struct). `auto` keeps the inferred
+    /// pointee type.
     #[arg(long = "out-buffer-param", value_name = "NAME=SHAPE|auto", num_args = 0..)]
     pub out_buffer_param: Vec<String>,
 

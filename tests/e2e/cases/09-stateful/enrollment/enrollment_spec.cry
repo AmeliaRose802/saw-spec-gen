@@ -1,25 +1,28 @@
 // Cryptol model for enroll_key (whole-object post-state, heterogeneous
-// mixed-width struct).
+// mixed-width struct with implicit padding).
 //
-// The EnrollmentKey object is a `uint32_t id` (offset 0, accessed as
-// one i32) next to a `uint8_t engaged` flag (offset 4). We model it as
-// a struct out-buffer:
+// The EnrollmentKey object is a `uint8_t engaged` flag (offset 0) next
+// to a naturally aligned `int64_t createdAt` field (offset 8). The 7
+// bytes of padding between them are not part of the Cryptol value; the
+// named `llvm_struct` allocation leaves them unconstrained while still
+// giving SAW typed i8/i64 memory cells.
 //
-//   --out-buffer-param k={i32,i8}  --cryptol-fn-out k=enroll_key_post
+//   --out-buffer-param k=struct:EnrollmentKey
+//   --cryptol-fn-out   k=enroll_key_post
 //
-// SAW allocates the object as `llvm_struct_type [llvm_int 32, llvm_int
-// 8]` and presents the pre-state `k_pre` as the Cryptol tuple
-// ([32],[8]) — the first element is `id`, the second is `engaged`.
+// SAW allocates the object as `llvm_struct "struct.EnrollmentKey"` and
+// presents the pre-state `k_pre` as the Cryptol tuple ([8],[64]) —
+// `engaged` then `createdAt`.
 
 module enrollment_spec where
 
-// (id, engaged) — mirrors the EnrollmentKey struct field order.
-type Key = ([32], [8])
+// (engaged, createdAt) — mirrors the typed fields in order.
+type Key = ([8], [64])
 
-// Post-state: id incremented by one (wrapping mod 2^32), engaged kept.
+// Post-state: engaged kept, createdAt overwritten with 42.
 enroll_key_post : Key -> Key
-enroll_key_post (id, engaged) = (id + 1, engaged)
+enroll_key_post (engaged, _) = (engaged, 42)
 
-// Return value: always reports success (1).
+// Return value: report the original engaged byte.
 enroll_key_ret : Key -> [32]
-enroll_key_ret _ = 1
+enroll_key_ret (engaged, _) = zero # engaged
