@@ -239,6 +239,7 @@ fn emit_one(
         BrokenReason::DeclareOnly => "declare-only",
         BrokenReason::UsesVarargsIntrinsic => "body uses llvm.va_*",
         BrokenReason::StlOverride => "stl-override",
+        BrokenReason::MsvcMutexHelper => "msvc-mutex-helper",
     };
     let variadic_tag = if t.is_variadic { "; variadic" } else { "" };
     out.push_str(&format!(
@@ -375,6 +376,19 @@ fn emit_one(
                 ));
                 out.push_str(&format!(
                     "    llvm_return (llvm_term {{{{ {sentinel} : [{bits}] }}}});\n"
+                ));
+            } else if let Some(val) = super::status_primitives::msvc_mutex_noop_return(&t.symbol) {
+                // MSVC `_Mutex_base` helpers (e.g. `_Verify_ownership_levels`)
+                // do typed reads on mutex internals that fail under SAW's
+                // symbolic execution when the struct is modeled as flat bytes.
+                // In a sequential proof ownership is always valid — pin the
+                // no-op return (true for bool-returning helpers).
+                out.push_str(&format!(
+                    "    // msvc-mutex-helper: pin no-op return \
+                     ({val}) — ownership always valid in sequential proof\n"
+                ));
+                out.push_str(&format!(
+                    "    llvm_return (llvm_term {{{{ {val} : [{bits}] }}}});\n"
                 ));
             } else {
                 out.push_str(&format!(

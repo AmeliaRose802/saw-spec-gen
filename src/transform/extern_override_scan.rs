@@ -90,6 +90,13 @@ pub enum BrokenReason {
     /// body but tends to panic deep inside libstdc++ allocator
     /// helpers (`Cannot mux LLVM values`). Force-havoc instead.
     StlOverride,
+    /// The symbol is a known MSVC `_Mutex_base` internal helper
+    /// (e.g. `_Verify_ownership_levels`) defined in-module with
+    /// `linkonce_odr` linkage. It performs typed reads on mutex
+    /// internals that cause "Error during memory load" under SAW
+    /// symbolic execution when the struct is modeled as flat bytes.
+    /// Safe to no-op in sequential proofs.
+    MsvcMutexHelper,
 }
 
 /// Per-function parsed snapshot used internally by [`scan`].
@@ -159,6 +166,8 @@ pub fn scan(ir: &str, target_symbol: &str) -> Vec<OverrideTarget> {
             BrokenReason::UsesVarargsIntrinsic
         } else if crate::emit::saw_emit::stl_overrides::matches(&f.name) {
             BrokenReason::StlOverride
+        } else if crate::emit::saw_emit::status_primitives::is_msvc_mutex_helper(&f.name) {
+            BrokenReason::MsvcMutexHelper
         } else {
             continue;
         };
