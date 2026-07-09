@@ -152,13 +152,9 @@ fn parse_full_signature(s: &str) -> Option<PolyCrySig> {
             parse_predicate(pred.trim(), &mut upper_bounds);
         }
         rest = after_open[close + 1..].trim_start();
-        // Skip the fat arrow.
-        if let Some(after_fat) = rest.strip_prefix("=>") {
-            rest = after_fat.trim_start();
-        } else {
-            // Context without `=>` is malformed; bail.
-            return None;
-        }
+        // Skip the fat arrow. Context without `=>` is malformed; bail.
+        let after_fat = rest.strip_prefix("=>")?;
+        rest = after_fat.trim_start();
     } else if rest.starts_with("=>") {
         rest = rest.trim_start_matches("=>").trim_start();
     }
