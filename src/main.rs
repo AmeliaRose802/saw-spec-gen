@@ -20,7 +20,12 @@ fn main() -> Result<()> {
             args.include_dirs,
             args.cxx_standard,
             args.clang_flags,
-            args.extra_spec_gen_args,
+            args.config,
+            args.in_buffer_size,
+            args.out_buffer_param,
+            args.cryptol_fn_out,
+            args.max_len_precond,
+            args.no_struct_shape_recognizer,
             args.spec_only_on_missing,
         ),
         Commands::FromClangAst {

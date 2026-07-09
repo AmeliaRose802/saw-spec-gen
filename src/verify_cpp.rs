@@ -31,7 +31,12 @@ pub struct VerifyRequest {
     pub include_dirs: Vec<PathBuf>,
     pub cxx_standard: Option<String>,
     pub clang_flags: Vec<String>,
-    pub extra_spec_gen_args: Vec<String>,
+    pub config: Option<PathBuf>,
+    pub in_buffer_size: Vec<String>,
+    pub out_buffer_param: Vec<String>,
+    pub cryptol_fn_out: Vec<String>,
+    pub max_len_precond: Vec<String>,
+    pub no_struct_shape_recognizer: bool,
     pub spec_only_on_missing: bool,
 }
 
@@ -44,6 +49,14 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
         .cryptol_spec
         .canonicalize()
         .with_context(|| format!("failed to resolve {}", req.cryptol_spec.display()))?;
+    let config = req
+        .config
+        .as_ref()
+        .map(|p| {
+            p.canonicalize()
+                .with_context(|| format!("failed to resolve config {}", p.display()))
+        })
+        .transpose()?;
     let include_dirs = req
         .include_dirs
         .iter()
@@ -156,7 +169,12 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
         &cryptol_spec,
         &req.cryptol_fn,
         &req.function,
-        &req.extra_spec_gen_args,
+        config.as_deref(),
+        &req.in_buffer_size,
+        &req.out_buffer_param,
+        &req.cryptol_fn_out,
+        &req.max_len_precond,
+        req.no_struct_shape_recognizer,
         req.spec_only_on_missing,
     )?;
     if req.spec_only_on_missing && is_spec_only_result(&output_dir)? {
@@ -195,10 +213,15 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
             bc_file: &bc_file,
             ll_file: &ll_file,
             ast_file: &ast_file,
-            cry_dest: &cry_dest,
+            cryptol_spec: &cryptol_spec,
             cryptol_fn: &req.cryptol_fn,
             function: &req.function,
-            extra_spec_gen_args: &req.extra_spec_gen_args,
+            config: config.as_deref(),
+            in_buffer_size: &req.in_buffer_size,
+            out_buffer_param: &req.out_buffer_param,
+            cryptol_fn_out: &req.cryptol_fn_out,
+            max_len_precond: &req.max_len_precond,
+            no_struct_shape_recognizer: req.no_struct_shape_recognizer,
             spec_only_on_missing: req.spec_only_on_missing,
         })?;
         saw_output = run_saw(saw, &output_dir, "verify.saw")?;

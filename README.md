@@ -82,6 +82,26 @@ file — the `.bc`, the AST JSON, every generated override spec, the
 `verify.saw` script, and a structured `result.json`
 ([schema](docs/result-json.md)).
 
+For `verify-cpp`, use versioned TOML config for shaping. Put per-spec
+settings in a `<spec>.toml` sibling or repo-wide defaults in
+`saw-spec-gen.toml`:
+
+```toml
+[functions.add_one_spec]
+in_buffer_size = ["buf=32"]
+max_len_precond = ["len=32"]
+```
+
+```powershell
+pwsh -File ./verify.ps1 -CppFile .\add_one.cpp `
+                       -CryptolSpec .\add_one_spec.cry `
+                       -CryptolFn add_one_spec -Function add_one
+```
+
+`verify-cpp` preserves `gen-verify`'s normal config auto-discovery from
+the original spec path, and also accepts `--config PATH` / `-Config
+PATH` when you want to point at an explicit TOML file.
+
 ## The verification model
 
 For every external function — interface methods, OS calls, allocators,

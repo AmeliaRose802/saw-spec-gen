@@ -1,9 +1,7 @@
 //! Subcommand handler implementations for the `saw-spec-gen` binary.
 //!
-//! `main.rs` parses CLI args into [`Commands`] (defined alongside `Cli` in
-//! `main.rs`) and immediately delegates here, so the binary's entry point
-//! stays small and the command bodies remain editable without pushing
-//! `main.rs` over the 500-non-whitespace-line limit.
+//! `main.rs` parses CLI args into [`Commands`] and immediately delegates
+//! here so the binary entry point stays small.
 
 use anyhow::Result;
 use std::path::PathBuf;
@@ -23,7 +21,12 @@ pub fn verify_cmd(
     include_dirs: Vec<PathBuf>,
     cxx_standard: Option<String>,
     clang_flags: Vec<String>,
-    extra_spec_gen_args: Vec<String>,
+    config: Option<PathBuf>,
+    in_buffer_size: Vec<String>,
+    out_buffer_param: Vec<String>,
+    cryptol_fn_out: Vec<String>,
+    max_len_precond: Vec<String>,
+    no_struct_shape_recognizer: bool,
     spec_only_on_missing: bool,
 ) -> Result<()> {
     let outcome = verify_cpp::run(verify_cpp::VerifyRequest {
@@ -35,7 +38,12 @@ pub fn verify_cmd(
         include_dirs,
         cxx_standard,
         clang_flags,
-        extra_spec_gen_args,
+        config,
+        in_buffer_size,
+        out_buffer_param,
+        cryptol_fn_out,
+        max_len_precond,
+        no_struct_shape_recognizer,
         spec_only_on_missing,
     })?;
     std::process::exit(outcome.exit_code);

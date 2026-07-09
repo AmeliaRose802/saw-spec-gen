@@ -43,15 +43,43 @@ pub struct VerifyArgs {
     #[arg(long = "clang-flag", num_args = 0.., action = clap::ArgAction::Append)]
     pub clang_flags: Vec<String>,
 
-    /// Extra raw argv elements appended to the internal `gen-verify`
-    /// invocation. Use for buffer overrides and other advanced flags
-    /// without the outer `verify` subcommand needing to understand them.
-    #[arg(
-        long = "extra-spec-gen-arg",
-        num_args = 0..,
-        action = clap::ArgAction::Append
-    )]
-    pub extra_spec_gen_args: Vec<String>,
+    /// Path to a per-invocation config file (TOML) forwarded to
+    /// `gen-verify`.
+    ///
+    /// When omitted, `verify-cpp` preserves `gen-verify`'s normal
+    /// spec-relative auto-discovery by passing the original
+    /// `--cryptol-spec` path through unchanged. Prefer versioned
+    /// config files for shaping.
+    #[arg(long = "config", value_name = "PATH")]
+    pub config: Option<PathBuf>,
+
+    /// Declare a read-only input buffer override.
+    ///
+    /// Format: `NAME=SHAPE` (for example `src=32` or `data=4xi8`).
+    #[arg(long = "in-buffer-size", value_name = "NAME=SHAPE", num_args = 0..)]
+    pub in_buffer_size: Vec<String>,
+
+    /// Declare a writable output buffer override.
+    ///
+    /// Format: `NAME=SHAPE` or `NAME=auto` (for example `out=32`).
+    #[arg(long = "out-buffer-param", value_name = "NAME=SHAPE|auto", num_args = 0..)]
+    pub out_buffer_param: Vec<String>,
+
+    /// Bind an out-buffer to a Cryptol postcondition function.
+    ///
+    /// Format: `OUT_PARAM=FN` (for example `out=bounded_copy_post`).
+    #[arg(long = "cryptol-fn-out", value_name = "OUT_PARAM=FN", num_args = 0..)]
+    pub cryptol_fn_out: Vec<String>,
+
+    /// Emit a scalar length precondition before the call.
+    ///
+    /// Format: `NAME=VAL` (for example `len=32`).
+    #[arg(long = "max-len-precond", value_name = "NAME=VAL", num_args = 0..)]
+    pub max_len_precond: Vec<String>,
+
+    /// Disable the struct-shape recognizer.
+    #[arg(long = "no-struct-shape-recognizer", default_value_t = false)]
+    pub no_struct_shape_recognizer: bool,
 
     /// Soft-exit with a `result.json` status of `not_attempted` when the
     /// target function has no matching implementation symbol.

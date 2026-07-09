@@ -197,7 +197,12 @@ pub(super) fn run_gen_verify(
     cryptol_spec: &Path,
     cryptol_fn: &str,
     function: &str,
-    extra_spec_gen_args: &[String],
+    config: Option<&Path>,
+    in_buffer_size: &[String],
+    out_buffer_param: &[String],
+    cryptol_fn_out: &[String],
+    max_len_precond: &[String],
+    no_struct_shape_recognizer: bool,
     spec_only_on_missing: bool,
 ) -> Result<()> {
     let self_exe = std::env::current_exe()?;
@@ -218,10 +223,27 @@ pub(super) fn run_gen_verify(
     if let Some(ll_file) = ll_file {
         cmd.arg("--llvm-ir").arg(ll_file);
     }
+    if let Some(config) = config {
+        cmd.arg("--config").arg(config);
+    }
+    for arg in in_buffer_size {
+        cmd.arg("--in-buffer-size").arg(arg);
+    }
+    for arg in out_buffer_param {
+        cmd.arg("--out-buffer-param").arg(arg);
+    }
+    for arg in cryptol_fn_out {
+        cmd.arg("--cryptol-fn-out").arg(arg);
+    }
+    for arg in max_len_precond {
+        cmd.arg("--max-len-precond").arg(arg);
+    }
+    if no_struct_shape_recognizer {
+        cmd.arg("--no-struct-shape-recognizer");
+    }
     if spec_only_on_missing {
         cmd.arg("--spec-only-on-missing");
     }
-    cmd.args(extra_spec_gen_args);
     run_command(&mut cmd, "gen-verify")
 }
 
@@ -247,10 +269,15 @@ pub(super) struct O1Recompile<'a> {
     pub bc_file: &'a Path,
     pub ll_file: &'a Path,
     pub ast_file: &'a Path,
-    pub cry_dest: &'a Path,
+    pub cryptol_spec: &'a Path,
     pub cryptol_fn: &'a str,
     pub function: &'a str,
-    pub extra_spec_gen_args: &'a [String],
+    pub config: Option<&'a Path>,
+    pub in_buffer_size: &'a [String],
+    pub out_buffer_param: &'a [String],
+    pub cryptol_fn_out: &'a [String],
+    pub max_len_precond: &'a [String],
+    pub no_struct_shape_recognizer: bool,
     pub spec_only_on_missing: bool,
 }
 
@@ -295,10 +322,15 @@ pub(super) fn recompile_at_o1(ctx: &O1Recompile) -> Result<()> {
         ctx.bc_file,
         ll.as_deref(),
         ctx.ast_file,
-        ctx.cry_dest,
+        ctx.cryptol_spec,
         ctx.cryptol_fn,
         ctx.function,
-        ctx.extra_spec_gen_args,
+        ctx.config,
+        ctx.in_buffer_size,
+        ctx.out_buffer_param,
+        ctx.cryptol_fn_out,
+        ctx.max_len_precond,
+        ctx.no_struct_shape_recognizer,
         ctx.spec_only_on_missing,
     )
 }

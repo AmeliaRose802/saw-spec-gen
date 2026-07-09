@@ -67,6 +67,81 @@ fn verify_subcommand_writes_disproved_result_details() {
     assert_eq!(result["actual"], "0");
 }
 
+#[test]
+fn verify_subcommand_discovers_spec_sibling_config() {
+    let env = FakeVerifyEnv::new(SawMode::Verified);
+    let out_dir = env.root.path().join("out_config_auto");
+    std::fs::write(
+        env.cry_file.with_extension("toml"),
+        r#"[functions.ComputeChecksum_spec]
+max_len_precond = ["length=32"]
+"#,
+    )
+    .unwrap();
+
+    let status = env.run_verify_with_args(&out_dir, &[]);
+    assert!(status.success(), "verify failed: {status:?}");
+
+    let saw = std::fs::read_to_string(out_dir.join("verify.saw")).unwrap();
+    assert!(
+        saw.contains("llvm_precond {{ `32 >= length }};"),
+        "expected config-driven max-len precondition in verify.saw, got:\n{saw}"
+    );
+    assert!(
+        out_dir.join("fixture.cry").exists(),
+        "copied spec artifact missing"
+    );
+}
+
+#[test]
+fn verify_subcommand_forwards_explicit_config_path() {
+    let env = FakeVerifyEnv::new(SawMode::Verified);
+    let out_dir = env.root.path().join("out_config_explicit");
+    let config_dir = env.root.path().join("configs");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    let config_path = config_dir.join("verify.toml");
+    std::fs::write(
+        &config_path,
+        r#"[functions.ComputeChecksum_spec]
+max_len_precond = ["length=64"]
+"#,
+    )
+    .unwrap();
+
+    let status = env.run_verify_with_args(&out_dir, &["--config", config_path.to_str().unwrap()]);
+    assert!(status.success(), "verify failed: {status:?}");
+
+    let saw = std::fs::read_to_string(out_dir.join("verify.saw")).unwrap();
+    assert!(
+        saw.contains("llvm_precond {{ `64 >= length }};"),
+        "expected explicit config path to reach gen-verify, got:\n{saw}"
+    );
+}
+
+#[test]
+fn verify_subcommand_forwards_shaping_flags_without_passthrough() {
+    let env = FakeVerifyEnv::new(SawMode::Verified);
+    let out_dir = env.root.path().join("out_shaping_flags");
+
+    let status = env.run_verify_with_args(
+        &out_dir,
+        &[
+            "--in-buffer-size",
+            "data=32",
+            "--max-len-precond",
+            "length=32",
+            "--no-struct-shape-recognizer",
+        ],
+    );
+    assert!(status.success(), "verify failed: {status:?}");
+
+    let saw = std::fs::read_to_string(out_dir.join("verify.saw")).unwrap();
+    assert!(
+        saw.contains("llvm_precond {{ `32 >= length }};"),
+        "expected direct shaping flags to reach gen-verify, got:\n{saw}"
+    );
+}
+
 struct FakeVerifyEnv {
     root: TempDir,
     cpp_file: PathBuf,
@@ -204,37 +279,45 @@ EOF
     }
 
     fn run_verify(&self, out_dir: &Path) -> std::process::ExitStatus {
-        Command::new(saw_spec_gen_binary())
-            .args([
-                "verify-cpp",
-                "--cpp-file",
-                self.cpp_file.to_str().unwrap(),
-                "--cryptol-spec",
-                self.cry_file.to_str().unwrap(),
-                "--cryptol-fn",
-                "ComputeChecksum_spec",
-                "--function",
-                "ComputeChecksum",
-                "--output",
-                out_dir.to_str().unwrap(),
-                "--include-dir",
-                self.include_dir.to_str().unwrap(),
-                "--cxx-standard",
-                "c++20",
-                "--clang-flag=-DMOCK=1",
-            ])
-            .env("SAW_SPEC_GEN_LLVM_BIN", &self.fake_bin)
-            .env("SAW_SPEC_GEN_SAW", self.fake_bin.join("saw"))
-            .env(
-                "PATH",
-                format!(
-                    "{}:{}",
-                    self.fake_bin.display(),
-                    std::env::var("PATH").unwrap()
-                ),
-            )
-            .status()
-            .unwrap()
+        self.run_verify_with_args(out_dir, &[])
+    }
+
+    fn run_verify_with_args(
+        &self,
+        out_dir: &Path,
+        extra_args: &[&str],
+    ) -> std::process::ExitStatus {
+        let mut cmd = Command::new(saw_spec_gen_binary());
+        cmd.args([
+            "verify-cpp",
+            "--cpp-file",
+            self.cpp_file.to_str().unwrap(),
+            "--cryptol-spec",
+            self.cry_file.to_str().unwrap(),
+            "--cryptol-fn",
+            "ComputeChecksum_spec",
+            "--function",
+            "ComputeChecksum",
+            "--output",
+            out_dir.to_str().unwrap(),
+            "--include-dir",
+            self.include_dir.to_str().unwrap(),
+            "--cxx-standard",
+            "c++20",
+            "--clang-flag=-DMOCK=1",
+        ])
+        .args(extra_args)
+        .env("SAW_SPEC_GEN_LLVM_BIN", &self.fake_bin)
+        .env("SAW_SPEC_GEN_SAW", self.fake_bin.join("saw"))
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                self.fake_bin.display(),
+                std::env::var("PATH").unwrap()
+            ),
+        );
+        cmd.status().unwrap()
     }
 }
 
