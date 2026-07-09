@@ -73,7 +73,9 @@ fn verify_subcommand_discovers_spec_sibling_config() {
     let out_dir = env.root.path().join("out_config_auto");
     std::fs::write(
         env.cry_file.with_extension("toml"),
-        "[functions.ComputeChecksum_spec]\nmax_len_precond = [\"length=32\"]\n",
+        r#"[functions.ComputeChecksum_spec]
+max_len_precond = ["length=32"]
+"#,
     )
     .unwrap();
 
@@ -100,7 +102,9 @@ fn verify_subcommand_forwards_explicit_config_path() {
     let config_path = config_dir.join("verify.toml");
     std::fs::write(
         &config_path,
-        "[functions.ComputeChecksum_spec]\nmax_len_precond = [\"length=64\"]\n",
+        r#"[functions.ComputeChecksum_spec]
+max_len_precond = ["length=64"]
+"#,
     )
     .unwrap();
 
