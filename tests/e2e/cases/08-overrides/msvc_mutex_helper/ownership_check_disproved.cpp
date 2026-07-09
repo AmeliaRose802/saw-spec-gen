@@ -1,26 +1,16 @@
 // Companion to ownership_check_verified.cpp.
 //
-// On GCC/Linux, `_Mutex_base_sim::_Verify_ownership_levels` is NOT
-// classified as MsvcMutexHelper (the GCC-mangled name lacks `_Mutex_base@std`),
-// so SAW executes the simple int-comparison body inline.  The body returns
-// the comparison result which is discarded by the caller, so verification
-// outcome is determined solely by the arithmetic in `ownership_check_disproved`.
-// The off-by-one (x + 2 vs spec x + 1) produces DISPROVED for the right reason.
+// Same std::recursive_mutex shape — any std::_Mutex_base helpers are still
+// overridden as no-ops via the MsvcMutexHelper classification — but the
+// guarded body returns x + 2 while the Cryptol spec says x + 1.  The proof
+// must DISPROVE: the override does not mask genuine arithmetic bugs.
 
 #include <cstdint>
+#include <mutex>
 
-struct _Mutex_base_sim {
-    int _owner;
-    int _level;
-
-    bool _Verify_ownership_levels() {
-        return _owner <= _level;
-    }
-};
-
-static _Mutex_base_sim g_sim_disproved;
+static std::recursive_mutex g_mtx_disproved;
 
 extern "C" uint32_t ownership_check_disproved(uint32_t x) {
-    g_sim_disproved._Verify_ownership_levels();
+    std::lock_guard<std::recursive_mutex> guard(g_mtx_disproved);
     return x + 2;  // BUG: off by one vs spec x + 1.
 }
