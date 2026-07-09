@@ -199,9 +199,7 @@ pub(super) fn emit_verify_step(
             overrides.push(format!("ov_{safe_class}_ctor"));
         }
         for method in iface.vmethods {
-            if method.is_override
-                && originating_names.contains(method.method.name.as_str())
-            {
+            if method.is_override && originating_names.contains(method.method.name.as_str()) {
                 continue;
             }
             let stub_name = stub_function_name(method);
