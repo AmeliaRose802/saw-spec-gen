@@ -138,8 +138,13 @@ pub fn emit_interface_stubs(
     }
 
     let index_path = output_dir.join("interface_overrides.saw");
-    let index_content =
-        generate_override_index_with_vtable(methods, &by_class, constructors, classes_with_vdtor);
+    let index_content = generate_override_index_with_vtable(
+        methods,
+        &by_class,
+        constructors,
+        classes_with_vdtor,
+        target_triple,
+    );
     fs::write(&index_path, index_content)?;
     Ok(())
 }

@@ -112,6 +112,12 @@ pub(super) fn maybe_lower_exceptions(
     bc_file: &Path,
     ll_file: Option<&Path>,
 ) -> Result<()> {
+    // The exception-lower pass targets MSVC EH patterns. Running it on
+    // Itanium Linux IR can introduce malformed pointer loads that SAW
+    // then reports as UNKNOWN (orphan_override_vtable regression).
+    if !is_msvc {
+        return Ok(());
+    }
     let Some(exception_lower) = tools.exception_lower.as_deref() else {
         if is_msvc {
             eprintln!("note: exception-lower binary not available; EH will not be lowered.");
