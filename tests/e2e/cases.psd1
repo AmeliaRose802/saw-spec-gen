@@ -68,8 +68,12 @@
         # vtable_stubs.ll failed to assemble, and SAW aborted at load. The
         # fix reclassifies orphan overrides as originating methods (own
         # stub + havoc + assume binding). Also exercises the pointer-return
-        # havoc path (what() returns const char*).
+        # havoc path (what() returns const char*). The verified case ignores
+        # what()'s result; the disproved case dereferences it, proving the
+        # pointer-return havoc is sound (arbitrary pointee byte) rather than
+        # vacuously returning zeroed memory.
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/orphan_override_vtable';     File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/orphan_override_vtable';     File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
         # C++ exception lowering: total Cryptol spec, partial impl.
         @{ Tag = 'cpp_throws'; Runner = 'cpp'; Dir = 'tests/e2e/cases/06-throws-exception';           File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
         @{ Tag = 'cpp_throws'; Runner = 'cpp'; Dir = 'tests/e2e/cases/06-throws-exception';           File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
