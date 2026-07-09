@@ -160,7 +160,7 @@ pub fn parse_function_decl(
     }
 
     let return_type = parse_return_type(&qual_type, ctx);
-    let is_virtual = node.r#virtual == Some(true);
+    let is_virtual = node.r#virtual == Some(true) || node.has_override_attr();
     let has_body = node.inner.iter().any(|c| c.kind == "CompoundStmt");
     let is_system = {
         let loc = node.loc.as_ref();
