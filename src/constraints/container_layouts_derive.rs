@@ -149,10 +149,8 @@ fn pointer_field_path(
             // them, else look the name up in the struct table.
             let inner_fields: &[(String, TypeInfo)] = if !fields.is_empty() {
                 fields
-            } else if let Some(found) = structs.get(name.as_str()) {
-                found.as_slice()
             } else {
-                return None;
+                structs.get(name.as_str())?.as_slice()
             };
             // The first pointer field inside the nested struct wins —
             // basic_string's `_Alloc_hider` carries `_M_p` first.
