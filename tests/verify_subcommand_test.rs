@@ -324,17 +324,20 @@ EOF
 /// Integration test for BrokenReason::MsvcMutexHelper (bd issue #65).
 ///
 /// Sets up a fake `verify-cpp` environment where the LLVM IR contains a
-/// `linkonce_odr`-defined `_Verify_ownership_levels` function (an MSVC
-/// `_Mutex_base` internal helper that performs typed field reads).  Before
-/// the fix the extern-override scanner skipped defined non-vararg bodies;
-/// the generated `verify.saw` never saw an override for this function and
-/// SAW aborted with "Error during memory load" when it tried to inline the
-/// typed reads through a symbolically-allocated struct pointer.
+/// `linkonce_odr`-defined `std::_Mutex_base` helper function (here
+/// `_Verify_ownership_levels`) that performs typed field reads on the mutex
+/// struct. Before the fix the extern-override scanner skipped defined
+/// non-vararg bodies; the generated `verify.saw` never saw an override for
+/// this function and SAW aborted with "Error during memory load" when it
+/// tried to inline the typed reads through a symbolically-allocated struct
+/// pointer.
 ///
-/// With the fix the scanner detects `_Verify_ownership_levels` as a
-/// substring of the GCC-mangled name (fires on Linux the same way it fires
-/// on MSVC), classifies the function as `MsvcMutexHelper`, and emits
-/// `{{ 1 : [1] }}` (bool true — ownership always valid in a sequential
+/// The injected IR uses the real MSVC-mangled name
+/// `?_Verify_ownership_levels@_Mutex_base@std@@IEAA_NXZ` so the
+/// `_Mutex_base@std` substring pattern fires. This broad pattern future-proofs
+/// detection of all sibling `std::_Mutex_base` helpers without a per-method
+/// allowlist. The scanner classifies the function as `MsvcMutexHelper` and
+/// emits `{{ 1 : [1] }}` (bool true — ownership always valid in a sequential
 /// proof) as the pinned no-op return.
 #[test]
 fn msvc_mutex_helper_emits_noop_override_in_verify_script() {
@@ -359,7 +362,8 @@ fn msvc_mutex_helper_emits_noop_override_in_verify_script() {
 
     // Fake clang: AST dump → fixture; -S -emit-llvm → IR with the helper;
     // bitcode → empty BC sentinel.  The IR defines ComputeChecksum as a
-    // caller of _Verify_ownership_levels (linkonce_odr).
+    // caller of ?_Verify_ownership_levels@_Mutex_base@std@@... (linkonce_odr),
+    // using the real MSVC-mangled name so `_Mutex_base@std` fires.
     // Double-brace every `{` / `}` in the IR because this block uses format!.
     write_script(
         &fake_bin.join("clang"),
@@ -376,14 +380,14 @@ if [[ " $* " == *"_test_cex.cpp"* ]]; then
 fi
 if [[ " $* " == *" -S "* && " $* " == *" -emit-llvm "* ]]; then
   cat > "$out" <<'IREOF'
-target triple = "x86_64-unknown-linux-gnu"
+target triple = "x86_64-pc-windows-msvc"
 define i32 @_Z15ComputeChecksumPKhm(ptr %data, i64 %len) {{
 entry:
   %self = alloca [8 x i8], align 4
-  call i1 @_ZN15_Mutex_base_sim24_Verify_ownership_levelsEv(ptr %self)
+  call i1 @"?_Verify_ownership_levels@_Mutex_base@std@@IEAA_NXZ"(ptr %self)
   ret i32 0
 }}
-define linkonce_odr i1 @_ZN15_Mutex_base_sim24_Verify_ownership_levelsEv(ptr %0) {{
+define linkonce_odr i1 @"?_Verify_ownership_levels@_Mutex_base@std@@IEAA_NXZ"(ptr %0) {{
 entry:
   %1 = load i32, ptr %0, align 4
   %2 = getelementptr inbounds i32, ptr %0, i32 1
@@ -414,14 +418,14 @@ for arg in "$@"; do
   if [[ "$prev" == "-o" ]]; then out="$arg"; fi; prev="$arg"
 done
 cat > "$out" <<'IREOF'
-target triple = "x86_64-unknown-linux-gnu"
+target triple = "x86_64-pc-windows-msvc"
 define i32 @_Z15ComputeChecksumPKhm(ptr %data, i64 %len) {
 entry:
   %self = alloca [8 x i8], align 4
-  call i1 @_ZN15_Mutex_base_sim24_Verify_ownership_levelsEv(ptr %self)
+  call i1 @"?_Verify_ownership_levels@_Mutex_base@std@@IEAA_NXZ"(ptr %self)
   ret i32 0
 }
-define linkonce_odr i1 @_ZN15_Mutex_base_sim24_Verify_ownership_levelsEv(ptr %0) {
+define linkonce_odr i1 @"?_Verify_ownership_levels@_Mutex_base@std@@IEAA_NXZ"(ptr %0) {
 entry:
   %1 = load i32, ptr %0, align 4
   %2 = getelementptr inbounds i32, ptr %0, i32 1
@@ -472,7 +476,7 @@ IREOF
         std::fs::read_to_string(out_dir.join("verify.saw")).expect("verify.saw not written");
     assert!(
         verify_saw.contains("[msvc-mutex-helper]"),
-        "_Verify_ownership_levels must be classified MsvcMutexHelper;\
+        "?_Verify_ownership_levels@_Mutex_base@std@@... must be classified MsvcMutexHelper;\
          \nverify.saw:\n{verify_saw}"
     );
     assert!(
