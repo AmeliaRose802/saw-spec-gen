@@ -1,0 +1,7 @@
+module ownership_check_spec where
+
+// A call to _Verify_ownership_levels is always a no-op in a sequential
+// proof (ownership is always valid when the mutex is uncontended), so
+// the function reduces to a plain increment.
+ownership_check_spec : [32] -> [32]
+ownership_check_spec x = x + 1
