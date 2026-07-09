@@ -396,8 +396,9 @@
            Cry = 'use_prim_spec.cry'; CryptolFn = 'use_prim_spec'; Function = 'use_prim' }
 
         # ── Stateful methods: whole-object post-state via the ordinary
-        #    --out-buffer-param / --cryptol-fn-out flags (no dedicated
-        #    flag needed; see docs/03-stateful-method-specs.md).
+        #    out-buffer machinery, including inferred mutable `this`
+        #    receivers on non-static methods (see
+        #    docs/03-stateful-method-specs.md).
         #
         # A stateful method's headline safety property is relational over
         # the pre/post heap, which the default functional-equivalence spec
@@ -424,6 +425,10 @@
         # Each *_disproved variant proves the post-condition is not
         # vacuous: the buggy body diverges from the model and SAW returns
         # the discriminating counterexample.
+        @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/member_receiver'; File = 'member_receiver_verified.cpp';  Expected = 'VERIFIED';
+           Cry = 'member_receiver_spec.cry'; CryptolFn = 'activate_ret'; Function = 'activate' }
+        @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/member_receiver'; File = 'member_receiver_disproved.cpp'; Expected = 'DISPROVED';
+           Cry = 'member_receiver_spec.cry'; CryptolFn = 'activate_ret'; Function = 'activate' }
         @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/key_store'; File = 'key_store_verified.cpp';  Expected = 'VERIFIED';
            Cry = 'key_store_spec.cry'; CryptolFn = 'key_store_activate_ret'; Function = 'key_store_activate';
            ExtraSpecGenArgs = @(
