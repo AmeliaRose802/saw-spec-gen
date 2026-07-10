@@ -91,7 +91,7 @@ fn resolve_via_ir(saw_type: &str, ir_sizes: &HashMap<String, usize>) -> Option<S
     //    `std::optional<protocol::EnrollmentKey>` in the IR.
     if name.contains('<') {
         let name_norm = normalize_template_args(name);
-        let cands: Vec<usize> = ir_sizes
+        let matching_sizes: Vec<usize> = ir_sizes
             .iter()
             .filter_map(|(k, v)| {
                 let k_simple = strip_prefix(k);
@@ -102,8 +102,8 @@ fn resolve_via_ir(saw_type: &str, ir_sizes: &HashMap<String, usize>) -> Option<S
                 }
             })
             .collect();
-        if cands.len() == 1 {
-            return Some(format!("llvm_array {} (llvm_int 8)", cands[0]));
+        if matching_sizes.len() == 1 {
+            return Some(format!("llvm_array {} (llvm_int 8)", matching_sizes[0]));
         }
     }
 
@@ -132,14 +132,18 @@ fn normalize_template_args(s: &str) -> String {
     let args_and_rest = &s[open + 1..];
     let close = find_closing_angle(args_and_rest);
     let args = &args_and_rest[..close];
-    // Split args at depth-0 commas.
+    // Split args at depth-0 commas.  The `args` slice contains only the
+    // content between the outermost `<` and its matching `>`, so every `>`
+    // here is a nested closing bracket; depth should not underflow on
+    // well-formed input.  Use explicit guard to avoid panic on malformed input.
     let mut out_args: Vec<String> = Vec::new();
     let mut depth = 0usize;
     let mut start = 0usize;
     for (i, c) in args.char_indices() {
         match c {
             '<' => depth += 1,
-            '>' => depth = depth.saturating_sub(1),
+            '>' if depth > 0 => depth -= 1,
+            '>' => {} // extra `>` in malformed input — ignore
             ',' if depth == 0 => {
                 out_args.push(normalize_one_arg(args[start..i].trim()));
                 start = i + 1;
@@ -164,12 +168,18 @@ fn normalize_one_arg(arg: &str) -> String {
 /// Return the index of the `>` that closes the outermost `<` whose
 /// contents are `s` (i.e. the `<` has already been consumed).
 /// Returns `s.len()` if no matching `>` is found.
+///
+/// `depth` counts unmatched `<` seen so far; the bare `'>'` arm can only
+/// be reached when `depth > 0` (the `if depth == 0` guard returns first),
+/// so `depth -= 1` here is always safe and cannot underflow.
 fn find_closing_angle(s: &str) -> usize {
     let mut depth = 0usize;
     for (i, c) in s.char_indices() {
         match c {
             '<' => depth += 1,
+            // depth == 0: this `>` closes the outermost `<` — return its index.
             '>' if depth == 0 => return i,
+            // depth > 0: this `>` closes a nested `<`; safe to subtract.
             '>' => depth -= 1,
             _ => {}
         }
