@@ -33,7 +33,9 @@ pub fn classify_return(ty: &TypeInfo) -> Option<RustReturnKind> {
             }
             None
         }
-        // Inline aggregate type like "{ i1, i1 }" (no named struct in IR)
+        // Inline aggregate type like "{ i1, i1 }" (no named struct in IR).
+        // LLVM represents anonymous inline struct types with literal brace
+        // syntax; named types use "%TypeName" which maps to TypeInfo::Struct.
         TypeInfo::Opaque { name, .. } if name.starts_with('{') => {
             classify_inline_struct_return(name)
         }

@@ -1,5 +1,6 @@
 // Cryptol spec for get_status — returns a 24-byte status struct (3 × u64).
 // Three u64 fields forces sret on x86_64 (> 2 registers).
+// `zero` is the Cryptol built-in zero-valued polymorphic constant.
 get_status_spec : [8] -> [8] -> [3][64]
 get_status_spec enabled active = [zero # enabled, zero # active, result]
   where

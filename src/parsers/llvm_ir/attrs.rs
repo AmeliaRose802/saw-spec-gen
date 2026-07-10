@@ -66,9 +66,10 @@ impl IrToken {
             return IrToken::SkipSingle;
         }
         if let Some(rest) = part.strip_prefix("sret(") {
-            // Count the net paren depth of `rest` (not counting the already-
-            // consumed opening paren in "sret(").
-            let mut depth = 1i32; // the '(' in "sret(" is already open
+            // Track paren depth across `rest`.  We start at 1 because the
+            // opening '(' of "sret(" is already consumed by strip_prefix —
+            // it counts as an open that still needs to be closed.
+            let mut depth = 1i32;
             for ch in rest.chars() {
                 match ch {
                     '(' => depth += 1,
@@ -82,8 +83,8 @@ impl IrToken {
                 return IrToken::Sret(Some(inner.to_string()));
             } else {
                 // Multi-token: sret([24 x i8]) — inner type has spaces.
-                // `rest` is everything after "sret(", depth is how many
-                // unmatched opens remain.
+                // `rest` is everything after "sret(", depth > 0 means how
+                // many unmatched opens remain across subsequent tokens.
                 return IrToken::SretStart(rest.to_string(), depth);
             }
         }

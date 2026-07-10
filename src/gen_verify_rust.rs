@@ -248,6 +248,9 @@ fn try_resolve_candidate(
     // Note: `extract_sret` strips the `sret` annotation, so we use the
     // WriteOnly + non-integer-type combination as the detection signal.
     let has_sret = f.params.first().is_some_and(|p| {
+        // WriteOnly + non-integer type = stripped sret parameter.
+        // `extract_sret` removes the Custom("sret") annotation but
+        // preserves WriteOnly mutability and the non-integer struct type.
         p.mutability == crate::constraints::Mutability::WriteOnly && type_int_bits(&p.ty).is_none()
     });
     let input_params = if has_sret {
