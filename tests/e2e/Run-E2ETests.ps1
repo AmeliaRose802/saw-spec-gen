@@ -91,7 +91,11 @@ $defaultTags = @(
     'cryptol_len_bind'
     'int_ops'
         'string_content'
+<<<<<<< HEAD
     'msvc_string'
+=======
+    'aggregate_bridge'
+>>>>>>> origin/master
 )
 if ($All) {
     $selected = $cases

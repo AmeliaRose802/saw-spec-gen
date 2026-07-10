@@ -359,3 +359,77 @@ entry:
         "missing else discriminant:\n{saw}"
     );
 }
+
+#[test]
+fn resolves_inline_aggregate_return() {
+    // LLVM 22+ may use inline struct syntax for small aggregates.
+    let ir = "\
+define { i1, i1 } @_RNvCs0_4test14enforce_access(i8 %mode, i8 %decision) {
+entry:
+  ret { i1, i1 } zeroinitializer
+}
+";
+    let arts = resolve_target(ir, "enforce_access").unwrap();
+    match &arts.return_kind {
+        RustReturnKind::Aggregate { field_bits } => {
+            assert_eq!(field_bits, &[1, 1]);
+        }
+        other => panic!("expected Aggregate, got {other:?}"),
+    }
+    assert_eq!(arts.params.len(), 2);
+}
+
+#[test]
+fn resolves_sret_byte_array_return() {
+    // LLVM 22+ uses `[N x i8]` as the sret type for large structs.
+    let ir = "\
+define void @_RNvCs0_4test10get_status(ptr sret([24 x i8]) align 8 %_0, i8 %enabled, i8 %active) {
+entry:
+  ret void
+}
+";
+    let arts = resolve_target(ir, "get_status").unwrap();
+    match &arts.return_kind {
+        RustReturnKind::Sret {
+            llvm_type,
+            size_bytes,
+        } => {
+            assert_eq!(llvm_type, "[24 x i8]");
+            assert_eq!(*size_bytes, 24);
+        }
+        other => panic!("expected Sret, got {other:?}"),
+    }
+    // The sret param is NOT in the user-visible param list.
+    assert_eq!(arts.params.len(), 2);
+    assert_eq!(arts.params[0].name, "x0");
+    assert_eq!(arts.params[1].name, "x1");
+}
+
+#[test]
+fn sret_byte_array_emits_result_ptr_and_points_to() {
+    let ir = "\
+define void @_RNvCs0_4test10get_status(ptr sret([24 x i8]) align 8 %_0, i8 %enabled, i8 %active) {
+entry:
+  ret void
+}
+";
+    let arts = resolve_target(ir, "get_status").unwrap();
+    let saw = gen_verify_rust_emit::emit_saw_script(
+        "get_status",
+        "get_status_spec",
+        "x.bc",
+        "x.cry",
+        &arts,
+        &BufferOverrides::default(),
+        &gen_verify_rust_emit::VariantMap::default(),
+        &crate::uninterpreted::UninterpretedBlock::default(),
+    );
+    assert!(
+        saw.contains("result_ptr <- llvm_alloc"),
+        "missing result_ptr allocation:\n{saw}"
+    );
+    assert!(
+        saw.contains("llvm_points_to result_ptr"),
+        "missing llvm_points_to result_ptr:\n{saw}"
+    );
+}
