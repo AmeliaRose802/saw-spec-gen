@@ -91,13 +91,20 @@ The new tag runs in CI automatically — no further edits needed. Only
 add a tag to `$researchTags` in `Run-E2ETests.ps1` if the case is
 intentionally expected to produce `UNKNOWN` under the current pipeline.
 
+**Runner policy:** use only built-in runners — `cpp`, `rust`, `equiv`.
+Do **not** add `Runner = 'custom'` or `Script = ...` to `cases.psd1`.
+If a built-in runner lacks a needed capability, extend the runner instead
+of wrapping a custom script. CI enforces this via the `no-custom-runners`
+job; run `bash scripts/check-no-custom-runners.sh` locally to check.
+
 ## Pre-commit integration
 
 `.githooks/pre-commit` (activated with `git config core.hooksPath .githooks`)
 runs:
 
 1. `scripts/check-line-count.sh` — fast, always required.
-2. `tests/e2e/Run-E2ETests.ps1` — skipped automatically when SAW is
+2. `scripts/check-no-custom-runners.sh` — fast, always required; rejects custom E2E runners.
+3. `tests/e2e/Run-E2ETests.ps1` — skipped automatically when SAW is
    not installed, or when `SKIP_SAW_TESTS=1` is exported.
 
 ## Runner semantics
