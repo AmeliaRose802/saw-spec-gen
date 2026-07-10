@@ -17,7 +17,7 @@
 # To renew an expiry, update Expires and file an issue tracking the new date.
 # Never add new entries unless you also file a migration issue.
 @{
-    # All five entries below share a single migration blocker:
+    # The five Exceptions below share a single migration blocker:
     # the built-in rust runner has no output-inspection mode, so tests that
     # need to assert specific SAW script content (preconditions, return
     # adapters, struct bridges) cannot use it yet.  Once the rust runner
