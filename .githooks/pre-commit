@@ -3,9 +3,10 @@
 #
 # Runs:
 #   1. scripts/check-line-count.sh on staged source files (always).
-#   2. cargo fmt -- --check (matches CI; skip with SKIP_FMT=1).
-#   3. cargo clippy -- -D warnings (matches CI; skip with SKIP_CLIPPY=1).
-#   4. tests/e2e/Run-E2ETests.ps1, the end-to-end end-to-end test suite.
+#   2. scripts/check-no-custom-runners.sh (always).
+#   3. cargo fmt -- --check (matches CI; skip with SKIP_FMT=1).
+#   4. cargo clippy -- -D warnings (matches CI; skip with SKIP_CLIPPY=1).
+#   5. tests/e2e/Run-E2ETests.ps1, the end-to-end test suite.
 #      The runner auto-skips when SAW is not installed on the machine.
 #      Set SKIP_SAW_TESTS=1 in the environment to skip explicitly.
 #
@@ -28,7 +29,11 @@ if [ "${#staged[@]}" -gt 0 ]; then
     bash scripts/check-line-count.sh "${staged[@]}"
 fi
 
-# ── 2. rustfmt (matches CI: cargo fmt -- --check) ─────────────────────────
+# ── 2. No-custom-runner check ─────────────────────────────────────────────
+echo "pre-commit: running check-no-custom-runners"
+bash scripts/check-no-custom-runners.sh
+
+# ── 3. rustfmt (matches CI: cargo fmt -- --check) ─────────────────────────
 if [ "${SKIP_FMT:-0}" = "1" ]; then
     echo "pre-commit: SKIP_FMT=1 set; skipping rustfmt."
 elif ! command -v cargo >/dev/null 2>&1; then
@@ -38,7 +43,7 @@ else
     cargo fmt --all -- --check
 fi
 
-# ── 3. Clippy (matches CI: cargo clippy -- -D warnings) ───────────────────
+# ── 4. Clippy (matches CI: cargo clippy -- -D warnings) ───────────────────
 if [ "${SKIP_CLIPPY:-0}" = "1" ]; then
     echo "pre-commit: SKIP_CLIPPY=1 set; skipping clippy."
 elif ! command -v cargo >/dev/null 2>&1; then
@@ -48,7 +53,7 @@ else
     cargo clippy --quiet -- -D warnings
 fi
 
-# ── 4. end-to-end test suite (skippable) ─────────────────────────────────────────
+# ── 5. end-to-end test suite (skippable) ──────────────────────────────────
 if [ "${SKIP_SAW_TESTS:-0}" = "1" ]; then
     echo "pre-commit: SKIP_SAW_TESTS=1 set; skipping end-to-end test suite."
     exit 0

@@ -63,6 +63,15 @@ Add new cases by appending to
 [tests/e2e/README.md](tests/e2e/README.md) for the schema and tag list.
 Do not write a bespoke runner script.
 
+**No custom runners.** Do **not** add `Runner = 'custom'` or
+`Script = ...` entries to `cases.psd1`. Use only `cpp`, `rust`, or
+`equiv`. Extend a built-in runner if a capability is missing. CI
+enforces this with the `no-custom-runners` job; run locally with:
+
+```bash
+bash scripts/check-no-custom-runners.sh
+```
+
 ### Pre-commit hook
 
 ```powershell

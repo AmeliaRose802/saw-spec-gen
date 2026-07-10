@@ -77,6 +77,13 @@ jobs:
     - name: Enforce 500 non-whitespace line limit
       run: bash scripts/check-line-count.sh
 
+  no-custom-runners:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Reject custom-script E2E runners
+      run: bash scripts/check-no-custom-runners.sh
+
   e2e-tests-linux:
     # Runs inside a pre-baked image (built by publish-ci-image.yml) that
     # already contains SAW 1.5, LLVM 20.1.6, PowerShell 7, and Rust

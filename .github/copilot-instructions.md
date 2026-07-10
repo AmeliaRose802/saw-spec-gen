@@ -67,3 +67,23 @@ pwsh tests/e2e/Run-E2ETests.ps1 -List             # dry run
 When adding a new test, append an entry to
 [`tests/e2e/cases.psd1`](../tests/e2e/cases.psd1) — do not write a
 bespoke runner script.
+
+### No custom E2E runners
+
+**Do not** add `Runner = 'custom'` or `Script = ...` entries to
+`tests/e2e/cases.psd1`. Use only built-in runners: `cpp`, `rust`,
+`equiv`. If a built-in runner lacks a capability you need, extend the
+runner instead of wrapping a one-off script.
+
+CI enforces this policy via the `no-custom-runners` job
+(`bash scripts/check-no-custom-runners.sh`). Run it locally before
+pushing:
+
+```bash
+bash scripts/check-no-custom-runners.sh
+```
+
+Pre-existing exceptions are tracked in
+[`tests/e2e/custom-runner-allowlist.psd1`](../tests/e2e/custom-runner-allowlist.psd1)
+with an owner and expiry date. Do not add new entries to that file
+without filing a migration issue.

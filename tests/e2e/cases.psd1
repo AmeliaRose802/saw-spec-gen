@@ -2,15 +2,15 @@
 #
 # Every entry is one case the harness runs end-to-end. The runner
 # (Run-E2ETests.ps1) dispatches on `Runner`, executes the underlying
-# verify*.ps1 (or custom script), captures stdout, and matches against
-# `Expected`.
+# verify*.ps1, captures stdout, and matches against `Expected`.
 #
 # Common keys
 #   Tag       Group label (cpp_havoc, rust_havoc, bounded_loop, ...).
 #   Dir       Test-case directory, relative to repo root.
 #   Expected  One of VERIFIED | DISPROVED | UNKNOWN
 #                 |  EQUIVALENT | NOT EQUIVALENT.
-#   Runner    cpp | rust | equiv | custom
+#   Runner    cpp | rust | equiv
+#             (Runner='custom' and Script= are BANNED — see policy below)
 #
 # Convention defaults (override per-case as needed):
 #   Cry        = "add_one_spec.cry"
@@ -25,7 +25,16 @@
 #                        the SAT-solver meaning (SAT result = bug found,
 #                        UNSAT result = proof succeeded) and confusing.
 #
-# Custom-script runners pass Script + ScriptArgs verbatim.
+# ── Custom-runner policy ──────────────────────────────────────────────────
+# Runner='custom' and Script= entries are BANNED.  Use built-in runners
+# (cpp, rust, equiv) only.  If a capability is missing, extend the runner
+# rather than wrapping a bespoke script.
+#
+# Pre-existing exceptions are tracked in
+#   tests/e2e/custom-runner-allowlist.psd1
+# with an Owner and Expires date.  CI enforces the policy via
+#   bash scripts/check-no-custom-runners.sh
+# ─────────────────────────────────────────────────────────────────────────
 @{
     Cases = @(
         # ── C++ havoc tests (verify.ps1) ─────────────────────────────────────
