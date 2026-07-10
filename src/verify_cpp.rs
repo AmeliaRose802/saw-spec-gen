@@ -196,6 +196,10 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
     // verdict is never overridden.  Internal simulation errors that
     // surface alongside a `Counterexample` marker are not conclusive
     // and are also eligible for the retry.
+    //
+    // A result is conclusive when SAW is VERIFIED, or when it has a
+    // Counterexample that is NOT an internal simulation error (i.e. a
+    // real semantic counterexample to the proof obligation).
     let is_conclusive = saw_output.contains("VERIFIED")
         || (saw_output.contains("Counterexample") && !is_internal_simulation_error(&saw_output));
     if !is_conclusive && is_empty_struct_load_failure(&saw_output) {
@@ -347,16 +351,24 @@ fn is_empty_struct_load_failure(saw_output: &str) -> bool {
         || saw_output.contains("Unexpected zero-sized")
 }
 
+/// SAW transcript substring that identifies a subgoal failure caused by an
+/// internal simulation error (e.g. an unresolved STL accessor).
+const SAW_INTERNAL_ERROR_PATTERN: &str = "internal: error:";
+
+/// SAW transcript substring that identifies a symbolic memory-load failure.
+const SAW_MEMORY_LOAD_ERROR_PATTERN: &str = "Error during memory load";
+
 /// Returns `true` when the SAW transcript signals an internal simulation or
 /// memory-load error rather than a genuine semantic counterexample.  These
 /// appear as `Counterexample` sections in SAW output but are tooling failures
 /// (e.g. unresolved `std::optional` accessors under symbolic execution).
 ///
 /// Patterns matched:
-/// - `internal: error:` — SAW subgoal failure with an internal error message
-/// - `Error during memory load` — SAW failed to load through a symbolic pointer
+/// - [`SAW_INTERNAL_ERROR_PATTERN`] — SAW subgoal failure with an internal error message
+/// - [`SAW_MEMORY_LOAD_ERROR_PATTERN`] — SAW failed to load through a symbolic pointer
 fn is_internal_simulation_error(saw_output: &str) -> bool {
-    saw_output.contains("internal: error:") || saw_output.contains("Error during memory load")
+    saw_output.contains(SAW_INTERNAL_ERROR_PATTERN)
+        || saw_output.contains(SAW_MEMORY_LOAD_ERROR_PATTERN)
 }
 
 fn update_inventory(output_dir: &Path) -> Result<()> {
