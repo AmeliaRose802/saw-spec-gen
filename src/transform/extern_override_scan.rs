@@ -457,29 +457,29 @@ fn extract_return_type_token(prefix: &str) -> String {
 
 /// Split `s` on whitespace keeping bracket-enclosed spans as one token (depth only, no pair-check).
 fn split_bracket_tokens(s: &str) -> Vec<String> {
-    let (mut out, mut cur, mut depth) = (Vec::new(), String::new(), 0i32);
+    let (mut tokens, mut current_token, mut bracket_depth) = (Vec::new(), String::new(), 0i32);
     for b in s.bytes() {
         match b {
             b'[' | b'(' | b'{' | b'<' => {
-                depth += 1;
-                cur.push(b as char);
+                bracket_depth += 1;
+                current_token.push(b as char);
             }
             b']' | b')' | b'}' | b'>' => {
-                depth -= 1;
-                cur.push(b as char);
+                bracket_depth -= 1;
+                current_token.push(b as char);
             }
-            b' ' | b'\t' if depth == 0 => {
-                if !cur.is_empty() {
-                    out.push(std::mem::take(&mut cur));
+            b' ' | b'\t' if bracket_depth == 0 => {
+                if !current_token.is_empty() {
+                    tokens.push(std::mem::take(&mut current_token));
                 }
             }
-            _ => cur.push(b as char),
+            _ => current_token.push(b as char),
         }
     }
-    if !cur.is_empty() {
-        out.push(cur);
+    if !current_token.is_empty() {
+        tokens.push(current_token);
     }
-    out
+    tokens
 }
 
 fn extract_call_target(line: &str) -> Option<String> {
