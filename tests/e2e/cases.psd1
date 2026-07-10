@@ -552,7 +552,18 @@
            Script = 'tests/e2e/cases/12-aggregate-bridge/niche_enum_remap/Check-NicheEnumRemap.ps1';
            ScriptArgs = @{} }
 
-<<<<<<< HEAD
+        # sret sub-callee havoc (issue #68): gen-verify must include the
+        # hidden sret return-pointer in llvm_execute_func for external
+        # C++ sub-callees that return a struct by value.  wrap_canonicalize
+        # calls the sret sub-callee but ignores its return, so the result
+        # (x + 1) is fully deterministic and SAW-verifiable.
+        @{ Tag = 'aggregate_bridge'; Runner = 'cpp';
+           Dir = 'tests/e2e/cases/12-aggregate-bridge/sret_sub_callee_havoc';
+           File = 'sret_sub_callee_verified.cpp'; Expected = 'VERIFIED';
+           Cry = 'sret_sub_callee_spec.cry';
+           CryptolFn = 'wrap_canonicalize_spec';
+           Function = 'wrap_canonicalize' }
+
         # ── 13-msvc-string ───────────────────────────────────────────────────
         # Regression tests for the MSVC STL override return-type fix.
         # Each case assembles a pre-written LLVM IR file (no C++ compilation
@@ -574,18 +585,5 @@
            Dir = 'tests/e2e/cases/13-msvc-string/byte_array_return'
            File = 'byte_array_return.ll'
            Expected = 'VERIFIED' }
-=======
-        # sret sub-callee havoc (issue #68): gen-verify must include the
-        # hidden sret return-pointer in llvm_execute_func for external
-        # C++ sub-callees that return a struct by value.  wrap_canonicalize
-        # calls the sret sub-callee but ignores its return, so the result
-        # (x + 1) is fully deterministic and SAW-verifiable.
-        @{ Tag = 'aggregate_bridge'; Runner = 'cpp';
-           Dir = 'tests/e2e/cases/12-aggregate-bridge/sret_sub_callee_havoc';
-           File = 'sret_sub_callee_verified.cpp'; Expected = 'VERIFIED';
-           Cry = 'sret_sub_callee_spec.cry';
-           CryptolFn = 'wrap_canonicalize_spec';
-           Function = 'wrap_canonicalize' }
->>>>>>> origin/master
     )
 }
