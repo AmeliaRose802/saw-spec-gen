@@ -65,6 +65,9 @@ fn is_basic_string_alias(name: &str) -> bool {
         && !n.contains("basic_stringstream")
 }
 
+/// MSVC resize prefix: `resize(size_type, char)` IR always has (this*, i64, i8).
+const MSVC_RESIZE_PREFIX: &str = "?resize@?$basic_string@";
+
 /// Emit a SAW spec block + `llvm_unsafe_assume_spec` binding for one
 /// recognized basic_string method. `safe` is the sanitized identifier
 /// suffix used by [`super::bitcode_overrides::emit_one`] for the
@@ -113,11 +116,7 @@ pub fn emit_string_override(
         }
         StlMethod::BasicStringResize => {
             out.push_str("    n <- llvm_fresh_var \"n\" (llvm_int 64);\n");
-            // MSVC STL defines resize(size_type, char) with a defaulted
-            // char arg; clang fills the default at the call site, so the
-            // IR function always has three parameters (this*, i64, i8).
-            // Itanium ABI emits resize(size_type) without the char param.
-            if symbol.starts_with("?resize@?$basic_string@") {
+            if symbol.starts_with(MSVC_RESIZE_PREFIX) {
                 out.push_str("    ch <- llvm_fresh_var \"ch\" (llvm_int 8);\n");
                 out.push_str("    llvm_execute_func [s, llvm_term n, llvm_term ch];\n");
             } else {
