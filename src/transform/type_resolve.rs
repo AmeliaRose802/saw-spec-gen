@@ -38,10 +38,14 @@ pub fn needs_resolution(saw_type: &str) -> bool {
 ///   2. Strip `struct.` / `class.` / `union.` prefix, then match any IR
 ///      name whose own simple-name suffix equals the AST short name
 ///      (covers MSVC fully-qualified names like `struct.Foo::Bar::Baz`).
+///   3. Template-argument short-name match: compares `std::optional<T>`
+///      against `std::optional<ns::T>` by normalising every template
+///      argument to its last `::` component — handles the Itanium ABI
+///      case where the IR emits `class.std::optional<protocol::T>` while
+///      the AST qualType stores `std::optional<T>` without a namespace.
 ///
-/// Ambiguous suffix matches (two unrelated namespaces sharing the same
-/// final component) return None so the caller can warn rather than
-/// silently pick the wrong layout.
+/// Ambiguous matches (two candidates at any step) return None so the
+/// caller can warn rather than silently pick the wrong layout.
 fn resolve_via_ir(saw_type: &str, ir_sizes: &HashMap<String, usize>) -> Option<String> {
     if ir_sizes.is_empty() {
         return None;
@@ -80,7 +84,97 @@ fn resolve_via_ir(saw_type: &str, ir_sizes: &HashMap<String, usize>) -> Option<S
     if candidates.len() == 1 {
         return Some(format!("llvm_array {} (llvm_int 8)", candidates[0]));
     }
+
+    // 3. Template-argument short-name match.
+    //    Normalise all namespace prefixes in template arguments so that
+    //    `std::optional<EnrollmentKey>` matches
+    //    `std::optional<protocol::EnrollmentKey>` in the IR.
+    if name.contains('<') {
+        let name_norm = normalize_template_args(name);
+        let cands: Vec<usize> = ir_sizes
+            .iter()
+            .filter_map(|(k, v)| {
+                let k_simple = strip_prefix(k);
+                if k_simple.contains('<') && normalize_template_args(k_simple) == name_norm {
+                    Some(*v)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if cands.len() == 1 {
+            return Some(format!("llvm_array {} (llvm_int 8)", cands[0]));
+        }
+    }
+
     None
+}
+
+/// Return the last `::` component of a potentially namespace-qualified name.
+fn last_component(s: &str) -> &str {
+    s.rfind("::").map_or(s, |pos| &s[pos + 2..])
+}
+
+/// Normalise a template instantiation string by reducing each argument to
+/// its last `::` component.
+///
+/// Example: `std::optional<protocol::EnrollmentKey>` →
+///          `std::optional<EnrollmentKey>`
+///
+/// Nested templates are handled recursively: each argument may itself
+/// contain `<…>` and will be normalised in the same way.
+fn normalize_template_args(s: &str) -> String {
+    let Some(open) = s.find('<') else {
+        return s.to_string();
+    };
+    let base = &s[..open];
+    // Find the matching closing `>` for the outermost `<`.
+    let args_and_rest = &s[open + 1..];
+    let close = find_closing_angle(args_and_rest);
+    let args = &args_and_rest[..close];
+    // Split args at depth-0 commas.
+    let mut out_args: Vec<String> = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    for (i, c) in args.char_indices() {
+        match c {
+            '<' => depth += 1,
+            '>' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                out_args.push(normalize_one_arg(args[start..i].trim()));
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out_args.push(normalize_one_arg(args[start..].trim()));
+    format!("{}<{}>", base, out_args.join(", "))
+}
+
+/// Normalise a single template argument: if it contains `<`, recurse;
+/// otherwise strip its namespace prefix.
+fn normalize_one_arg(arg: &str) -> String {
+    if arg.contains('<') {
+        normalize_template_args(arg)
+    } else {
+        last_component(arg).to_string()
+    }
+}
+
+/// Return the index of the `>` that closes the outermost `<` whose
+/// contents are `s` (i.e. the `<` has already been consumed).
+/// Returns `s.len()` if no matching `>` is found.
+fn find_closing_angle(s: &str) -> usize {
+    let mut depth = 0usize;
+    for (i, c) in s.char_indices() {
+        match c {
+            '<' => depth += 1,
+            '>' if depth == 0 => return i,
+            '>' => depth -= 1,
+            _ => {}
+        }
+    }
+    s.len()
 }
 
 /// Resolve `saw_type` against the IR struct table, falling back to a
@@ -248,5 +342,61 @@ mod tests {
         let m: HashMap<String, usize> = HashMap::new();
         let out = resolve_saw_type("llvm_int 32", &m, Some(112));
         assert!(out.is_none());
+    }
+
+    #[test]
+    fn resolve_template_arg_namespace_mismatch_itanium() {
+        // Fix 3: Itanium ABI emits `class.std::optional<protocol::EnrollmentKey>`
+        // but the AST qualType is `std::optional<EnrollmentKey>`.
+        // Step 3 of resolve_via_ir must match after normalising template args.
+        let mut m = HashMap::new();
+        m.insert(
+            "class.std::optional<protocol::EnrollmentKey>".to_string(),
+            16usize,
+        );
+        let out = resolve_saw_type("llvm_alias \"std::optional<EnrollmentKey>\"", &m, None);
+        assert_eq!(
+            out.as_deref(),
+            Some("llvm_array 16 (llvm_int 8)"),
+            "template-arg namespace mismatch must still resolve"
+        );
+    }
+
+    #[test]
+    fn resolve_template_already_matches_without_normalise() {
+        // Exact match on `std::optional<EnrollmentKey>` (MSVC ABI — no
+        // namespace in template arg) — Step 1 handles this, Step 3 must
+        // not interfere.
+        let mut m = HashMap::new();
+        m.insert("std::optional<EnrollmentKey>".to_string(), 16usize);
+        let out = resolve_saw_type("llvm_alias \"std::optional<EnrollmentKey>\"", &m, None);
+        assert_eq!(out.as_deref(), Some("llvm_array 16 (llvm_int 8)"));
+    }
+
+    #[test]
+    fn normalize_template_args_strips_single_namespace() {
+        // Unit test for the helper — not exported but tested via resolve.
+        // Ensure `std::optional<ns::T>` → `std::optional<T>`.
+        let normalised = normalize_template_args("std::optional<protocol::EnrollmentKey>");
+        assert_eq!(normalised, "std::optional<EnrollmentKey>");
+    }
+
+    #[test]
+    fn normalize_template_args_handles_nested_templates() {
+        // `std::pair<ns::A, std::optional<ns::B>>` →
+        // `std::pair<A, std::optional<B>>`
+        let normalised = normalize_template_args("std::pair<ns::A, std::optional<ns::B>>");
+        assert_eq!(normalised, "std::pair<A, std::optional<B>>");
+    }
+
+    #[test]
+    fn resolve_template_arg_ambiguous_returns_none() {
+        // Two IR entries that both normalise to the same template — must
+        // return None (ambiguous), not pick one arbitrarily.
+        let mut m = HashMap::new();
+        m.insert("class.std::optional<ns1::T>".to_string(), 8usize);
+        m.insert("class.std::optional<ns2::T>".to_string(), 16usize);
+        let out = resolve_saw_type("llvm_alias \"std::optional<T>\"", &m, None);
+        assert!(out.is_none(), "ambiguous template match must return None");
     }
 }

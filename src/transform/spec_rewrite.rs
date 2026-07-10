@@ -25,6 +25,19 @@ pub use crate::alias_fallbacks::{collect_type_sizes, AliasFallbacks};
 use crate::type_resolve::resolve_via_ir_pub;
 use std::collections::{HashMap, HashSet};
 
+/// Returns true for STL template types whose internal libstdc++/MSVC
+/// layout is too complex for SAW to handle via `llvm_alias` — these
+/// are always converted to a byte-array regardless of whether the alias
+/// is resolvable in the IR symbol table.
+///
+/// SAW reports `unsupported type: %"std::optional<T>"` and similar
+/// errors for `std::optional` and `std::variant` even when the alias
+/// resolves: the internal payload/base chain contains anonymous unions
+/// and conditional types that SAW's symbolic evaluator cannot traverse.
+fn is_complex_stl_template(name: &str) -> bool {
+    name.starts_with("std::optional<") || name.starts_with("std::variant<")
+}
+
 /// Rewrite every `llvm_alias "X"` occurrence in `text` that's not
 /// resolvable through the IR struct table with the appropriate fallback:
 ///   - enums (`fallbacks.enum_bits` hit) → `llvm_int <bits>`
@@ -62,8 +75,18 @@ pub fn rewrite_unresolved_aliases(
             // Only fall through to the byte-array rewrite when the alias
             // needs *renaming* (suffix matching on a short C++ name → the
             // IR's fully-qualified `struct.Foo::Bar::Baz`).
-            if ir_sizes.contains_key(name) {
+            //
+            // Exception: complex STL templates like `std::optional<T>` and
+            // `std::variant<T…>` appear in the IR symbol table but SAW
+            // cannot handle their internal layout (anonymous union of
+            // payload/base types) — force byte-array conversion for these.
+            if ir_sizes.contains_key(name) && !is_complex_stl_template(name) {
                 out.push_str(&alias_text);
+            } else if let Some(&n) = ir_sizes.get(name) {
+                // Complex STL template with a known exact IR size: emit the
+                // byte-array form so SAW can allocate the right amount of
+                // memory without needing to understand the internal layout.
+                out.push_str(&format!("llvm_array {n} (llvm_int 8)"));
             } else if let Some(r) = resolve_via_ir_pub(&alias_text, ir_sizes) {
                 out.push_str(&r);
             } else if let Some(bits) = fallbacks.enum_bits.get(name) {
@@ -276,5 +299,56 @@ mod tests {
         let (out, unresolved) = rewrite_unresolved_aliases(input, &ir, &fb);
         assert_eq!(out, input);
         assert!(unresolved.is_empty());
+    }
+
+    #[test]
+    fn rewrite_converts_std_optional_exact_ir_match_to_byte_array() {
+        // Fix 2: `std::optional<T>` appears in the IR table (MSVC ABI —
+        // exact name match) but SAW cannot handle its internal layout.
+        // The rewriter must convert it to `llvm_array N (llvm_int 8)`
+        // rather than keeping the alias verbatim.
+        let mut ir: HashMap<String, usize> = HashMap::new();
+        ir.insert("std::optional<EnrollmentKey>".into(), 16);
+        let fb = AliasFallbacks::default();
+        let input = "ret <- llvm_alloc (llvm_alias \"std::optional<EnrollmentKey>\");";
+        let (out, unresolved) = rewrite_unresolved_aliases(input, &ir, &fb);
+        assert!(
+            out.contains("llvm_array 16 (llvm_int 8)"),
+            "expected byte-array for complex STL template; got: {out}"
+        );
+        assert!(
+            !out.contains("llvm_alias"),
+            "alias must not be preserved for complex STL template; got: {out}"
+        );
+        assert!(unresolved.is_empty());
+    }
+
+    #[test]
+    fn rewrite_converts_std_variant_exact_ir_match_to_byte_array() {
+        // `std::variant<T…>` has the same SAW layout unsupported issue.
+        let mut ir: HashMap<String, usize> = HashMap::new();
+        ir.insert("std::variant<int, double>".into(), 12);
+        let fb = AliasFallbacks::default();
+        let input = "v <- llvm_alloc (llvm_alias \"std::variant<int, double>\");";
+        let (out, _) = rewrite_unresolved_aliases(input, &ir, &fb);
+        assert!(out.contains("llvm_array 12 (llvm_int 8)"), "got: {out}");
+    }
+
+    #[test]
+    fn rewrite_still_preserves_non_stl_exact_ir_match() {
+        // Regression guard: non-STL user-defined structs with an exact IR
+        // match should still be preserved as aliases.
+        let mut ir: HashMap<String, usize> = HashMap::new();
+        ir.insert("struct.UserDefined".into(), 48);
+        let fb = AliasFallbacks::default();
+        let (out, _) = rewrite_unresolved_aliases(
+            "x <- llvm_alloc (llvm_alias \"struct.UserDefined\");",
+            &ir,
+            &fb,
+        );
+        assert!(
+            out.contains("llvm_alias \"struct.UserDefined\""),
+            "non-STL exact IR match should remain as alias; got: {out}"
+        );
     }
 }

@@ -14,25 +14,12 @@ use std::collections::HashMap;
 /// Merge LLVM IR-derived `dereferenceable(N)` annotations into `fb`.
 ///
 /// Runs two passes:
-///
-///   1. **AST-matched merge** — for each AST function we look up the
-///      matching IR function by mangled name and copy each IR
-///      parameter's deref size onto the AST param's pointee type name.
-///      Sret slot deref → AST return type's name.  This is the most
-///      precise mapping (one AST type name per IR param).
-///   2. **IR-only fallback** — for every IR parameter whose pointee
-///      type is itself a known struct in the IR struct table, we
-///      attribute the deref directly to the struct's short name (the
-///      C++ class name, stripped of namespaces).  Catches:
-///        - Virtual interface methods that the AST records under a
-///          different mangled name than the IR uses for the same
-///          symbol (rare but happens with MSVC vtable thunks).
-///        - Functions where the AST's `parentDeclContextId` resolution
-///          failed and the mangled name on the AST node doesn't match
-///          the IR's `define`/`declare` line exactly.
-///        - sret return slots of `std::tuple<…>` whose IR struct name
-///          gets sufficient size info via the deref attribute even when
-///          the AST function isn't found.
+///   1. **AST-matched** — matches AST function by mangled name to IR
+///      function, copying each IR param's deref/sret struct size onto the
+///      AST param's pointee type name.
+///   2. **IR-only fallback** — for every IR parameter whose pointee type
+///      is a known struct, attributes the deref/struct size directly to the
+///      struct's C++ name (stripped of namespaces).
 pub fn add_ir_deref_fallbacks(
     fb: &mut AliasFallbacks,
     ast_funcs: &[FunctionInfo],
@@ -64,7 +51,13 @@ fn merge_via_ast_match(
 
         if sret_offset == 1 {
             if let (Some(sret), Some(name)) = (ir.params.first(), pointee_name(&ast.return_type)) {
-                if let Some(n) = deref_annotation(&sret.annotations) {
+                // Primary: use `dereferenceable(N)` from the IR sret slot.
+                // Fallback: use the byte size the IR type-parser computed
+                // from the pointee struct layout (common for `std::optional<T>`
+                // and other aggregate returns where clang omits `dereferenceable`).
+                let n =
+                    deref_annotation(&sret.annotations).or_else(|| struct_size_from_ty(&sret.ty));
+                if let Some(n) = n {
                     fb.insert_bytes(name, n);
                 }
             }
@@ -122,20 +115,48 @@ fn find_ir_match<'a>(
     }
 }
 
-/// Pass 2: attribute IR deref sizes to the IR pointee's short name
-/// directly, ignoring AST matching entirely.
+/// Extract the byte size of the struct/opaque type that `ty` points to.
 ///
-/// LLVM IR carries the struct name on `sret(%struct.Foo::Bar::X)`
-/// attributes and (when not lowered to opaque `ptr`) on the type-string
-/// of struct-typed parameters.  We record the deref size under both
-/// the *fully-qualified* C++ name (with namespaces, matching e.g.
-/// `std::tuple<…>`) and the short last-component name (matching e.g.
-/// `HttpRequest` after the rewriter's suffix-strip) — the rewriter
-/// looks up whichever form `type_to_saw` happened to emit.
+/// Used as a fallback size source for sret parameters that lack an
+/// explicit `dereferenceable(N)` annotation — the IR type-parser
+/// already computed the struct layout, so we can lift it directly.
+fn struct_size_from_ty(ty: &TypeInfo) -> Option<usize> {
+    let inner = match ty {
+        TypeInfo::Pointer(inner) => inner.as_ref(),
+        other => other,
+    };
+    match inner {
+        TypeInfo::Struct {
+            size_bytes: Some(n),
+            ..
+        } if *n > 0 => Some(*n),
+        TypeInfo::Opaque { size_bytes: n, .. } if *n > 0 => Some(*n),
+        _ => None,
+    }
+}
+
+/// Pass 2: attribute IR deref/struct sizes to the IR pointee's C++ name,
+/// ignoring AST matching entirely.
+///
+/// Records both the fully-qualified name (`std::tuple<…>` after stripping
+/// `struct.`/`class.`) and the short last-component name (`HttpRequest`),
+/// since the rewriter looks up whichever form `type_to_saw` emitted.
+///
+/// For sret params without `dereferenceable(N)` (common for aggregate
+/// returns like `std::optional<T>`), falls back to the byte size the IR
+/// type-parser computed from the struct layout.
 fn merge_via_ir_only(fb: &mut AliasFallbacks, ir_funcs: &[FunctionInfo]) {
     for ir in ir_funcs {
         for p in &ir.params {
-            let Some(n) = deref_annotation(&p.annotations) else {
+            let deref = deref_annotation(&p.annotations);
+            // Sret params without `dereferenceable`: fall back to the
+            // struct size the IR type-parser computed from the layout.
+            let sret_struct_size = if deref.is_none() && is_sret_param(&p.annotations) {
+                struct_size_from_ty(&p.ty)
+            } else {
+                None
+            };
+            let Some(n) = deref.or(sret_struct_size) else {
                 continue;
             };
             for key in ir_pointee_name_variants(&p.ty) {
@@ -434,5 +455,66 @@ mod tests {
         add_ir_deref_fallbacks(&mut fb, &[], &[ir]);
         let expected = "std::tuple<KeyStoreOperationResult, LatchableKey>";
         assert_eq!(fb.bytes.get(expected).copied(), Some(48));
+    }
+
+    #[test]
+    fn sret_without_dereferenceable_uses_struct_type_size_ast_match() {
+        // When the sret IR param carries no `dereferenceable(N)`, the AST-matched
+        // merge must fall back to the byte size in the sret TypeInfo (Fix 1a).
+        let ast = ast_func(
+            "_ZN8KeyStore7currentEv",
+            vec![],
+            TypeInfo::Struct {
+                name: "std::optional<EnrollmentKey>".into(),
+                size_bytes: None,
+                fields: vec![],
+            },
+        );
+        let ir = ir_func(
+            "_ZN8KeyStore7currentEv",
+            vec![ir_param(
+                TypeInfo::Pointer(Box::new(TypeInfo::Struct {
+                    name: "class.std::optional<protocol::EnrollmentKey>".into(),
+                    size_bytes: Some(16),
+                    fields: vec![],
+                })),
+                None, // no dereferenceable annotation
+                true,
+            )],
+            TypeInfo::Void,
+        );
+        let mut fb = AliasFallbacks::default();
+        add_ir_deref_fallbacks(&mut fb, &[ast], &[ir]);
+        assert_eq!(
+            fb.bytes.get("std::optional<EnrollmentKey>").copied(),
+            Some(16)
+        );
+    }
+
+    #[test]
+    fn sret_without_dereferenceable_uses_struct_type_size_ir_only() {
+        // No AST match: IR-only pass must use TypeInfo size for sret without
+        // dereferenceable annotation (Fix 1b).
+        let ir = ir_func(
+            "_ZN8KeyStore7currentEv",
+            vec![ir_param(
+                TypeInfo::Pointer(Box::new(TypeInfo::Struct {
+                    name: "class.std::optional<protocol::EnrollmentKey>".into(),
+                    size_bytes: Some(16),
+                    fields: vec![],
+                })),
+                None, // no dereferenceable annotation
+                true,
+            )],
+            TypeInfo::Void,
+        );
+        let mut fb = AliasFallbacks::default();
+        add_ir_deref_fallbacks(&mut fb, &[], &[ir]);
+        assert_eq!(
+            fb.bytes
+                .get("std::optional<protocol::EnrollmentKey>")
+                .copied(),
+            Some(16)
+        );
     }
 }
