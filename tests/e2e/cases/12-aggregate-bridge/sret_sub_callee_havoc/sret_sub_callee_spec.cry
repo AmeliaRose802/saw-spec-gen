@@ -1,0 +1,8 @@
+module sret_sub_callee_spec where
+
+// Spec for wrap_canonicalize: calls an sret sub-callee (canonicalize)
+// but ignores the struct return value, always returning x + 1.
+// The sub-callee gets an adversarial (havoc) spec, so x + 1 is
+// the only observable behaviour of the wrapper function.
+wrap_canonicalize_spec : [32] -> [32]
+wrap_canonicalize_spec x = x + 1
