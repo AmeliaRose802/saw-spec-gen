@@ -87,6 +87,11 @@ fn correct_sret_from_ir_detects_sret_when_ast_missed_typedef() {
     let mangled = "?hmac_sha256@crypto@@YA?AVHmacDigest@@V?$span@E@std@@@Z";
     // Opaque with a plain alias name – no `<` or `::`, so AST heuristic
     // leaves is_sret = false.
+    //
+    // size_bytes: 0 is intentional: if the AST knew the size was > 8 it
+    // would classify the return as sret on its own.  The bug scenario is
+    // specifically when the typedef name is opaque and the size is unknown
+    // (0), so the AST heuristic misses the sret ABI lowering.
     let ast_ret = TypeInfo::Opaque {
         name: "HmacDigest".into(),
         size_bytes: 0,
@@ -135,6 +140,9 @@ fn correct_sret_from_ir_no_sret_in_ir_leaves_false() {
 #[test]
 fn correct_sret_from_ir_no_ir_match_leaves_typedef_false() {
     let mangled = "?doThing@@YAVResult@@XZ";
+    // size_bytes: 0 is intentional: this tests that when there is no
+    // matching IR function, the spec is left unchanged even for a
+    // typedef-aliased return type that the AST could not size.
     let ast_ret = TypeInfo::Opaque {
         name: "Result".into(),
         size_bytes: 0,
