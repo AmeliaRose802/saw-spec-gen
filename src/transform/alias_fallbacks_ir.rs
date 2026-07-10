@@ -8,7 +8,7 @@
 //! that the rewriter looks up.
 
 use crate::alias_fallbacks::{deref_annotation, pointee_name, AliasFallbacks};
-use crate::constraints::{Annotation, FunctionInfo, TypeInfo};
+use crate::constraints::{Annotation, FunctionInfo, Mutability, ParamInfo, TypeInfo};
 use std::collections::HashMap;
 
 /// Merge LLVM IR-derived `dereferenceable(N)` annotations into `fb`.
@@ -45,7 +45,7 @@ fn merge_via_ast_match(
         };
 
         let sret_offset = match ir.params.first() {
-            Some(p) if is_sret_param(&p.annotations) => 1,
+            Some(p) if is_sret_param(p) => 1,
             _ => 0,
         };
 
@@ -151,7 +151,7 @@ fn merge_via_ir_only(fb: &mut AliasFallbacks, ir_funcs: &[FunctionInfo]) {
             let deref = deref_annotation(&p.annotations);
             // Sret params without `dereferenceable`: fall back to the
             // struct size the IR type-parser computed from the layout.
-            let sret_struct_size = if deref.is_none() && is_sret_param(&p.annotations) {
+            let sret_struct_size = if deref.is_none() && is_sret_param(p) {
                 struct_size_from_ty(&p.ty)
             } else {
                 None
@@ -199,10 +199,14 @@ fn ir_pointee_name_variants(ty: &TypeInfo) -> Vec<&str> {
     }
 }
 
-/// True when the annotation list contains the IR parser's `sret` marker.
-fn is_sret_param(anns: &[Annotation]) -> bool {
-    anns.iter()
-        .any(|a| matches!(a, Annotation::Custom(s) if s == "sret"))
+/// True when the param is a hidden sret return slot.
+/// `extract_sret` sets `Mutability::WriteOnly` and strips the `sret`
+/// annotation — check both to cover hand-crafted test `ParamInfo` too.
+fn is_sret_param(p: &ParamInfo) -> bool {
+    p.mutability == Mutability::WriteOnly
+        || p.annotations
+            .iter()
+            .any(|a| matches!(a, Annotation::Custom(s) if s == "sret"))
 }
 
 #[cfg(test)]
@@ -244,8 +248,6 @@ mod tests {
         f
     }
 
-    /// LLVM IR functions are keyed by mangled symbol — `parse_ir_function`
-    /// puts the mangled name into `FunctionInfo.name`.
     fn ir_func(mangled: &str, params: Vec<ParamInfo>, ret: TypeInfo) -> FunctionInfo {
         let mut f = empty_func();
         f.name = mangled.into();
@@ -259,13 +261,16 @@ mod tests {
         if let Some(n) = deref {
             anns.push(Annotation::Dereferenceable(n));
         }
-        if sret {
-            anns.push(Annotation::Custom("sret".into()));
-        }
+        // Mirrors extract_sret: sret → WriteOnly, annotation stripped.
+        let mutability = if sret {
+            Mutability::WriteOnly
+        } else {
+            Mutability::Mutable
+        };
         ParamInfo {
             name: String::new(),
             ty,
-            mutability: Mutability::Mutable,
+            mutability,
             nullable: Nullability::NonNull,
             annotations: anns,
         }

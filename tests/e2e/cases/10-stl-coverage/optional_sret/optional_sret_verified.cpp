@@ -1,13 +1,16 @@
 /*
  * E2E regression: std::optional<T> return type alias / layout resolution.
  *
- * get_key() returns std::optional<proto::Key> via sret (the type is too
- * large to fit in a register, so clang emits a hidden out-pointer).
+ * get_key() returns std::optional<proto::Key> via sret (the struct is 16
+ * bytes, so std::optional<proto::Key> is 20 bytes — above the 16-byte
+ * register-return threshold on x86-64 Itanium ABI).
  * Three pipeline fixes land together to make this verifiable:
  *
  *   Fix 1 (alias_fallbacks_ir.rs):
  *     Clang omits dereferenceable(N) on output-only sret slots. The
  *     fallback now reads the byte size from the struct's TypeInfo layout.
+ *     Previously is_sret_param() checked for the "sret" annotation that
+ *     extract_sret() had already stripped; it now checks Mutability::WriteOnly.
  *
  *   Fix 2 (spec_rewrite.rs — is_complex_stl_template):
  *     std::optional<T> appears in the IR symbol table (MSVC ABI) but SAW
@@ -29,9 +32,13 @@
 #include <optional>
 
 namespace proto {
+    // 16 bytes: large enough that std::optional<Key> (~20 bytes) is
+    // returned via a hidden sret pointer on x86-64 (threshold is 16 bytes).
     struct Key {
         uint32_t id;
         uint32_t flags;
+        uint32_t version;
+        uint32_t reserved;
     };
 }  // namespace proto
 
@@ -40,5 +47,5 @@ std::optional<proto::Key> get_key(uint32_t id) {
     if (id == 0) {
         return std::nullopt;
     }
-    return proto::Key{id, 1u};
+    return proto::Key{id, 1u, 0u, 0u};
 }
