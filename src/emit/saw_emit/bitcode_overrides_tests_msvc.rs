@@ -2,6 +2,10 @@
 //! to keep `bitcode_overrides_tests.rs` under the 500 NWS-line limit.
 
 use super::super::*;
+use crate::emit::saw_emit::bitcode_overrides_functional::StlMethod;
+use crate::emit::saw_emit::bitcode_overrides_functional_string::{
+    emit_string_override, StringLayout,
+};
 use crate::transform::extern_override_scan::BrokenReason;
 
 #[test]
@@ -20,4 +24,25 @@ fn msvc_mutex_helper_pins_noop_bool_return() {
     let out = emit_overrides(&[t], &[], &[], &Default::default());
     let snip = &out.snippet;
     assert!(snip.contains("{{ 1 : [1] }}") && snip.contains("[msvc-mutex-helper]"));
+}
+
+#[test]
+fn msvc_resize_emits_char_param() {
+    // MSVC resize(size_t, char) — third param is the defaulted char.
+    let layout = StringLayout {
+        alias: "class.std::basic_string".to_string(),
+        size_field_index: 1,
+    };
+    let sym = "?resize@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAAX_KD@Z";
+    let mut out = String::new();
+    emit_string_override(
+        &mut out,
+        StlMethod::BasicStringResize,
+        &layout,
+        sym,
+        "rv",
+        "ov_rv",
+    );
+    assert!(out.contains("llvm_fresh_var \"ch\" (llvm_int 8)"));
+    assert!(out.contains("llvm_execute_func [s, llvm_term n, llvm_term ch]"));
 }

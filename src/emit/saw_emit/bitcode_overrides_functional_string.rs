@@ -113,7 +113,16 @@ pub fn emit_string_override(
         }
         StlMethod::BasicStringResize => {
             out.push_str("    n <- llvm_fresh_var \"n\" (llvm_int 64);\n");
-            out.push_str("    llvm_execute_func [s, llvm_term n];\n");
+            // MSVC STL defines resize(size_type, char) with a defaulted
+            // char arg; clang fills the default at the call site, so the
+            // IR function always has three parameters (this*, i64, i8).
+            // Itanium ABI emits resize(size_type) without the char param.
+            if symbol.starts_with("?resize@?$basic_string@") {
+                out.push_str("    ch <- llvm_fresh_var \"ch\" (llvm_int 8);\n");
+                out.push_str("    llvm_execute_func [s, llvm_term n, llvm_term ch];\n");
+            } else {
+                out.push_str("    llvm_execute_func [s, llvm_term n];\n");
+            }
             out.push_str(&format!(
                 "    llvm_points_to (llvm_elem s {idx}) (llvm_term n);\n",
             ));
