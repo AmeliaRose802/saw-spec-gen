@@ -515,3 +515,12 @@ fn ordinary_int_return_is_not_pinned() {
     );
     assert!(!out.snippet.contains("_Thrd_success"));
 }
+
+#[test]
+fn byte_array_return_emits_llvm_array_fresh_var() {
+    let t = target("f", &[], "[16 x i8]", false, BrokenReason::DeclareOnly);
+    let out = emit_overrides(&[t], &[], &[], &Default::default());
+    assert!(out
+        .snippet
+        .contains("llvm_fresh_var \"rv\" (llvm_array 16 (llvm_int 8))"));
+}

@@ -52,10 +52,15 @@ pub fn discover_string_layout(struct_defs: &HashMap<String, IrStructDef>) -> Opt
 
 fn is_basic_string_alias(name: &str) -> bool {
     let n = name;
+    // On GCC/Clang the LLVM type is `class.std::__cxx11::basic_string` (no
+    // template args in the name). On MSVC the full template is spelled out:
+    // `class.std::basic_string<char,struct std::char_traits<char>,...>`.
+    // Both contain `basic_string`; neither contains `_Alloc_hider` or the
+    // streaming variants. We no longer exclude `char_traits` here because the
+    // MSVC full-template name naturally includes it as a template argument.
     (n.starts_with("class.std::") || n.starts_with("class.std."))
         && n.contains("basic_string")
         && !n.contains("_Alloc_hider")
-        && !n.contains("char_traits")
         && !n.contains("basic_stringbuf")
         && !n.contains("basic_stringstream")
 }

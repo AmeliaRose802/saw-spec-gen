@@ -393,7 +393,10 @@ fn leading_type_token(p: &str) -> String {
 
 fn extract_return_type_token(prefix: &str) -> String {
     // Walk tokens right-to-left; the return type is the last token that
-    // isn't a known keyword.
+    // isn't a known keyword.  We use a bracket-aware splitter so that
+    // compound LLVM types such as `[16 x i8]` or `{ i64, ptr }` are
+    // treated as a single token rather than being torn apart by the
+    // space between `[16`, `x`, and `i8]`.
     let known = [
         "define",
         "declare",
@@ -431,14 +434,14 @@ fn extract_return_type_token(prefix: &str) -> String {
         "zeroext",
         "signext",
     ];
-    let tokens: Vec<&str> = prefix.split_whitespace().collect();
+    let tokens = split_bracket_tokens(prefix);
     for t in tokens.iter().rev() {
         // Calling conventions can also appear as `cc 10` etc. Skip
         // bare numbers.
         if t.parse::<i64>().is_ok() {
             continue;
         }
-        if known.contains(t) {
+        if known.contains(&t.as_str()) {
             continue;
         }
         if t.starts_with("alignstack")
@@ -447,9 +450,36 @@ fn extract_return_type_token(prefix: &str) -> String {
         {
             continue;
         }
-        return t.to_string();
+        return t.clone();
     }
     "void".to_string()
+}
+
+/// Split `s` on whitespace, keeping bracket-enclosed spans as one token.
+fn split_bracket_tokens(s: &str) -> Vec<String> {
+    let (mut out, mut cur, mut depth) = (Vec::new(), String::new(), 0i32);
+    for b in s.bytes() {
+        match b {
+            b'[' | b'(' | b'{' | b'<' => {
+                depth += 1;
+                cur.push(b as char);
+            }
+            b']' | b')' | b'}' | b'>' => {
+                depth -= 1;
+                cur.push(b as char);
+            }
+            b' ' | b'\t' if depth == 0 => {
+                if !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                }
+            }
+            _ => cur.push(b as char),
+        }
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
 }
 
 fn extract_call_target(line: &str) -> Option<String> {
