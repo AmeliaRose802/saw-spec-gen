@@ -46,10 +46,15 @@ pub struct VerifyArgs {
     /// Extra raw argv elements appended to the internal `gen-verify`
     /// invocation. Use for buffer overrides and other advanced flags
     /// without the outer `verify` subcommand needing to understand them.
+    /// `allow_hyphen_values` + single-value `num_args` let each
+    /// occurrence carry a value that itself starts with `--` (e.g.
+    /// `--extra-spec-gen-arg --in-buffer-size`) without clap mistaking
+    /// it for an unknown flag.
     #[arg(
         long = "extra-spec-gen-arg",
-        num_args = 0..,
-        action = clap::ArgAction::Append
+        num_args = 1,
+        action = clap::ArgAction::Append,
+        allow_hyphen_values = true
     )]
     pub extra_spec_gen_args: Vec<String>,
 

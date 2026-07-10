@@ -233,21 +233,23 @@
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/user_variadic';           File = 'bump_with_log_verified.cpp'; Cry = 'bump_with_log_spec.cry'; CryptolFn = 'bump_with_log_spec'; Function = 'bump_with_log'; Expected = 'VERIFIED'  }
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/variadic_clobber';        File = 'add_one_disproved.cpp';      Cry = 'add_one_spec.cry';       CryptolFn = 'add_one_spec';       Function = 'add_one_disproved';       Expected = 'DISPROVED' }
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/variadic_global_clobber'; File = 'add_one_disproved.cpp';      Cry = 'add_one_spec.cry';       CryptolFn = 'add_one_spec';       Function = 'add_one_disproved';       Expected = 'DISPROVED' }
-        # Mutex success-sentinel: `_Mtx_lock`/`_Mtx_unlock` are declare-only
-        # `_Thrd_result` primitives whose override pins the `_Thrd_success` (0)
-        # sentinel instead of a fresh return. The verified case only proves
-        # because the spurious lock-failure branch is dead; the disproved case
-        # shows the pin still lets a genuine off-by-one bug surface.
+        # Mutex success-sentinel: `_Mtx_lock`/`_Mtx_unlock` (MSVC) and
+        # `pthread_mutex_lock`/`pthread_mutex_unlock` (libstdc++) are
+        # declare-only status primitives whose override pins the success
+        # sentinel (0) instead of a fresh return. The verified case only
+        # proves because the spurious lock-failure branch is dead; the
+        # disproved case shows the pin still lets a genuine off-by-one bug
+        # surface. Verifies identically on Windows and Linux.
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/mutex_sentinel';          File = 'guarded_add_verified.cpp';   Cry = 'guarded_add_spec.cry';   CryptolFn = 'guarded_add_spec';   Function = 'guarded_add';             Expected = 'VERIFIED'  }
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/mutex_sentinel';          File = 'guarded_add_disproved.cpp';  Cry = 'guarded_add_spec.cry';   CryptolFn = 'guarded_add_spec';   Function = 'guarded_add_disproved';   Expected = 'DISPROVED' }
-        # MSVC _Mutex_base::_Verify_ownership_levels no-op override (bd issue #65).
-        # This defined-in-module helper performs typed field reads on the mutex
-        # struct. Before the MsvcMutexHelper fix, extern_override_scan skipped
-        # it and SAW failed with "Error during memory load" when inlining its
-        # body against a symbolically-allocated struct. With the fix it is
-        # detected via the _Verify_ownership_levels substring pattern (fires on
-        # both MSVC and GCC/Clang mangled names) and overridden as a no-op
-        # returning {{ 1 : [1] }} (ownership always valid in sequential proofs).
+        # Recursive-mutex helper override (bd issue #65), verified on BOTH
+        # toolchains against a real std::recursive_mutex. On MSVC the
+        # linkonce_odr std::_Mutex_base helpers (e.g. _Verify_ownership_levels)
+        # do typed field reads that SAW cannot load, so they are classified
+        # MsvcMutexHelper and overridden as no-ops. On libstdc++ the guard
+        # lowers to declare-only pthread_mutex_lock/unlock, pinned to the
+        # POSIX success sentinel. Either way the guarded x+1 body VERIFIES and
+        # the x+2 companion DISPROVES -- the override never masks a real bug.
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/msvc_mutex_helper'; File = 'ownership_check_verified.cpp';  Cry = 'ownership_check_spec.cry'; CryptolFn = 'ownership_check_spec'; Function = 'ownership_check';           Expected = 'VERIFIED'  }
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/msvc_mutex_helper'; File = 'ownership_check_disproved.cpp'; Cry = 'ownership_check_spec.cry'; CryptolFn = 'ownership_check_spec'; Function = 'ownership_check_disproved'; Expected = 'DISPROVED' }
 

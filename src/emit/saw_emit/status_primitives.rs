@@ -16,25 +16,58 @@
 /// Success-sentinel return value for a known threading status
 /// primitive, or `None` for any other symbol.
 ///
-/// MSVC/UCRT mutex primitives report `_Thrd_result`, whose success
-/// value `_Thrd_success` is `0`. In a lock-guarded body these land in
-/// the override set on every path (`std::scoped_lock` → `mutex::lock()`
-/// → `_Mtx_lock`), and a fresh-symbolic return lets the solver choose a
-/// failure code, sending `_Mutex_base::lock` down its `_Throw_Cpp_error`
-/// → `unreachable` path so the subgoal fails. Since SAW verifies the
-/// *sequential* transition (concurrency is out of scope), an
-/// uncontended lock/unlock/init/destroy always succeeds, so pinning `0`
-/// is sound for these.
+/// Both major C++ standard libraries lower a lock guard to a status-
+/// returning C primitive that a sequential proof must treat as always
+/// succeeding:
 ///
-/// Curated, not heuristic: only the mutex family that unconditionally
-/// returns `_Thrd_success` in a well-formed sequential program is
-/// matched, by exact symbol name. `_Mtx_trylock` is intentionally
-/// excluded — it has a legitimate `_Thrd_busy` return that pinning
-/// success would silently erase.
+///   * **MSVC/UCRT** report `_Thrd_result`, whose success value
+///     `_Thrd_success` is `0` (`std::scoped_lock` → `mutex::lock()` →
+///     `_Mtx_lock`).
+///   * **libstdc++/glibc** call the POSIX `pthread_mutex_*` primitives,
+///     whose success return is likewise `0` (`std::lock_guard` →
+///     `mutex::lock()` → `__gthread_mutex_lock` → `pthread_mutex_lock`).
+///     The libstdc++ gthr-posix layer may reference these either
+///     directly or through a `__gthrw_`-prefixed weakref alias, so the
+///     prefix is stripped before matching.
+///
+/// A fresh-symbolic return lets the solver choose a failure code,
+/// sending `mutex::lock` down its throw path (`_Throw_Cpp_error` /
+/// `__throw_system_error` → `unreachable`) so the subgoal fails. Since
+/// SAW verifies the *sequential* transition (concurrency is out of
+/// scope), an uncontended lock/unlock/init/destroy always succeeds, so
+/// pinning `0` is sound on both toolchains. This keeps the mutex e2e
+/// contract identical cross-platform: the same guarded body verifies on
+/// Windows and Linux, each through its own real STL primitives.
+///
+/// Curated, not heuristic: only the mutex families that unconditionally
+/// return success in a well-formed sequential program are matched, by
+/// exact symbol name. The `trylock` variants (`_Mtx_trylock`,
+/// `pthread_mutex_trylock`) are intentionally excluded — each has a
+/// legitimate busy return (`_Thrd_busy` / `EBUSY`) that pinning success
+/// would silently erase.
 pub fn success_sentinel(symbol: &str) -> Option<i64> {
-    const SUCCESS_SENTINEL_PRIMITIVES: &[&str] =
+    // MSVC/UCRT `_Thrd_result` mutex primitives (exact symbol match).
+    const MSVC_MUTEX_PRIMITIVES: &[&str] =
         &["_Mtx_lock", "_Mtx_unlock", "_Mtx_init", "_Mtx_destroy"];
-    SUCCESS_SENTINEL_PRIMITIVES.contains(&symbol).then_some(0)
+    if MSVC_MUTEX_PRIMITIVES.contains(&symbol) {
+        return Some(0);
+    }
+
+    // POSIX `pthread_mutex_*` primitives (libstdc++/glibc). libstdc++
+    // may call these directly or via a `__gthrw_pthread_mutex_*`
+    // weakref alias, so strip that prefix before matching.
+    const POSIX_MUTEX_PRIMITIVES: &[&str] = &[
+        "pthread_mutex_lock",
+        "pthread_mutex_unlock",
+        "pthread_mutex_init",
+        "pthread_mutex_destroy",
+    ];
+    let base = symbol.strip_prefix("__gthrw_").unwrap_or(symbol);
+    if POSIX_MUTEX_PRIMITIVES.contains(&base) {
+        return Some(0);
+    }
+
+    None
 }
 
 /// Substring patterns that identify MSVC `std::_Mutex_base` internal helpers.
@@ -93,8 +126,38 @@ mod tests {
     }
 
     #[test]
+    fn pins_posix_pthread_mutex_family() {
+        // libstdc++/glibc lock guards call these; success == 0.
+        for sym in [
+            "pthread_mutex_lock",
+            "pthread_mutex_unlock",
+            "pthread_mutex_init",
+            "pthread_mutex_destroy",
+        ] {
+            assert_eq!(success_sentinel(sym), Some(0), "{sym} should pin 0");
+        }
+    }
+
+    #[test]
+    fn pins_gthrw_weakref_pthread_mutex_family() {
+        // libstdc++ gthr-posix references the primitives through a
+        // `__gthrw_`-prefixed weakref alias — the prefix is stripped.
+        for sym in [
+            "__gthrw_pthread_mutex_lock",
+            "__gthrw_pthread_mutex_unlock",
+            "__gthrw_pthread_mutex_init",
+            "__gthrw_pthread_mutex_destroy",
+        ] {
+            assert_eq!(success_sentinel(sym), Some(0), "{sym} should pin 0");
+        }
+    }
+
+    #[test]
     fn trylock_is_excluded() {
+        // Both toolchains: trylock has a legitimate busy return.
         assert_eq!(success_sentinel("_Mtx_trylock"), None);
+        assert_eq!(success_sentinel("pthread_mutex_trylock"), None);
+        assert_eq!(success_sentinel("__gthrw_pthread_mutex_trylock"), None);
     }
 
     #[test]

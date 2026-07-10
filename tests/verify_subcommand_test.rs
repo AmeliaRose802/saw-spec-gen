@@ -238,170 +238,19 @@ EOF
     }
 }
 
-/// Integration test for BrokenReason::MsvcMutexHelper (bd issue #65).
-///
-/// Sets up a fake `verify-cpp` environment where the LLVM IR contains a
-/// `linkonce_odr`-defined `std::_Mutex_base` helper function (here
-/// `_Verify_ownership_levels`) that performs typed field reads on the mutex
-/// struct. Before the fix the extern-override scanner skipped defined
-/// non-vararg bodies; the generated `verify.saw` never saw an override for
-/// this function and SAW aborted with "Error during memory load" when it
-/// tried to inline the typed reads through a symbolically-allocated struct
-/// pointer.
-///
-/// The injected IR uses the real MSVC-mangled name
-/// `?_Verify_ownership_levels@_Mutex_base@std@@IEAA_NXZ` so the
-/// `_Mutex_base@std` substring pattern fires. This broad pattern future-proofs
-/// detection of all sibling `std::_Mutex_base` helpers without a per-method
-/// allowlist. The scanner classifies the function as `MsvcMutexHelper` and
-/// emits `{{ 1 : [1] }}` (bool true — ownership always valid in a sequential
-/// proof) as the pinned no-op return.
-#[test]
-fn msvc_mutex_helper_emits_noop_override_in_verify_script() {
-    let root = TempDir::new("mutex-helper").unwrap();
-    let fake_bin = root.path().join("fakebin");
-    std::fs::create_dir_all(&fake_bin).unwrap();
-
-    let cpp_file = root.path().join("ownership_check.cpp");
-    std::fs::write(
-        &cpp_file,
-        "extern \"C\" int ComputeChecksum(const unsigned char*, unsigned long) { return 0; }\n",
-    )
-    .unwrap();
-    let cry_file = root.path().join("spec.cry");
-    std::fs::write(
-        &cry_file,
-        "module Main where\nComputeChecksum_spec : [32] -> [32]\nComputeChecksum_spec x = x\n",
-    )
-    .unwrap();
-
-    let ast_path = repo_root().join("tests/fixtures/request_validator_cpp.json");
-
-    // Fake clang: AST dump → fixture; -S -emit-llvm → IR with the helper;
-    // bitcode → empty BC sentinel.  The IR defines ComputeChecksum as a
-    // caller of ?_Verify_ownership_levels@_Mutex_base@std@@... (linkonce_odr),
-    // using the real MSVC-mangled name so `_Mutex_base@std` fires.
-    // Double-brace every `{` / `}` in the IR because this block uses format!.
-    write_script(
-        &fake_bin.join("clang"),
-        &format!(
-            r#"#!/usr/bin/env bash
-set -euo pipefail
-out=""; prev=""
-for arg in "$@"; do
-  if [[ "$prev" == "-o" ]]; then out="$arg"; fi; prev="$arg"
-done
-if [[ " $* " == *" -Xclang -ast-dump=json "* ]]; then cat "{ast}"; exit 0; fi
-if [[ " $* " == *"_test_cex.cpp"* ]]; then
-  echo '#!/usr/bin/env bash' > "$out"; echo 'echo CPP_RESULT=0' >> "$out"; chmod +x "$out"; exit 0
-fi
-if [[ " $* " == *" -S "* && " $* " == *" -emit-llvm "* ]]; then
-  cat > "$out" <<'IREOF'
-target triple = "x86_64-pc-windows-msvc"
-define i32 @_Z15ComputeChecksumPKhm(ptr %data, i64 %len) {{
-entry:
-  %self = alloca [8 x i8], align 4
-  call i1 @"?_Verify_ownership_levels@_Mutex_base@std@@IEAA_NXZ"(ptr %self)
-  ret i32 0
-}}
-define linkonce_odr i1 @"?_Verify_ownership_levels@_Mutex_base@std@@IEAA_NXZ"(ptr %0) {{
-entry:
-  %1 = load i32, ptr %0, align 4
-  %2 = getelementptr inbounds i32, ptr %0, i32 1
-  %3 = load i32, ptr %2, align 4
-  %4 = icmp sle i32 %1, %3
-  ret i1 %4
-}}
-IREOF
-  exit 0
-fi
-printf 'BC' > "$out"
-"#,
-            ast = ast_path.display(),
-        ),
-    );
-    write_script(
-        &fake_bin.join("llvm-as"),
-        "#!/usr/bin/env bash\nset -euo pipefail\nout=''; prev=''\nfor arg in \"$@\"; do\n  if [[ \"$prev\" == \"-o\" ]]; then out=\"$arg\"; fi; prev=\"$arg\"\ndone\nprintf 'BC' > \"$out\"\n",
-    );
-    // llvm-dis returns the same IR (no format! needed — no variable
-    // substitution required here, so no escaping of braces).
-    write_script(
-        &fake_bin.join("llvm-dis"),
-        r#"#!/usr/bin/env bash
-set -euo pipefail
-out=""; prev=""
-for arg in "$@"; do
-  if [[ "$prev" == "-o" ]]; then out="$arg"; fi; prev="$arg"
-done
-cat > "$out" <<'IREOF'
-target triple = "x86_64-pc-windows-msvc"
-define i32 @_Z15ComputeChecksumPKhm(ptr %data, i64 %len) {
-entry:
-  %self = alloca [8 x i8], align 4
-  call i1 @"?_Verify_ownership_levels@_Mutex_base@std@@IEAA_NXZ"(ptr %self)
-  ret i32 0
-}
-define linkonce_odr i1 @"?_Verify_ownership_levels@_Mutex_base@std@@IEAA_NXZ"(ptr %0) {
-entry:
-  %1 = load i32, ptr %0, align 4
-  %2 = getelementptr inbounds i32, ptr %0, i32 1
-  %3 = load i32, ptr %2, align 4
-  %4 = icmp sle i32 %1, %3
-  ret i1 %4
-}
-IREOF
-"#,
-    );
-    write_script(&fake_bin.join("llvm-link"), "#!/usr/bin/env bash\nexit 0\n");
-    write_script(
-        &fake_bin.join("c++filt"),
-        "#!/usr/bin/env bash\necho 'ComputeChecksum(unsigned char const*, unsigned long)'\n",
-    );
-    write_script(
-        &fake_bin.join("saw"),
-        "#!/usr/bin/env bash\necho 'VERIFIED'\n",
-    );
-    write_script(&fake_bin.join("z3"), "#!/usr/bin/env bash\nexit 0\n");
-
-    let out_dir = root.path().join("out");
-    let status = Command::new(saw_spec_gen_binary())
-        .args([
-            "verify-cpp",
-            "--cpp-file",
-            cpp_file.to_str().unwrap(),
-            "--cryptol-spec",
-            cry_file.to_str().unwrap(),
-            "--cryptol-fn",
-            "ComputeChecksum_spec",
-            "--function",
-            "ComputeChecksum",
-            "--output",
-            out_dir.to_str().unwrap(),
-        ])
-        .env("SAW_SPEC_GEN_LLVM_BIN", &fake_bin)
-        .env("SAW_SPEC_GEN_SAW", fake_bin.join("saw"))
-        .env(
-            "PATH",
-            format!("{}:{}", fake_bin.display(), std::env::var("PATH").unwrap()),
-        )
-        .status()
-        .unwrap();
-    assert!(status.success(), "verify-cpp failed: {status:?}");
-
-    let verify_saw =
-        std::fs::read_to_string(out_dir.join("verify.saw")).expect("verify.saw not written");
-    assert!(
-        verify_saw.contains("[msvc-mutex-helper]"),
-        "?_Verify_ownership_levels@_Mutex_base@std@@... must be classified MsvcMutexHelper;\
-         \nverify.saw:\n{verify_saw}"
-    );
-    assert!(
-        verify_saw.contains("{{ 1 : [1] }}"),
-        "MsvcMutexHelper override must pin {{ 1 : [1] }} (bool true);\
-         \nverify.saw:\n{verify_saw}"
-    );
-}
+// NOTE: The MsvcMutexHelper override path is covered without a fake
+// toolchain by two fast, cross-platform unit tests:
+//   * `msvc_mutex_helper_defined_in_module_is_flagged` in
+//     src/transform/extern_override_scan_tests.rs -- asserts a
+//     `linkonce_odr` `_Mutex_base@std` body is classified MsvcMutexHelper.
+//   * `msvc_mutex_helper_pins_noop_bool_return` in
+//     src/emit/saw_emit/bitcode_overrides_tests.rs -- asserts the emitted
+//     override pins `{{ 1 : [1] }}` and tags `[msvc-mutex-helper]`.
+// End-to-end wiring (symbol -> written verify.saw -> real proof) is
+// covered by the tests/e2e/cases/08-overrides/msvc_mutex_helper cases,
+// which run genuine clang + SAW. A fake-toolchain integration test here
+// would only re-assert the same two `contains` checks through a heavy,
+// Unix-only bash-stub harness, so it is intentionally omitted.
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

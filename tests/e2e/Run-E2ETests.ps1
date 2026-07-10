@@ -81,6 +81,7 @@ if (-not $cases -or $cases.Count -eq 0) {
 $defaultTags = @(
     'cpp_havoc'
     'cpp_throws'
+    'cpp_overrides'
     'rust_havoc'
     'bounded_loop'
     'csep590b_c04'

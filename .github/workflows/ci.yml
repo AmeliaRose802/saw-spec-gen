@@ -81,9 +81,10 @@ jobs:
     # Runs inside a pre-baked image (built by publish-ci-image.yml) that
     # already contains SAW 1.5, LLVM 20.1.6, PowerShell 7, and Rust
     # stable at the exact paths discover-tools.ps1 probes. No install
-    # step, no ~1.2 GB tarball download — just `cargo build` and run.
-    # Non-blocking while the end-to-end test suite stabilises.
-    name: 'end-to-end test suite (Linux, experimental)'
+    # step, no ~1.2 GB tarball download -- just `cargo build` and run.
+    # Gating: the default tag set (see Run-E2ETests.ps1) must pass on
+    # Linux for the build to go green.
+    name: 'end-to-end test suite (Linux)'
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/ameliarose802/saw-spec-gen-ci:latest
@@ -92,7 +93,6 @@ jobs:
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
-    continue-on-error: true
     timeout-minutes: 90
     steps:
     - uses: actions/checkout@v4

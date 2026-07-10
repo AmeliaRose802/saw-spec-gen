@@ -477,3 +477,7 @@ fn ir_return_setup(ir_ty: &str) -> ReturnSetup {
 #[cfg(test)]
 #[path = "bitcode_overrides_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "bitcode_overrides_mutex_tests.rs"]
+mod mutex_tests;

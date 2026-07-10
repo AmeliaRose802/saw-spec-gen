@@ -49,7 +49,11 @@ foreach ($flag in $ClangFlags) {
     $args += @('--clang-flag', $flag)
 }
 foreach ($flag in $ExtraSpecGenArgs) {
-    $args += @('--extra-spec-gen-arg', $flag)
+    # Use the `--opt=value` form so clap accepts values that themselves
+    # begin with `--` (e.g. forwarding `--in-buffer-size` to gen-verify).
+    # The space-separated form would make clap treat such a value as an
+    # unknown flag. See tests/e2e/cases/08-overrides/bounded_copy.
+    $args += @("--extra-spec-gen-arg=$flag")
 }
 if ($SpecOnlyOnMissing) {
     $args += '--spec-only-on-missing'
