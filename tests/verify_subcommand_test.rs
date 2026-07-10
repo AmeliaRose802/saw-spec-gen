@@ -144,7 +144,9 @@ fn verify_subcommand_forwards_shaping_flags_without_passthrough() {
 
 #[test]
 fn verify_subcommand_loop_invariant_config_emits_fixpoint_chc() {
-    // Verify that declaring loop_invariants in the sibling .toml config:
+    // Verify that declaring loop_invariants in the sibling .toml config
+    // for the ComputeChecksum_spec Cryptol function (the function used in
+    // FakeVerifyEnv's fixture):
     //   1. Switches verify.saw from llvm_verify to llvm_verify_fixpoint_chc
     //   2. Adds a proof_mode comment in verify.saw
     //   3. Writes proof_mode: "invariant" in result.json
