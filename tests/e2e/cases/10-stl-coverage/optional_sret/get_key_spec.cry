@@ -1,0 +1,8 @@
+// Cryptol spec for the optional_sret DISPROVED E2E test.
+//
+// get_key returns std::optional<proto::Key> via sret (20 bytes).
+// This spec deliberately returns all-zero bytes, which is wrong:
+// get_key writes has_value=1 for any nonzero id, so SAW finds a
+// counterexample and reports DISPROVED.
+get_key_spec : [32] -> [20][8]
+get_key_spec _ = zero

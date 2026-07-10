@@ -349,10 +349,12 @@
         #   Fix 1 — sret byte-size fallback when dereferenceable(N) is absent.
         #   Fix 2 — is_complex_stl_template() byte-array rewrite (MSVC ABI).
         #   Fix 3 — normalize_template_args() namespace-strip match (Itanium ABI).
-        # SAW is NOT invoked; the checker verifies spec-generation output only.
-        @{ Tag = 'stl_coverage'; Runner = 'custom'; Expected = 'VERIFIED';
-           Script = 'tests/e2e/cases/10-stl-coverage/optional_sret/Check-OptionalSret.ps1';
-           ScriptArgs = @{} }
+        # The spec is deliberately wrong (all zeros); SAW disproves because
+        # get_key writes has_value=1 for any nonzero id, proving the full
+        # pipeline (spec generation + SAW execution) reaches proof obligations.
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/optional_sret';
+           File = 'get_key_disproved.cpp'; Expected = 'DISPROVED';
+           Cry = 'get_key_spec.cry'; CryptolFn = 'get_key_spec'; Function = 'get_key' }
 
         # ── sret pre-state slice (09-type-coverage) ─────────────────────────────
         # Returns a 16-byte struct via sret. Cryptol model has a trailing
