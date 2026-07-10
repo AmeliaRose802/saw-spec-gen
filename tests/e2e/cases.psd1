@@ -390,6 +390,28 @@
         # emit take`{12}/drop`{4} slice, not the full buffer.
         @{ Tag = 'sret_slice'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-type-coverage/sret_slice'; File = 'stamp_header_verified.cpp'; Expected = 'VERIFIED'; Cry = 'stamp_header_spec.cry'; CryptolFn = 'stamp_header_spec'; Function = 'stamp_header' }
 
+        # ── Nested aggregate read (aligned byte-buffer allocation) ──────────
+        # Reads a natural-aligned sub-object field (`Outer::inner.b` at
+        # offset 4) through a `const Outer*` modelled as a flat byte
+        # buffer. SAW allocates byte-array buffers at 1-byte alignment by
+        # default, so the compiler's `load i32 ... align 4` aborts with a
+        # vacuous `Error during memory load`. The `object_allocator`
+        # helper (src/emit/saw_emit/names.rs) pins byte-array buffers to
+        # the platform fundamental alignment (8) via
+        # `llvm_alloc_readonly_aligned 8`, letting the aligned read reach a
+        # real verdict. This is the general fix for nested objects of any
+        # type (plain structs, std::optional, std::variant) — not an
+        # accessor-specific override.
+        #
+        # verified  : returns inner.b (offset 4) — matches the model.
+        # disproved : returns inner.a (offset 0) — still an aligned read,
+        #             but diverges from the model, proving non-vacuity.
+        @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-type-coverage/nested_object'; File = 'nested_object_verified.cpp';  Expected = 'VERIFIED';
+           Cry = 'nested_object_spec.cry'; CryptolFn = 'read_nested_spec'; Function = 'read_nested'; Config = 'nested_object.toml' }
+        @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-type-coverage/nested_object'; File = 'nested_object_disproved.cpp'; Expected = 'DISPROVED';
+           Cry = 'nested_object_spec.cry'; CryptolFn = 'read_nested_spec'; Function = 'read_nested'; Config = 'nested_object.toml' }
+
+
         # ── Buffer overrides (08-overrides) ─────────────────────────────────
         # Exercises the --out-buffer-param / --in-buffer-size /
         # --cryptol-fn-out / --max-len-precond CLI surface plus the
