@@ -555,22 +555,23 @@
         # ── 13-msvc-string ───────────────────────────────────────────────────
         # Regression tests for the MSVC STL override return-type fix.
         # Each case assembles a pre-written LLVM IR file (no C++ compilation
-        # needed), runs gen-verify, inspects the generated SAW script, and
-        # then verifies with SAW.
+        # needed), runs gen-verify, and verifies with SAW.
 
         # MSVC-mangled basic_string methods (??0 ctor, ??1 dtor, ?resize@,
         # ?size@) must be classified as functional overrides, not generic havoc.
         # Also exercises is_basic_string_alias accepting full-template MSVC
         # struct names containing "char_traits".
-        @{ Tag = 'msvc_string'; Runner = 'custom'; Expected = 'VERIFIED';
-           Script = 'tests/e2e/cases/13-msvc-string/msvc_string_classify/Check-MsvcStringClassify.ps1';
-           ScriptArgs = @{} }
+        @{ Tag = 'msvc_string'; Runner = 'llvm_ir'
+           Dir = 'tests/e2e/cases/13-msvc-string/msvc_string_classify'
+           File = 'msvc_resize_size.ll'
+           Expected = 'VERIFIED' }
 
         # [16 x i8] aggregate return type must emit
         # `llvm_fresh_var "rv" (llvm_array 16 (llvm_int 8))` in the override,
         # not a missing llvm_return (pre-fix) that caused SAW type-mismatch.
-        @{ Tag = 'msvc_string'; Runner = 'custom'; Expected = 'VERIFIED';
-           Script = 'tests/e2e/cases/13-msvc-string/byte_array_return/Check-ByteArrayReturn.ps1';
-           ScriptArgs = @{} }
+        @{ Tag = 'msvc_string'; Runner = 'llvm_ir'
+           Dir = 'tests/e2e/cases/13-msvc-string/byte_array_return'
+           File = 'byte_array_return.ll'
+           Expected = 'VERIFIED' }
     )
 }
