@@ -237,6 +237,23 @@ fn synth_this_param(
     }
 }
 
+/// Whether a by-value parameter is an *aggregate* (struct/class/union/
+/// array/wrapper) rather than a scalar. Aggregates larger than a
+/// register are passed via a hidden indirect pointer that the callee
+/// owns and may mutate, so their SAW backing allocation must be
+/// `Mutable`. Scalars pass in a register and are lowered to a fresh
+/// symbolic value, so their mutability flag is inert.
+fn is_by_value_aggregate(ty: &TypeInfo) -> bool {
+    matches!(
+        ty,
+        TypeInfo::Struct { .. }
+            | TypeInfo::ByteArray(_)
+            | TypeInfo::Opaque { .. }
+            | TypeInfo::Option(_)
+            | TypeInfo::Result(_, _)
+    )
+}
+
 /// Parse one `ParmVarDecl` into a [`ParamInfo`]. Combines C++ type-string
 /// information with SAL annotations: the strictest mutability wins.
 pub fn parse_param(node: &AstNode, ctx: &TypeContext) -> Option<ParamInfo> {
@@ -249,12 +266,26 @@ pub fn parse_param(node: &AstNode, ctx: &TypeContext) -> Option<ParamInfo> {
     let is_ref = qual_type.contains('&');
     let is_ptr = qual_type.contains('*');
 
+    let ty = parse_cpp_type(qual_type, ctx);
+
     let mut mutability = if is_const && (is_ref || is_ptr) {
         Mutability::Readonly
     } else if is_ref || is_ptr {
         Mutability::Mutable
+    } else if is_by_value_aggregate(&ty) {
+        // Pass-by-value *aggregate*: the MSVC ABI lowers a by-value
+        // struct/class/array into a hidden indirect pointer that the
+        // callee OWNS. The callee may freely mutate its private copy
+        // (e.g. reset a field before moving it into a member), so the
+        // SAW backing allocation must be MUTABLE. A readonly alloc turns
+        // any such write into "Pointer passed to memset/store didn't
+        // point to a mutable allocation" and drives the proof vacuous.
+        // Scalars are exempt: they pass in a register and become a fresh
+        // symbolic value, so their mutability flag is inert.
+        Mutability::Mutable
     } else {
-        // Pass-by-value: effectively read-only from the caller's perspective.
+        // Pass-by-value scalar: effectively read-only from the caller's
+        // perspective and lowered to a fresh register value.
         Mutability::Readonly
     };
     let nullable = if is_ref {
@@ -295,7 +326,6 @@ pub fn parse_param(node: &AstNode, ctx: &TypeContext) -> Option<ParamInfo> {
         _ => m,
     });
 
-    let ty = parse_cpp_type(qual_type, ctx);
     Some(ParamInfo {
         name,
         ty,

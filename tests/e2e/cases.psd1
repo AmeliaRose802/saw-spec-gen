@@ -484,6 +484,18 @@
            Cry = 'key_store_spec.cry'; CryptolFn = 'key_store_activate_ret'; Function = 'key_store_activate' }
         @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/key_store'; File = 'key_store_disproved.cpp'; Expected = 'DISPROVED';
            Cry = 'key_store_spec.cry'; CryptolFn = 'key_store_activate_ret'; Function = 'key_store_activate' }
+        # by_value_aggregate : a >8-byte struct passed BY VALUE. The MSVC
+        #             ABI lowers it to a hidden indirect pointer the callee
+        #             owns and mutates (`r.d = 0`). saw-spec-gen must
+        #             allocate that backing buffer MUTABLE — a readonly
+        #             alloc turns the store into "didn't point to a MUTABLE
+        #             allocation" and the proof goes vacuous. Regression
+        #             for the by-value-aggregate mutability classification
+        #             (parsers/clang_ast/functions.rs).
+        @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/by_value_aggregate'; File = 'by_value_aggregate_verified.cpp';  Expected = 'VERIFIED';
+           Cry = 'by_value_aggregate_spec.cry'; CryptolFn = 'reset_d_ret'; Function = 'reset_d' }
+        @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/by_value_aggregate'; File = 'by_value_aggregate_disproved.cpp'; Expected = 'DISPROVED';
+           Cry = 'by_value_aggregate_spec.cry'; CryptolFn = 'reset_d_ret'; Function = 'reset_d' }
         @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/block'; File = 'block_verified.cpp';  Expected = 'VERIFIED';
            Cry = 'block_spec.cry'; CryptolFn = 'block_mask_ret'; Function = 'block_mask' }
         @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/block'; File = 'block_disproved.cpp'; Expected = 'DISPROVED';

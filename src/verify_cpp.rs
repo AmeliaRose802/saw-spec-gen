@@ -10,7 +10,8 @@ use crate::verify_tools::ToolPaths;
 use anyhow::{bail, Context, Result};
 use compile::{
     build_clang_flags, dump_ast, emit_bitcode, emit_llvm_ir, is_spec_only_result, maybe_filter_ast,
-    maybe_lower_exceptions, patch_ir_and_reassemble, recompile_at_o1, run_gen_verify, O1Recompile,
+    maybe_lower_exceptions, patch_ir_and_reassemble, recompile_at_o1, recompile_promoted,
+    run_gen_verify, O1Recompile, PromoteRecompile,
 };
 use counterexample::{evaluate_counterexample, parse_counterexample, report_disproved};
 use std::ffi::OsStr;
@@ -188,29 +189,38 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
 
     let saw_started = Instant::now();
     let mut saw_output = run_saw(saw, &output_dir, "verify.saw")?;
-    // Part 2 (§2): one-shot `-O0` → `-O1` fallback. The `-O0` STL
-    // build can emit empty-struct global loads (e.g. from
-    // `std::optional` / `std::nullopt_t` ctors) that SAW's simulator
-    // cannot load; `-O1` inlines them into plain byte stores. Only
-    // fires on a non-conclusive result, so a real VERIFIED/DISPROVED
-    // verdict is never overridden.
-    if !saw_output.contains("VERIFIED")
-        && !saw_output.contains("Counterexample")
-        && is_empty_struct_load_failure(&saw_output)
-    {
+    // Part 2 (§2): the `-O0` STL build can emit constructs SAW's
+    // simulator cannot execute — empty-struct global loads from
+    // `std::optional` / `std::nullopt_t` ctors, and uninitialized reads
+    // of stateless-functor allocas (`std::equal_to` inside `std::equal`,
+    // the optional copy path in `provision`) — which abort with a vacuous
+    // `Error during memory load`. Crucible still prints a `<<All settings
+    // ...>>` counterexample block for these, so the presence of
+    // "Counterexample" is *not* a reliable conclusiveness signal here;
+    // gate the recovery on the memory-load signature itself (via
+    // [`is_empty_struct_load_failure`]) plus the absence of a real
+    // VERIFIED. A genuine z3 DISPROVED never emits that signature, so a
+    // real verdict is never overridden.
+    //
+    // Recovery is two-tier. First try an in-place promotion that strips
+    // `optnone` and runs `sroa,mem2reg,instsimplify` (see
+    // [`recompile_promoted`]): this rewrites the offending uninitialized
+    // reads to `undef` registers *without inlining*, so mutex / memcmp
+    // overrides stay intact and the proof reaches its real obligation.
+    // Only if promotion is unavailable or leaves the result inconclusive
+    // (no verdict AND no counterexample) do we fall back to the heavier
+    // `-O1` recompile, which inlines the STL bodies at the cost of also
+    // inlining the MSVC mutex ownership check into an `unreachable`.
+    if !saw_output.contains("VERIFIED") && is_empty_struct_load_failure(&saw_output) {
         eprintln!(
-            "note: SAW could not load the -O0 build (empty-struct global load); \
-             retrying once at -O1."
+            "note: SAW could not load the -O0 build (uninitialized empty-struct/tag load); \
+             retrying with optnone-strip + opt promotion."
         );
-        recompile_at_o1(&O1Recompile {
+        let promoted = recompile_promoted(&PromoteRecompile {
             tools: &tools,
-            is_msvc,
-            clang,
             llvm_as,
             output_dir: &output_dir,
             base_name: &base_name,
-            user_flags: &user_clang_flags,
-            cpp_file: &cpp_file,
             bc_file: &bc_file,
             ll_file: &ll_file,
             ast_file: &ast_file,
@@ -219,7 +229,36 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
             function: &req.function,
             config: config.as_deref(),
         })?;
-        saw_output = run_saw(saw, &output_dir, "verify.saw")?;
+        if promoted {
+            saw_output = run_saw(saw, &output_dir, "verify.saw")?;
+        }
+        // Fall back to -O1 only if promotion was unavailable or left the
+        // result without a conclusive verdict. A Counterexample produced
+        // on the promoted (un-inlined) build is a trustworthy DISPROVED
+        // and must not be overridden by the mutex-breaking -O1 build.
+        let inconclusive =
+            !saw_output.contains("VERIFIED") && !saw_output.contains("Counterexample");
+        if inconclusive {
+            eprintln!("note: promoted build still inconclusive; retrying once at -O1.");
+            recompile_at_o1(&O1Recompile {
+                tools: &tools,
+                is_msvc,
+                clang,
+                llvm_as,
+                output_dir: &output_dir,
+                base_name: &base_name,
+                user_flags: &user_clang_flags,
+                cpp_file: &cpp_file,
+                bc_file: &bc_file,
+                ll_file: &ll_file,
+                ast_file: &ast_file,
+                cryptol_spec: &cryptol_spec,
+                cryptol_fn: &req.cryptol_fn,
+                function: &req.function,
+                config: config.as_deref(),
+            })?;
+            saw_output = run_saw(saw, &output_dir, "verify.saw")?;
+        }
     }
     let time_secs = saw_started.elapsed().as_secs_f64();
     let impl_file = cpp_file.file_name().and_then(OsStr::to_str);
