@@ -12,8 +12,10 @@ use std::fs;
 use std::path::Path;
 
 use crate::buffer_overrides::BufferOverrides;
-use crate::constraints::TypeInfo;
 use crate::gen_verify_helpers::emit_spec_only_result;
+use crate::gen_verify_rust_classify::{
+    classify_return, classify_sret_return, format_return_llvm_type, type_int_bits,
+};
 use crate::gen_verify_rust_emit::{self, RustReturnKind, RustVerifyArtifacts, RustVerifyParam};
 use crate::inventory;
 use crate::parsers::llvm_ir::extract_functions;
@@ -238,21 +240,45 @@ fn try_resolve_candidate(
     range_map: &std::collections::HashMap<String, Vec<Option<(u64, u64)>>>,
 ) -> Option<ResolvedCandidate> {
     let ranges = range_map.get(&f.name);
-    // Collect params — must all be integer-typed
+
+    // Detect a hidden sret output parameter.  After `extract_sret` runs
+    // inside the IR parser, the sret param lands at f.params[0] with
+    // `WriteOnly` mutability and a non-integer type (ByteArray / Struct /
+    // Opaque).  The promoted return type carries the concrete struct type.
+    // Note: `extract_sret` strips the `sret` annotation, so we use the
+    // WriteOnly + non-integer-type combination as the detection signal.
+    let has_sret = f.params.first().is_some_and(|p| {
+        p.mutability == crate::constraints::Mutability::WriteOnly && type_int_bits(&p.ty).is_none()
+    });
+    let input_params = if has_sret {
+        &f.params[1..]
+    } else {
+        &f.params[..]
+    };
+    // IR-level offset so range attributes (indexed over all IR params)
+    // are looked up at the right position even after the sret skip.
+    let ir_offset = usize::from(has_sret);
+
+    // Collect input params — must all be integer-typed
     let mut params = Vec::new();
-    for (i, p) in f.params.iter().enumerate() {
+    for (local_i, p) in input_params.iter().enumerate() {
         let bits = type_int_bits(&p.ty)?;
-        let range = ranges.and_then(|r| r.get(i).copied().flatten());
+        let ir_i = local_i + ir_offset;
+        let range = ranges.and_then(|r| r.get(ir_i).copied().flatten());
         params.push(RustVerifyParam {
-            index: i,
-            name: format!("x{i}"),
+            index: local_i,
+            name: format!("x{local_i}"),
             bits,
             llvm_type: format!("i{bits}"),
             range,
         });
     }
     // Determine return kind
-    let return_kind = classify_return(&f.return_type)?;
+    let return_kind = if has_sret {
+        classify_sret_return(&f.return_type)?
+    } else {
+        classify_return(&f.return_type)?
+    };
     let return_llvm_type = format_return_llvm_type(&return_kind);
     Some(ResolvedCandidate {
         name: f.name.clone(),
@@ -260,63 +286,6 @@ fn try_resolve_candidate(
         return_kind,
         return_llvm_type,
     })
-}
-
-fn classify_return(ty: &TypeInfo) -> Option<RustReturnKind> {
-    match ty {
-        TypeInfo::Bool => Some(RustReturnKind::Scalar { bits: 1 }),
-        TypeInfo::SignedInt(n) | TypeInfo::UnsignedInt(n) => {
-            Some(RustReturnKind::Scalar { bits: *n })
-        }
-        TypeInfo::Struct {
-            name,
-            size_bytes,
-            fields,
-        } => {
-            // Try aggregate (all fields are iN)
-            let field_bits: Option<Vec<u32>> =
-                fields.iter().map(|(_, ft)| type_int_bits(ft)).collect();
-            if let Some(fb) = field_bits {
-                return Some(RustReturnKind::Aggregate { field_bits: fb });
-            }
-            // Fallback: sret with known size
-            if let Some(sz) = size_bytes {
-                if *sz > 0 {
-                    return Some(RustReturnKind::Sret {
-                        llvm_type: format!("%{name}"),
-                        size_bytes: *sz,
-                    });
-                }
-            }
-            None
-        }
-        _ => None,
-    }
-}
-
-fn format_return_llvm_type(kind: &RustReturnKind) -> String {
-    match kind {
-        RustReturnKind::Scalar { bits } => format!("i{bits}"),
-        RustReturnKind::Sret { llvm_type, .. } => llvm_type.clone(),
-        RustReturnKind::Aggregate { field_bits } => {
-            let fields = field_bits
-                .iter()
-                .map(|b| format!("i{b}"))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("{{ {fields} }}")
-        }
-    }
-}
-
-/// Width in bits of an `iN`-shaped [`TypeInfo`], or `None` for any
-/// other type.
-fn type_int_bits(t: &TypeInfo) -> Option<u32> {
-    match t {
-        TypeInfo::Bool => Some(1),
-        TypeInfo::SignedInt(n) | TypeInfo::UnsignedInt(n) => Some(*n),
-        _ => None,
-    }
 }
 
 /// Parse `range(lo, hi)` parameter attributes from IR define lines

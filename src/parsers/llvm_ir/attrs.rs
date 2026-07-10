@@ -20,9 +20,14 @@ pub enum IrToken {
     Nocapture,
     /// `nonnull` — pointer is non-null.
     Nonnull,
-    /// `sret` or `sret(%struct.Foo)`. Carries the optional inner
-    /// struct type for type resolution.
+    /// `sret` or `sret(%struct.Foo)` (fully balanced in one token).
+    /// Carries the optional inner struct type for type resolution.
     Sret(Option<String>),
+    /// `sret([24` — the opening fragment of a `sret([N x T])` token
+    /// whose inner type contains spaces and spans multiple whitespace-
+    /// separated tokens.  Carries the partial inner text and the
+    /// current unmatched open-paren depth (always ≥ 1).
+    SretStart(String, i32),
     /// `dereferenceable(N)` — known-good byte count behind the pointer.
     Dereferenceable(usize),
     /// `align` — the next token holds the integer alignment.
@@ -60,8 +65,27 @@ impl IrToken {
         if SKIP_SINGLE_ATTRS.contains(&part) {
             return IrToken::SkipSingle;
         }
-        if let Some(inner) = part.strip_prefix("sret(").and_then(|s| s.strip_suffix(')')) {
-            return IrToken::Sret(Some(inner.to_string()));
+        if let Some(rest) = part.strip_prefix("sret(") {
+            // Count the net paren depth of `rest` (not counting the already-
+            // consumed opening paren in "sret(").
+            let mut depth = 1i32; // the '(' in "sret(" is already open
+            for ch in rest.chars() {
+                match ch {
+                    '(' => depth += 1,
+                    ')' => depth -= 1,
+                    _ => {}
+                }
+            }
+            if depth == 0 {
+                // Fully balanced in one token: sret(typename)
+                let inner = rest.strip_suffix(')').unwrap_or(rest);
+                return IrToken::Sret(Some(inner.to_string()));
+            } else {
+                // Multi-token: sret([24 x i8]) — inner type has spaces.
+                // `rest` is everything after "sret(", depth is how many
+                // unmatched opens remain.
+                return IrToken::SretStart(rest.to_string(), depth);
+            }
         }
         if part == "sret" {
             return IrToken::Sret(None);
@@ -123,10 +147,33 @@ impl IrParamAttrs {
         let mut attrs = IrParamAttrs::default();
         let mut skip_next = false;
         let mut paren_depth: i32 = 0;
+        // State for multi-token `sret([N x T])` where the inner type
+        // contains spaces.  `sret_depth > 0` means we're still
+        // accumulating the inner type string.
+        let mut sret_accum = String::new();
+        let mut sret_depth: i32 = 0;
 
         for part in parts {
             if skip_next {
                 skip_next = false;
+                continue;
+            }
+            // Accumulate the remainder of a multi-token sret inner type.
+            if sret_depth > 0 {
+                let opens = part.chars().filter(|&c| c == '(').count() as i32;
+                let closes = part.chars().filter(|&c| c == ')').count() as i32;
+                sret_depth += opens - closes;
+                if sret_depth <= 0 {
+                    // This token closes the sret(…) group; strip its
+                    // trailing ')' (which belongs to the sret wrapper).
+                    sret_accum.push(' ');
+                    sret_accum.push_str(part.strip_suffix(')').unwrap_or(part));
+                    attrs.type_str = std::mem::take(&mut sret_accum);
+                    sret_depth = 0;
+                } else {
+                    sret_accum.push(' ');
+                    sret_accum.push_str(part);
+                }
                 continue;
             }
             if paren_depth > 0 {
@@ -145,6 +192,11 @@ impl IrParamAttrs {
                     if let Some(ty) = inner {
                         attrs.type_str = ty;
                     }
+                }
+                IrToken::SretStart(partial, depth) => {
+                    attrs.sret = true;
+                    sret_accum = partial;
+                    sret_depth = depth;
                 }
                 IrToken::Dereferenceable(n) => attrs.deref_size = Some(n),
                 IrToken::SkipSingle => {}
