@@ -111,7 +111,12 @@ fn resolve_via_ir(saw_type: &str, ir_sizes: &HashMap<String, usize>) -> Option<S
 }
 
 /// Return the last `::` component of a potentially namespace-qualified name.
+///
+/// If `s` is `"foo::"` (trailing `::`) this returns `""`, which is an
+/// acceptable degenerate case — the caller discards empty results.
 fn last_component(s: &str) -> &str {
+    // `rfind("::") = pos` → `pos + 2` is at most `s.len()`, so the
+    // slice `&s[pos + 2..]` is always within bounds.
     s.rfind("::").map_or(s, |pos| &s[pos + 2..])
 }
 
@@ -131,11 +136,19 @@ fn normalize_template_args(s: &str) -> String {
     // Find the matching closing `>` for the outermost `<`.
     let args_and_rest = &s[open + 1..];
     let close = find_closing_angle(args_and_rest);
+    if close >= args_and_rest.len() {
+        // No matching `>` found — malformed template string; return unchanged.
+        return s.to_string();
+    }
     let args = &args_and_rest[..close];
     // Split args at depth-0 commas.  The `args` slice contains only the
     // content between the outermost `<` and its matching `>`, so every `>`
     // here is a nested closing bracket; depth should not underflow on
     // well-formed input.  Use explicit guard to avoid panic on malformed input.
+    //
+    // `i` comes from `char_indices()` which always yields byte-boundary
+    // indices; `start` advances to `i + 1` after a single-byte `,` character,
+    // so all slice boundaries are guaranteed to be char-aligned.
     let mut out_args: Vec<String> = Vec::new();
     let mut depth = 0usize;
     let mut start = 0usize;

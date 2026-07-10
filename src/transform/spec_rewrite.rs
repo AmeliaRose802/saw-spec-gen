@@ -34,6 +34,12 @@ use std::collections::{HashMap, HashSet};
 /// errors for `std::optional` and `std::variant` even when the alias
 /// resolves: the internal payload/base chain contains anonymous unions
 /// and conditional types that SAW's symbolic evaluator cannot traverse.
+///
+/// Matching on the prefix is intentional: any `std::optional<…>` or
+/// `std::variant<…>` instantiation (with any template arguments) has
+/// the same unsupported internal layout.  Names appearing here always
+/// come from valid generated SAW specs so the prefix uniquely identifies
+/// the type family.
 fn is_complex_stl_template(name: &str) -> bool {
     name.starts_with("std::optional<") || name.starts_with("std::variant<")
 }
