@@ -197,7 +197,7 @@
         # have emitted (`len <= MAX`) is gone, so the proof fails on
         # the unbounded len case → DISPROVED (recognizer regression
         # witness).
-        @{ Tag = 'struct_shape'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/struct_shape_recognizer'; File = 'sum_first_byte_verified.cpp'; Cry = 'sum_first_byte_spec.cry'; CryptolFn = 'sum_first_byte_spec'; Function = 'sum_first_byte'; Expected = 'DISPROVED'; NoStructShapeRecognizer = $true }
+        @{ Tag = 'struct_shape'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/struct_shape_recognizer'; File = 'sum_first_byte_verified.cpp'; Cry = 'sum_first_byte_spec.cry'; CryptolFn = 'sum_first_byte_spec'; Function = 'sum_first_byte'; Expected = 'DISPROVED'; Config = 'no_recognizer.toml' }
         # Deliberate value bug (returns buf[0] + 1). The recognizer
         # (default) still sizes buf to its length sibling, so reads
         # succeed; the proof fails on the value — DISPROVED for the
@@ -353,6 +353,28 @@
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/unique_ptr_deref_havoc'; File = 'add_one_gap_disproved.cpp';  Expected = 'DISPROVED' }
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/unique_ptr_deref_havoc'; File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
 
+        # optional_sret: std::optional return via sret.
+        # Exercises the three-part fix that prevented SAW from reaching proof
+        # obligations for std::optional returns:
+        #   Fix 1 — sret byte-size fallback when dereferenceable(N) is absent.
+        #   Fix 2 — is_complex_stl_template() byte-array rewrite (MSVC ABI).
+        #   Fix 3 — normalize_template_args() namespace-strip match (Itanium ABI).
+        #
+        # DISPROVED: std::optional<proto::Key> (20 bytes, 3 trailing padding bytes).
+        # The spec is deliberately wrong (all zeros); SAW disproves because
+        # get_key writes has_value=1 for any nonzero id, proving the full
+        # pipeline (spec generation + SAW execution) reaches proof obligations.
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/optional_sret';
+           File = 'get_key_disproved.cpp'; Expected = 'DISPROVED';
+           Cry = 'get_key_spec.cry'; CryptolFn = 'get_key_spec'; Function = 'get_key' }
+        # VERIFIED: std::optional<proto::ByteKey> (17 bytes, no padding).
+        # proto::ByteKey is uint8_t data[16] (alignof==1) so the optional is
+        # exactly 17 bytes with no trailing padding — all output bytes are
+        # deterministic and the spec verifies.
+        @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/optional_sret';
+           File = 'get_byte_key_verified.cpp'; Expected = 'VERIFIED';
+           Cry = 'get_byte_key_spec.cry'; CryptolFn = 'get_byte_key_spec'; Function = 'get_byte_key' }
+
         # ── sret pre-state slice (09-type-coverage) ─────────────────────────────
         # Returns a 16-byte struct via sret. Cryptol model has a trailing
         # [12][8] pre-state param (body field at offset 4) — saw-spec-gen must
@@ -373,17 +395,9 @@
         #             proving the override-branch postcondition is not
         #             vacuous.
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/bounded_copy'; File = 'bounded_copy_verified.cpp';  Expected = 'VERIFIED';
-           Cry = 'bounded_copy_spec.cry'; CryptolFn = 'bounded_copy_ret'; Function = 'bounded_copy';
-           InBufferSize = @('src=4');
-           OutBufferParam = @('out=4');
-           CryptolFnOut = @('out=bounded_copy_post');
-           MaxLenPrecond = @('nb=4') }
+           Cry = 'bounded_copy_spec.cry'; CryptolFn = 'bounded_copy_ret'; Function = 'bounded_copy' }
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/bounded_copy'; File = 'bounded_copy_disproved.cpp'; Expected = 'DISPROVED';
-           Cry = 'bounded_copy_spec.cry'; CryptolFn = 'bounded_copy_ret'; Function = 'bounded_copy';
-           InBufferSize = @('src=4');
-           OutBufferParam = @('out=4');
-           CryptolFnOut = @('out=bounded_copy_post');
-           MaxLenPrecond = @('nb=4') }
+           Cry = 'bounded_copy_spec.cry'; CryptolFn = 'bounded_copy_ret'; Function = 'bounded_copy' }
 
         # ── Uninterpreted primitives (08-overrides/uninterpreted) ───────────
         # Exercises the `@uninterpreted` Cryptol annotation surface: an
@@ -436,37 +450,21 @@
         @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/member_receiver'; File = 'member_receiver_disproved.cpp'; Expected = 'DISPROVED';
            Cry = 'member_receiver_spec.cry'; CryptolFn = 'activate_ret'; Function = 'activate' }
         @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/key_store'; File = 'key_store_verified.cpp';  Expected = 'VERIFIED';
-           Cry = 'key_store_spec.cry'; CryptolFn = 'key_store_activate_ret'; Function = 'key_store_activate';
-           OutBufferParam = @('ks=1');
-           CryptolFnOut = @('ks=key_store_activate_post') }
+           Cry = 'key_store_spec.cry'; CryptolFn = 'key_store_activate_ret'; Function = 'key_store_activate' }
         @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/key_store'; File = 'key_store_disproved.cpp'; Expected = 'DISPROVED';
-           Cry = 'key_store_spec.cry'; CryptolFn = 'key_store_activate_ret'; Function = 'key_store_activate';
-           OutBufferParam = @('ks=1');
-           CryptolFnOut = @('ks=key_store_activate_post') }
+           Cry = 'key_store_spec.cry'; CryptolFn = 'key_store_activate_ret'; Function = 'key_store_activate' }
         @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/block'; File = 'block_verified.cpp';  Expected = 'VERIFIED';
-           Cry = 'block_spec.cry'; CryptolFn = 'block_mask_ret'; Function = 'block_mask';
-           OutBufferParam = @('b=4');
-           CryptolFnOut = @('b=block_mask_post') }
+           Cry = 'block_spec.cry'; CryptolFn = 'block_mask_ret'; Function = 'block_mask' }
         @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/block'; File = 'block_disproved.cpp'; Expected = 'DISPROVED';
-           Cry = 'block_spec.cry'; CryptolFn = 'block_mask_ret'; Function = 'block_mask';
-           OutBufferParam = @('b=4');
-           CryptolFnOut = @('b=block_mask_post') }
+           Cry = 'block_spec.cry'; CryptolFn = 'block_mask_ret'; Function = 'block_mask' }
         @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/session'; File = 'session_verified.cpp';  Expected = 'VERIFIED';
-           Cry = 'session_spec.cry'; CryptolFn = 'session_open_ret'; Function = 'session_open';
-           OutBufferParam = @('s=4');
-           CryptolFnOut = @('s=session_open_post') }
+           Cry = 'session_spec.cry'; CryptolFn = 'session_open_ret'; Function = 'session_open' }
         @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/session'; File = 'session_disproved.cpp'; Expected = 'DISPROVED';
-           Cry = 'session_spec.cry'; CryptolFn = 'session_open_ret'; Function = 'session_open';
-           OutBufferParam = @('s=4');
-           CryptolFnOut = @('s=session_open_post') }
+           Cry = 'session_spec.cry'; CryptolFn = 'session_open_ret'; Function = 'session_open' }
         @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/counter'; File = 'counter_verified.cpp';  Expected = 'VERIFIED';
-           Cry = 'counter_spec.cry'; CryptolFn = 'counter_inc_ret'; Function = 'counter_inc';
-           OutBufferParam = @('c=i32');
-           CryptolFnOut = @('c=counter_inc_post') }
+           Cry = 'counter_spec.cry'; CryptolFn = 'counter_inc_ret'; Function = 'counter_inc' }
         @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/counter'; File = 'counter_disproved.cpp'; Expected = 'DISPROVED';
-           Cry = 'counter_spec.cry'; CryptolFn = 'counter_inc_ret'; Function = 'counter_inc';
-           OutBufferParam = @('c=i32');
-           CryptolFnOut = @('c=counter_inc_post') }
+           Cry = 'counter_spec.cry'; CryptolFn = 'counter_inc_ret'; Function = 'counter_inc' }
         # enrollment : a named heterogeneous struct with padding — byte
         #             `engaged` at offset 0, then 7 pad bytes, then an
         #             aligned i64 `createdAt` at offset 8. The case uses
@@ -475,13 +473,9 @@
         #             so SAW keeps typed i8/i64 cells and leaves padding
         #             bytes unconstrained.
         @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/enrollment'; File = 'enrollment_verified.cpp';  Expected = 'VERIFIED';
-           Cry = 'enrollment_spec.cry'; CryptolFn = 'enroll_key_ret'; Function = 'enroll_key';
-           OutBufferParam = @('k=struct:EnrollmentKey');
-           CryptolFnOut = @('k=enroll_key_post') }
+           Cry = 'enrollment_spec.cry'; CryptolFn = 'enroll_key_ret'; Function = 'enroll_key' }
         @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/enrollment'; File = 'enrollment_disproved.cpp'; Expected = 'DISPROVED';
-           Cry = 'enrollment_spec.cry'; CryptolFn = 'enroll_key_ret'; Function = 'enroll_key';
-           OutBufferParam = @('k=struct:EnrollmentKey');
-           CryptolFnOut = @('k=enroll_key_post') }
+           Cry = 'enrollment_spec.cry'; CryptolFn = 'enroll_key_ret'; Function = 'enroll_key' }
 
         # ── Box allocator: currently UNKNOWN due to MIR allocator model gap
         # box_allocator currently produces UNKNOWN under the default pipeline
@@ -551,5 +545,17 @@
         @{ Tag = 'aggregate_bridge'; Runner = 'custom'; Expected = 'VERIFIED';
            Script = 'tests/e2e/cases/12-aggregate-bridge/niche_enum_remap/Check-NicheEnumRemap.ps1';
            ScriptArgs = @{} }
+
+        # sret sub-callee havoc (issue #68): gen-verify must include the
+        # hidden sret return-pointer in llvm_execute_func for external
+        # C++ sub-callees that return a struct by value.  wrap_canonicalize
+        # calls the sret sub-callee but ignores its return, so the result
+        # (x + 1) is fully deterministic and SAW-verifiable.
+        @{ Tag = 'aggregate_bridge'; Runner = 'cpp';
+           Dir = 'tests/e2e/cases/12-aggregate-bridge/sret_sub_callee_havoc';
+           File = 'sret_sub_callee_verified.cpp'; Expected = 'VERIFIED';
+           Cry = 'sret_sub_callee_spec.cry';
+           CryptolFn = 'wrap_canonicalize_spec';
+           Function = 'wrap_canonicalize' }
     )
 }

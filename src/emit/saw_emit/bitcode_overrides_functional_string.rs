@@ -435,7 +435,7 @@ mod tests {
         );
         assert!(out.contains("llvm_fresh_var \"sz\""));
         assert!(out.contains("llvm_points_to (llvm_elem s 1) (llvm_term sz)"));
-        assert!(out.contains("llvm_return (llvm_term {{ sz == 0 }})"));
+        assert!(out.contains("llvm_return (llvm_term {{ if sz == 0 then (1:[1]) else (0:[1]) }})"));
     }
 
     #[test]

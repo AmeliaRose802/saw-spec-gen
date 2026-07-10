@@ -39,6 +39,7 @@ mod stubs;
 mod types;
 mod verify_script;
 mod verify_script_close;
+mod verify_script_precond;
 mod verify_script_sret;
 mod verify_script_steps;
 mod vtable_ir;

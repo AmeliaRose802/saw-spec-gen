@@ -16,12 +16,12 @@
 /// Success-sentinel return value for a known threading status
 /// primitive, or `None` for any other symbol.
 ///
-/// MSVC/UCRT mutex primitives report `_Thrd_result`, whose success
-/// value `_Thrd_success` is `0`. In a lock-guarded body these land in
-/// the override set on every path (`std::scoped_lock` → `mutex::lock()`
-/// → `_Mtx_lock`), and a fresh-symbolic return lets the solver choose a
-/// failure code, sending `_Mutex_base::lock` down its `_Throw_Cpp_error`
-/// → `unreachable` path so the subgoal fails. Since SAW verifies the
+/// MSVC/UCRT mutex primitives and Linux pthread/gthread mutex lock and
+/// unlock primitives return `0` on success. In a lock-guarded body these
+/// land in the override set on every path (`std::scoped_lock` →
+/// `mutex::lock()`), and a fresh-symbolic return lets the solver choose
+/// a failure code, sending the implementation down an exception/
+/// `unreachable` path so the subgoal fails. Since SAW verifies the
 /// *sequential* transition (concurrency is out of scope), an
 /// uncontended lock/unlock/init/destroy always succeeds, so pinning `0`
 /// is sound for these.
@@ -38,10 +38,12 @@ pub fn success_sentinel(symbol: &str) -> Option<i64> {
         "_Mtx_unlock",
         "_Mtx_init",
         "_Mtx_destroy",
-        // POSIX pthread mutex family (Linux/macOS). In a sequential proof
-        // the mutex is always uncontended, so these always succeed (return 0).
-        // `pthread_mutex_trylock` is intentionally excluded — it can return
-        // EBUSY in a well-formed program.
+        // POSIX pthread/gthread mutex family (Linux/macOS). In a sequential
+        // proof the mutex is always uncontended, so these always succeed
+        // (return 0). `pthread_mutex_trylock` is intentionally excluded —
+        // it can return EBUSY in a well-formed program.
+        "__gthread_mutex_lock",
+        "__gthread_mutex_unlock",
         "pthread_mutex_lock",
         "pthread_mutex_unlock",
         "pthread_mutex_init",
@@ -100,7 +102,18 @@ mod tests {
 
     #[test]
     fn pins_mutex_family() {
-        for sym in ["_Mtx_lock", "_Mtx_unlock", "_Mtx_init", "_Mtx_destroy"] {
+        for sym in [
+            "_Mtx_lock",
+            "_Mtx_unlock",
+            "_Mtx_init",
+            "_Mtx_destroy",
+            "__gthread_mutex_lock",
+            "__gthread_mutex_unlock",
+            "pthread_mutex_lock",
+            "pthread_mutex_unlock",
+            "pthread_mutex_init",
+            "pthread_mutex_destroy",
+        ] {
             assert_eq!(success_sentinel(sym), Some(0), "{sym} should pin 0");
         }
     }

@@ -9,6 +9,7 @@ use super::cryptol_bridge::cryptol_arg_for;
 use super::names::{sanitize_name, spec_safe_id};
 use super::overrides::{container_layout_for, emit_container_this};
 use super::stubs::AssembledStubs;
+use super::verify_script_precond::{emit_param_preconditions, emit_param_preconditions_filtered};
 use super::verify_script_sret::SretPrestate;
 use crate::buffer_overrides::BufferOverrides;
 use crate::constraints::*;
@@ -16,65 +17,6 @@ use std::collections::HashSet;
 
 pub(super) fn is_operator_new(spec: &SpecConstraint) -> bool {
     spec.function_name == "operator new" || spec.mangled_name.as_deref() == Some("??2@YAPEAX_K@Z")
-}
-
-/// Emit the per-parameter `llvm_precond` clauses derived in
-/// [`crate::constraints::derive`]. Lines that look like comments are
-/// passed through verbatim; everything else gets a trailing `;`.
-fn emit_param_preconditions(out: &mut String, preconditions: &[String]) {
-    for pre in preconditions {
-        let trimmed = pre.trim_start();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if trimmed.starts_with("//") {
-            out.push_str(&format!("    {pre}\n"));
-        } else {
-            out.push_str(&format!("    {pre};\n"));
-        }
-    }
-}
-
-/// Like [`emit_param_preconditions`] but drops the auto-emitted
-/// "unsized pointer" TODO block (the multi-line warning starting
-/// with `// TODO[saw-spec-gen]: pointer parameter \`<name>\` has no
-/// length annotation.`). Used in the buffer-override branch where
-/// the CLI flag has already supplied the missing size and the
-/// warning would only be noise.
-///
-/// The block layout is owned by
-/// [`crate::constraints::length_companion::LengthCompanionGuess::todo_lines`];
-/// every continuation line is indented under `//   `, so we drop
-/// every consecutive `//   ` line after the marker rather than
-/// hard-coding a continuation count.
-fn emit_param_preconditions_filtered(out: &mut String, preconditions: &[String], param_name: &str) {
-    let todo_marker = format!(
-        "// TODO[saw-spec-gen]: pointer parameter `{param_name}` has no length annotation.",
-    );
-    let mut iter = preconditions.iter().peekable();
-    while let Some(pre) = iter.next() {
-        if pre.trim_start() == todo_marker {
-            // Skip every consecutive continuation comment line that
-            // belongs to this TODO block (they all start with `//   `).
-            while let Some(next) = iter.peek() {
-                if next.trim_start().starts_with("//   ") {
-                    iter.next();
-                } else {
-                    break;
-                }
-            }
-            continue;
-        }
-        let trimmed = pre.trim_start();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if trimmed.starts_with("//") {
-            out.push_str(&format!("    {pre}\n"));
-        } else {
-            out.push_str(&format!("    {pre};\n"));
-        }
-    }
 }
 
 pub(super) fn emit_load_bitcode_step(

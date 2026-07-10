@@ -32,12 +32,6 @@ pub struct VerifyRequest {
     pub cxx_standard: Option<String>,
     pub clang_flags: Vec<String>,
     pub config: Option<PathBuf>,
-    pub in_buffer_size: Vec<String>,
-    pub out_buffer_param: Vec<String>,
-    pub cryptol_fn_out: Vec<String>,
-    pub max_len_precond: Vec<String>,
-    pub no_struct_shape_recognizer: bool,
-    pub spec_only_on_missing: bool,
 }
 
 pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
@@ -57,6 +51,19 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
                 .with_context(|| format!("failed to resolve config {}", p.display()))
         })
         .transpose()?;
+    // Resolve `spec_only_on_missing` from config (explicit path or
+    // spec-relative auto-discovery). The forked `gen-verify` subprocess
+    // does its own config discovery for shaping; this local copy only
+    // drives verify-cpp's own soft-exit decision below.
+    let spec_only_on_missing = {
+        let cwd = std::env::current_dir()?;
+        match config.as_deref() {
+            Some(p) => crate::project_config::ProjectConfig::load(p)?,
+            None => crate::project_config::ProjectConfig::discover_for_spec(&cryptol_spec, &cwd)?,
+        }
+        .apply(&req.cryptol_fn)
+        .spec_only_on_missing
+    };
     let include_dirs = req
         .include_dirs
         .iter()
@@ -170,14 +177,8 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
         &req.cryptol_fn,
         &req.function,
         config.as_deref(),
-        &req.in_buffer_size,
-        &req.out_buffer_param,
-        &req.cryptol_fn_out,
-        &req.max_len_precond,
-        req.no_struct_shape_recognizer,
-        req.spec_only_on_missing,
     )?;
-    if req.spec_only_on_missing && is_spec_only_result(&output_dir)? {
+    if spec_only_on_missing && is_spec_only_result(&output_dir)? {
         eprintln!(
             "spec-only: no C++ implementation for '{}' — skipping SAW.",
             req.function
@@ -217,12 +218,6 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
             cryptol_fn: &req.cryptol_fn,
             function: &req.function,
             config: config.as_deref(),
-            in_buffer_size: &req.in_buffer_size,
-            out_buffer_param: &req.out_buffer_param,
-            cryptol_fn_out: &req.cryptol_fn_out,
-            max_len_precond: &req.max_len_precond,
-            no_struct_shape_recognizer: req.no_struct_shape_recognizer,
-            spec_only_on_missing: req.spec_only_on_missing,
         })?;
         saw_output = run_saw(saw, &output_dir, "verify.saw")?;
     }

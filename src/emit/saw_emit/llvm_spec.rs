@@ -296,6 +296,17 @@ pub fn generate_unspecified_spec(spec: &SpecConstraint, all_globals: &[GlobalVar
             }
         }
     }
+    // sret: if the callee returns an aggregate via a hidden first pointer
+    // argument, allocate that buffer and prepend it to the argument list
+    // so the generated `llvm_execute_func` call has the correct arity.
+    if spec.return_constraint.is_sret {
+        out.push_str("    // sret: struct returned via hidden first pointer parameter\n");
+        out.push_str(&format!(
+            "    result_ptr <- llvm_alloc ({});\n",
+            spec.return_constraint.saw_type,
+        ));
+        args.insert(0, "result_ptr".to_string());
+    }
     // Each global the caller may touch needs to be declared so we can
     // refer to it in the post-state. Without `llvm_alloc_global` SAW
     // rejects `llvm_points_to (llvm_global X)` outright.
@@ -305,7 +316,16 @@ pub fn generate_unspecified_spec(spec: &SpecConstraint, all_globals: &[GlobalVar
     out.push_str(&format!("\n    llvm_execute_func [{}];\n", args.join(", "),));
 
     // Post-state: return value (if any) is unconstrained.
-    if !crate::emit::saw_emit::writer::is_void_saw_type(&spec.return_constraint.saw_type) {
+    if spec.return_constraint.is_sret {
+        // sret: write an unconstrained value through the hidden return
+        // pointer. The callee's LLVM return type is void, so no
+        // llvm_return call is needed.
+        out.push_str(&format!(
+            "    ret <- llvm_fresh_var \"ret\" ({});\n",
+            spec.return_constraint.saw_type,
+        ));
+        out.push_str("    llvm_points_to result_ptr (llvm_term ret);\n");
+    } else if !crate::emit::saw_emit::writer::is_void_saw_type(&spec.return_constraint.saw_type) {
         if spec.return_constraint.returns_pointer {
             // Allocate AND initialize the pointee with a fresh symbolic
             // value. Without the `llvm_points_to`, any dereference in

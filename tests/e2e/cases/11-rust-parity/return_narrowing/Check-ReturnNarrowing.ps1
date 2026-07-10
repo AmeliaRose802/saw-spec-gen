@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
-    Custom e2e test: verify that --variant-map return=... emits a
+    Custom e2e test: verify that a config `variant_map = ["return=..."]`
+    emits a
     two-variant if/then/else narrowing adapter in the generated SAW
     script. When a Cryptol spec returns Bit (True/False) but the Rust
     impl returns u8 (discriminant 0/1), the adapter bridges them.
@@ -40,18 +41,17 @@ $bcFile = Join-Path $outDir 'check_positive_verified.bc'
 $llFile = Join-Path $outDir 'check_positive_verified.ll'
 & $llvmDis $bcFile -o $llFile 2>&1 | Write-Host
 
-# ── Call gen-verify-rust with --variant-map on return ─────────────────────────
+# ── Call gen-verify-rust; return variant map comes from config ────────────────
 & $specGen gen-verify-rust `
     --llvm-ir      $llFile `
     --bitcode      $bcFile `
     --cryptol-spec $cryFile `
     --cryptol-fn   check_positive_spec `
     --function     check_positive `
-    --output       $outDir `
-    --variant-map  'return=Ok:0,Err:1' 2>&1 | Write-Host
+    --output       $outDir 2>&1 | Write-Host
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "gen-verify-rust with return variant-map failed"
+    Write-Error "gen-verify-rust with return variant map failed"
     Write-Host "RESULT: DISPROVED"
     exit 1
 }
