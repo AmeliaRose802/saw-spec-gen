@@ -9,8 +9,9 @@ use crate::verify_result::write_verify_result;
 use crate::verify_tools::ToolPaths;
 use anyhow::{bail, Context, Result};
 use compile::{
-    build_clang_flags, dump_ast, emit_bitcode, emit_llvm_ir, is_spec_only_result, maybe_filter_ast,
-    maybe_lower_exceptions, patch_ir_and_reassemble, recompile_at_o1, run_gen_verify, O1Recompile,
+    build_clang_flags, detect_proof_mode, dump_ast, emit_bitcode, emit_llvm_ir,
+    is_spec_only_result, maybe_filter_ast, maybe_lower_exceptions, patch_ir_and_reassemble,
+    recompile_at_o1, run_gen_verify, O1Recompile,
 };
 use counterexample::{evaluate_counterexample, parse_counterexample, report_disproved};
 use std::ffi::OsStr;
@@ -38,6 +39,10 @@ pub struct VerifyRequest {
     pub max_len_precond: Vec<String>,
     pub no_struct_shape_recognizer: bool,
     pub spec_only_on_missing: bool,
+    /// Cryptol predicates declared as loop invariants.  When non-empty,
+    /// `gen-verify` switches to `llvm_verify_fixpoint_chc` and the
+    /// `result.json` records `proof_mode: "invariant"`.
+    pub loop_invariants: Vec<String>,
 }
 
 pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
@@ -176,6 +181,7 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
         &req.max_len_precond,
         req.no_struct_shape_recognizer,
         req.spec_only_on_missing,
+        &req.loop_invariants,
     )?;
     if req.spec_only_on_missing && is_spec_only_result(&output_dir)? {
         eprintln!(
@@ -184,6 +190,12 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
         );
         return Ok(VerifyOutcome { exit_code: 0 });
     }
+
+    // Detect proof mode from the generated verify.saw.  The script contains
+    // a `// proof_mode: invariant` marker when loop invariants were declared
+    // (either via CLI --loop-invariant flags or via config loop_invariants).
+    // Read it here so the result.json reflects what the script actually does.
+    let proof_mode = detect_proof_mode(&output_dir);
 
     let saw_started = Instant::now();
     let mut saw_output = run_saw(saw, &output_dir, "verify.saw")?;
@@ -223,6 +235,7 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
             max_len_precond: &req.max_len_precond,
             no_struct_shape_recognizer: req.no_struct_shape_recognizer,
             spec_only_on_missing: req.spec_only_on_missing,
+            loop_invariants: &req.loop_invariants,
         })?;
         saw_output = run_saw(saw, &output_dir, "verify.saw")?;
     }
@@ -263,6 +276,7 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
             Some("z3"),
             Some(time_secs),
             impl_file,
+            proof_mode,
         )?;
         update_inventory(&output_dir)?;
         return Ok(VerifyOutcome { exit_code: 1 });
@@ -281,6 +295,7 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
             Some("z3"),
             Some(time_secs),
             impl_file,
+            proof_mode,
         )?;
         update_inventory(&output_dir)?;
         return Ok(VerifyOutcome { exit_code: 0 });
@@ -298,6 +313,7 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
         Some("z3"),
         Some(time_secs),
         impl_file,
+        proof_mode,
     )?;
     update_inventory(&output_dir)?;
     Ok(VerifyOutcome { exit_code: 2 })

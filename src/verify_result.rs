@@ -21,6 +21,7 @@ struct VerifyResult<'a> {
     function: &'a str,
     cryptol_fn: &'a str,
     verdict: &'a str,
+    proof_mode: &'a str,
     counterexample: &'a [CounterexampleEntry],
     expected: Option<&'a str>,
     actual: Option<&'a str>,
@@ -61,6 +62,7 @@ pub fn write_verify_result(
     solver: Option<&str>,
     time_secs: Option<f64>,
     impl_file: Option<&str>,
+    proof_mode: &str,
 ) -> Result<()> {
     let payload = VerifyResult {
         schema_version: RESULT_SCHEMA_VERSION,
@@ -68,6 +70,7 @@ pub fn write_verify_result(
         function,
         cryptol_fn,
         verdict,
+        proof_mode,
         counterexample,
         expected,
         actual,
@@ -137,6 +140,7 @@ mod tests {
             Some("z3"),
             Some(1.25),
             Some("f.cpp"),
+            "bounded",
         )
         .unwrap();
         let json: serde_json::Value =
@@ -144,11 +148,37 @@ mod tests {
                 .unwrap();
         assert_eq!(json["schema_version"], "1");
         assert_eq!(json["verdict"], "DISPROVED");
+        assert_eq!(json["proof_mode"], "bounded");
         assert_eq!(json["counterexample"][0]["bits"], 32);
         assert_eq!(json["expected"], "8");
         assert_eq!(json["actual"], "0");
         assert_eq!(json["solver"], "z3");
         assert_eq!(json["impl_file"], "f.cpp");
+    }
+
+    #[test]
+    fn writes_invariant_proof_mode() {
+        let dir = tempdir_compat::TempDir::new("verify-result-inv").unwrap();
+        write_verify_result(
+            dir.path(),
+            "cpp",
+            "g",
+            "g_spec",
+            "VERIFIED",
+            &[],
+            None,
+            None,
+            Some("z3"),
+            Some(0.5),
+            Some("g.cpp"),
+            "invariant",
+        )
+        .unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.path().join("result.json")).unwrap())
+                .unwrap();
+        assert_eq!(json["proof_mode"], "invariant");
+        assert_eq!(json["verdict"], "VERIFIED");
     }
 
     #[test]

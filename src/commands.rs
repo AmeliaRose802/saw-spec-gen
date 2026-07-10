@@ -1,5 +1,4 @@
 //! Subcommand handler implementations for the `saw-spec-gen` binary.
-//!
 //! `main.rs` parses CLI args into [`Commands`] and immediately delegates
 //! here so the binary entry point stays small.
 
@@ -45,6 +44,7 @@ pub fn verify_cmd(
         max_len_precond,
         no_struct_shape_recognizer,
         spec_only_on_missing,
+        loop_invariants: Vec::new(),
     })?;
     std::process::exit(outcome.exit_code);
 }
@@ -136,8 +136,6 @@ fn emit_clang_ast_stubs(
     // could write to any global, so havoc specs need the full list — not just
     // ones referenced by filtered functions.
     let all_globals = clang_ast::extract_all_globals(ast)?;
-
-    // Detect which classes have explicit virtual destructors.
     let classes_with_vdtor = clang_ast::classes_with_virtual_dtor(ast);
 
     saw_emit::emit_interface_stubs(
@@ -256,7 +254,6 @@ fn emit_llvm_ir_overrides(
         return Ok(());
     }
 
-    // Generate scaffold override specs for external calls
     let overrides_dir = output.join("overrides");
     std::fs::create_dir_all(&overrides_dir)?;
 
@@ -328,6 +325,7 @@ pub fn gen_verify_cmd(
     max_len_precond: Vec<String>,
     cryptol_arg_order: Vec<String>,
     variant_map: Vec<String>,
+    loop_invariants: Vec<String>,
     no_struct_shape_recognizer: bool,
     container_layouts: Option<PathBuf>,
     config: Option<PathBuf>,
@@ -355,10 +353,10 @@ pub fn gen_verify_cmd(
             cryptol_fn_pre,
             cryptol_arg_order,
             variant_map,
+            loop_invariants,
         },
     );
 
-    // Auto-detect language: Rust when --llvm-ir is provided without --ast
     let effective_lang = match lang.as_deref() {
         Some("rust") => "rust",
         Some("cpp") => "cpp",
@@ -425,6 +423,7 @@ pub fn gen_verify_cmd(
         merged.no_struct_shape_recognizer,
         container_layouts.as_deref(),
         &merged.uninterpreted,
+        &merged.loop_invariants,
     )
 }
 

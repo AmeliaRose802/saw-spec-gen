@@ -204,6 +204,7 @@ pub(super) fn run_gen_verify(
     max_len_precond: &[String],
     no_struct_shape_recognizer: bool,
     spec_only_on_missing: bool,
+    loop_invariants: &[String],
 ) -> Result<()> {
     let self_exe = std::env::current_exe()?;
     let mut cmd = Command::new(self_exe);
@@ -244,6 +245,9 @@ pub(super) fn run_gen_verify(
     if spec_only_on_missing {
         cmd.arg("--spec-only-on-missing");
     }
+    for inv in loop_invariants {
+        cmd.arg("--loop-invariant").arg(inv);
+    }
     run_command(&mut cmd, "gen-verify")
 }
 
@@ -254,6 +258,23 @@ pub(super) fn is_spec_only_result(output_dir: &Path) -> Result<bool> {
     }
     let value: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(result_path)?)?;
     Ok(value.get("status").and_then(|v| v.as_str()) == Some("not_attempted"))
+}
+
+/// Detect the proof mode from the generated `verify.saw` script.
+///
+/// Returns `"invariant"` when the script contains the `// proof_mode:
+/// invariant` marker emitted by fixpoint/CHC mode, and `"bounded"`
+/// otherwise (including when the script doesn't exist yet).
+pub(super) fn detect_proof_mode(output_dir: &Path) -> &'static str {
+    let saw_path = output_dir.join("verify.saw");
+    let Ok(contents) = std::fs::read_to_string(&saw_path) else {
+        return "bounded";
+    };
+    if contents.contains("// proof_mode: invariant") {
+        "invariant"
+    } else {
+        "bounded"
+    }
 }
 
 /// Inputs for the one-shot `-O1` recompile fallback ([`recompile_at_o1`]).
@@ -279,6 +300,7 @@ pub(super) struct O1Recompile<'a> {
     pub max_len_precond: &'a [String],
     pub no_struct_shape_recognizer: bool,
     pub spec_only_on_missing: bool,
+    pub loop_invariants: &'a [String],
 }
 
 /// Recompile the C++ target at `-O1` and regenerate the verify script.
@@ -332,5 +354,6 @@ pub(super) fn recompile_at_o1(ctx: &O1Recompile) -> Result<()> {
         ctx.max_len_precond,
         ctx.no_struct_shape_recognizer,
         ctx.spec_only_on_missing,
+        ctx.loop_invariants,
     )
 }

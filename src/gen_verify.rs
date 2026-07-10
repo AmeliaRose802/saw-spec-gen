@@ -1,5 +1,4 @@
 //! Driver for the `gen-verify` subcommand.
-//!
 //! Runs the full C++ → SAW verification pipeline:
 //!   1. Parse clang AST (one or more files, merged into a synthetic TU)
 //!   2. Derive target function + global / call-graph info
@@ -34,6 +33,7 @@ pub fn run(
     no_struct_shape_recognizer: bool,
     container_layouts: Option<&Path>,
     uninterpreted_cfg: &[crate::uninterpreted::UninterpretedEntry],
+    loop_invariants: &[String],
 ) -> Result<()> {
     if ast.is_empty() {
         anyhow::bail!("At least one --ast file is required");
@@ -494,6 +494,7 @@ pub fn run(
         &buffer_overrides,
         has_source_sal_annotations && bitcode_has_var_annotation,
         &uninterpreted,
+        loop_invariants,
     )?;
 
     // Post-processing: rewrite unresolved `llvm_alias "X"` references into

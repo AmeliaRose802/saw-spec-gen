@@ -1,0 +1,15 @@
+# saw-spec-gen config for scan_prefix_spec.cry
+#
+# Declares a loop invariant for the fixpoint/CHC proof mode.
+# When `loop_invariants` is non-empty, saw-spec-gen emits
+# `llvm_verify_fixpoint_chc` in the generated verify.saw (instead of
+# the default bounded `llvm_verify`) and writes `proof_mode: "invariant"`
+# in result.json.
+#
+# Requires a SAW build with CHC/fixpoint support.  The bounded path
+# remains the default when this table is absent.
+
+[functions.scan_prefix_spec]
+loop_invariants = ["scan_prefix_inv"]
+in_buffer_size  = ["buf=32"]
+max_len_precond = ["len=32"]

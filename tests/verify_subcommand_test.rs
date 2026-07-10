@@ -142,6 +142,81 @@ fn verify_subcommand_forwards_shaping_flags_without_passthrough() {
     );
 }
 
+#[test]
+fn verify_subcommand_loop_invariant_config_emits_fixpoint_chc() {
+    // Verify that declaring loop_invariants in the sibling .toml config
+    // for the ComputeChecksum_spec Cryptol function (the function used in
+    // FakeVerifyEnv's fixture):
+    //   1. Switches verify.saw from llvm_verify to llvm_verify_fixpoint_chc
+    //   2. Adds a proof_mode comment in verify.saw
+    //   3. Writes proof_mode: "invariant" in result.json
+    let env = FakeVerifyEnv::new(SawMode::Verified);
+    let out_dir = env.root.path().join("out_invariant");
+    std::fs::write(
+        env.cry_file.with_extension("toml"),
+        r#"[functions.ComputeChecksum_spec]
+loop_invariants = ["checksum_loop_inv"]
+"#,
+    )
+    .unwrap();
+
+    let status = env.run_verify_with_args(&out_dir, &[]);
+    assert!(status.success(), "verify failed: {status:?}");
+
+    let saw = std::fs::read_to_string(out_dir.join("verify.saw")).unwrap();
+    assert!(
+        saw.contains("llvm_verify_fixpoint_chc"),
+        "expected llvm_verify_fixpoint_chc in invariant mode; got:\n{saw}"
+    );
+    assert!(
+        saw.contains("// proof_mode: invariant"),
+        "expected proof_mode comment in verify.saw; got:\n{saw}"
+    );
+    assert!(
+        saw.contains("// Loop invariants declared:"),
+        "expected invariant list comment; got:\n{saw}"
+    );
+    assert!(
+        saw.contains("//   - checksum_loop_inv"),
+        "expected invariant name in comment; got:\n{saw}"
+    );
+    assert!(
+        !saw.contains("llvm_verify m "),
+        "should NOT use plain llvm_verify in invariant mode; got:\n{saw}"
+    );
+
+    let result: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(out_dir.join("result.json")).unwrap())
+            .unwrap();
+    assert_eq!(result["proof_mode"], "invariant");
+}
+
+#[test]
+fn verify_subcommand_default_mode_is_bounded() {
+    // Without loop_invariants, the generated script uses plain llvm_verify
+    // and result.json has proof_mode: "bounded".
+    let env = FakeVerifyEnv::new(SawMode::Verified);
+    let out_dir = env.root.path().join("out_bounded");
+
+    let status = env.run_verify_with_args(&out_dir, &[]);
+    assert!(status.success(), "verify failed: {status:?}");
+
+    let saw = std::fs::read_to_string(out_dir.join("verify.saw")).unwrap();
+    assert!(
+        saw.contains("llvm_verify m "),
+        "expected plain llvm_verify in bounded mode; got:\n{saw}"
+    );
+    assert!(
+        !saw.contains("llvm_verify_fixpoint_chc"),
+        "should NOT use fixpoint_chc in bounded mode; got:\n{saw}"
+    );
+
+    let result: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(out_dir.join("result.json")).unwrap())
+            .unwrap();
+    assert_eq!(result["proof_mode"], "bounded");
+}
+
 struct FakeVerifyEnv {
     root: TempDir,
     cpp_file: PathBuf,
