@@ -1,0 +1,7 @@
+// Placeholder Cryptol spec for the optional_sret E2E test.
+//
+// gen-verify only needs a syntactically valid function with the right
+// name; the type compatibility between the Cryptol function and the C++
+// function is checked by SAW, which this custom checker does not invoke.
+get_key_spec : [32] -> [32]
+get_key_spec id = id

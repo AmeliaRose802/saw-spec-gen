@@ -343,6 +343,17 @@
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/unique_ptr_deref_havoc'; File = 'add_one_gap_disproved.cpp';  Expected = 'DISPROVED' }
         @{ Tag = 'stl_coverage'; Runner = 'cpp'; Dir = 'tests/e2e/cases/10-stl-coverage/unique_ptr_deref_havoc'; File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
 
+        # optional_sret: std::optional<proto::Key> return via sret.
+        # Exercises the three-part fix that prevented SAW from reaching proof
+        # obligations for std::optional returns:
+        #   Fix 1 — sret byte-size fallback when dereferenceable(N) is absent.
+        #   Fix 2 — is_complex_stl_template() byte-array rewrite (MSVC ABI).
+        #   Fix 3 — normalize_template_args() namespace-strip match (Itanium ABI).
+        # SAW is NOT invoked; the checker verifies spec-generation output only.
+        @{ Tag = 'stl_coverage'; Runner = 'custom'; Expected = 'VERIFIED';
+           Script = 'tests/e2e/cases/10-stl-coverage/optional_sret/Check-OptionalSret.ps1';
+           ScriptArgs = @{} }
+
         # ── sret pre-state slice (09-type-coverage) ─────────────────────────────
         # Returns a 16-byte struct via sret. Cryptol model has a trailing
         # [12][8] pre-state param (body field at offset 4) — saw-spec-gen must
