@@ -468,3 +468,58 @@ declare void @user_helper()
         log.globals_written,
     );
 }
+
+#[test]
+fn msvc_mutex_helper_defined_in_module_is_flagged() {
+    // `_Verify_ownership_levels` is defined in-module with `linkonce_odr`
+    // linkage (not `declare`-only). The existing scan path skips defined
+    // bodies that don't use va_* intrinsics and aren't in the STL override
+    // list. The `MsvcMutexHelper` classification ensures these get an
+    // override so SAW's simulator never steps into their typed
+    // `_Mutex_base` reads, which would cause "Error during memory load"
+    // when the struct is modeled as flat symbolic bytes.
+    let ir = r#"
+define i32 @target(ptr %self) {
+  %1 = call i1 @"?_Verify_ownership_levels@_Mutex_base@std@@IEAA_NXZ"(ptr %self)
+  ret i32 0
+}
+
+define linkonce_odr i1 @"?_Verify_ownership_levels@_Mutex_base@std@@IEAA_NXZ"(ptr noundef %0) {
+  %2 = load i32, ptr %0, align 4
+  ret i1 true
+}
+"#;
+    let targets = scan(ir, "target");
+    let helper = targets
+        .iter()
+        .find(|t| t.symbol == "?_Verify_ownership_levels@_Mutex_base@std@@IEAA_NXZ")
+        .expect("defined-in-module _Verify_ownership_levels must be in override set");
+    assert_eq!(
+        helper.reason,
+        BrokenReason::MsvcMutexHelper,
+        "must be classified as MsvcMutexHelper, not skipped"
+    );
+    assert_eq!(helper.return_ir_type, "i1");
+    assert!(!helper.is_variadic);
+}
+
+#[test]
+fn non_mutex_defined_function_is_still_skipped() {
+    // A plain defined function without va_* and not in any allowlist
+    // must NOT be added to the override set — only the target function
+    // itself can be verified, not every helper.
+    let ir = r#"
+define i32 @target() {
+  %1 = call i32 @helper()
+  ret i32 %1
+}
+define i32 @helper() {
+  ret i32 42
+}
+"#;
+    let targets = scan(ir, "target");
+    assert!(
+        targets.iter().all(|t| t.symbol != "helper"),
+        "plain defined helper must not be overridden"
+    );
+}
