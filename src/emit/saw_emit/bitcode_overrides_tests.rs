@@ -11,7 +11,7 @@ fn target(
     target_with_writes(symbol, params, ret, variadic, reason, &[])
 }
 
-/// Same as [`target`] but with explicit per-target written globals.
+/// Same as [`target`] but lets tests specify per-target written globals.
 fn target_with_writes(
     symbol: &str,
     params: &[&str],
@@ -410,7 +410,8 @@ fn declare_only_extern_clobbers_globals_in_written_set() {
 
 #[test]
 fn mutex_lock_pins_success_sentinel_return() {
-    // `_Mtx_lock` must pin `_Thrd_success` (0) instead of returning fresh symbolic i32.
+    // A fresh symbolic return can pick failure codes and send lock-guarded
+    // paths through `_Throw_Cpp_error` → `unreachable`; pin `_Thrd_success` (0).
     let t = target(
         "_Mtx_lock",
         &["ptr"],
