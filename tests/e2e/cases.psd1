@@ -545,5 +545,18 @@
            Cry = 'sret_sub_callee_spec.cry';
            CryptolFn = 'wrap_canonicalize_spec';
            Function = 'wrap_canonicalize' }
+
+        # sret sub-callee recovered from IR (hmac_sha256 arg-mismatch):
+        # the sub-callee returns std::array<uint8_t,32>, which the AST
+        # does NOT classify as sret. ensure_sret_from_ir recovers the
+        # hidden sret output pointer from the LLVM IR signature so the
+        # generated havoc override has the correct 3-argument call shape.
+        # Without the fix SAW rejects it with "Argument 2 unspecified".
+        @{ Tag = 'aggregate_bridge'; Runner = 'cpp';
+           Dir = 'tests/e2e/cases/12-aggregate-bridge/sret_sub_callee_bytearray';
+           File = 'sret_sub_callee_bytearray.cpp'; Expected = 'VERIFIED';
+           Cry = 'sret_sub_callee_bytearray_spec.cry';
+           CryptolFn = 'wrap_hmac_spec';
+           Function = 'wrap_hmac' }
     )
 }

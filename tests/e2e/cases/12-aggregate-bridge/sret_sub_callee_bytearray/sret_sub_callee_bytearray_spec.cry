@@ -1,0 +1,9 @@
+module sret_sub_callee_bytearray_spec where
+
+// Spec for wrap_hmac: calls an sret sub-callee (hmac_sha256) whose
+// return type is `std::array<uint8_t, 32>`. The AST does not classify
+// that return as sret, so `ensure_sret_from_ir` must recover it from
+// the LLVM IR signature for the generated havoc override to have the
+// correct call shape. The wrapper ignores the digest and returns x + 1.
+wrap_hmac_spec : [32] -> [32]
+wrap_hmac_spec x = x + 1
