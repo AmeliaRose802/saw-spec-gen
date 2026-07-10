@@ -193,11 +193,16 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
     // `std::optional` / `std::nullopt_t` ctors) that SAW's simulator
     // cannot load; `-O1` inlines them into plain byte stores. Only
     // fires on a non-conclusive result, so a real VERIFIED/DISPROVED
-    // verdict is never overridden.
-    if !saw_output.contains("VERIFIED")
-        && !saw_output.contains("Counterexample")
-        && is_empty_struct_load_failure(&saw_output)
-    {
+    // verdict is never overridden.  Internal simulation errors that
+    // surface alongside a `Counterexample` marker are not conclusive
+    // and are also eligible for the retry.
+    //
+    // A result is conclusive when SAW is VERIFIED, or when it has a
+    // Counterexample that is NOT an internal simulation error (i.e. a
+    // real semantic counterexample to the proof obligation).
+    let is_conclusive = saw_output.contains("VERIFIED")
+        || (saw_output.contains("Counterexample") && !is_internal_simulation_error(&saw_output));
+    if !is_conclusive && is_empty_struct_load_failure(&saw_output) {
         eprintln!(
             "note: SAW could not load the -O0 build (empty-struct global load); \
              retrying once at -O1."
@@ -224,6 +229,30 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
     let time_secs = saw_started.elapsed().as_secs_f64();
     let impl_file = cpp_file.file_name().and_then(OsStr::to_str);
     if saw_output.contains("Counterexample") {
+        if is_internal_simulation_error(&saw_output) {
+            eprintln!(
+                "note: SAW reported a Counterexample but the subgoal failure is an \
+                 internal simulation/memory-load error, not a semantic counterexample. \
+                 Classifying as UNKNOWN."
+            );
+            println!("RESULT: UNKNOWN");
+            write_verify_result(
+                &output_dir,
+                "cpp",
+                &req.function,
+                &req.cryptol_fn,
+                "UNKNOWN",
+                &[],
+                None,
+                None,
+                Some("z3"),
+                Some(time_secs),
+                impl_file,
+                Some("unknown_internal_memory_error"),
+            )?;
+            update_inventory(&output_dir)?;
+            return Ok(VerifyOutcome { exit_code: 2 });
+        }
         let counterexample = parse_counterexample(&saw_output);
         let (expected, actual) = evaluate_counterexample(
             saw,
@@ -258,6 +287,7 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
             Some("z3"),
             Some(time_secs),
             impl_file,
+            Some("disproved_counterexample"),
         )?;
         update_inventory(&output_dir)?;
         return Ok(VerifyOutcome { exit_code: 1 });
@@ -276,6 +306,7 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
             Some("z3"),
             Some(time_secs),
             impl_file,
+            None,
         )?;
         update_inventory(&output_dir)?;
         return Ok(VerifyOutcome { exit_code: 0 });
@@ -293,6 +324,7 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
         Some("z3"),
         Some(time_secs),
         impl_file,
+        None,
     )?;
     update_inventory(&output_dir)?;
     Ok(VerifyOutcome { exit_code: 2 })
@@ -319,6 +351,26 @@ fn is_empty_struct_load_failure(saw_output: &str) -> bool {
         || saw_output.contains("Unexpected zero-sized")
 }
 
+/// SAW transcript substring that identifies a subgoal failure caused by an
+/// internal simulation error (e.g. an unresolved STL accessor).
+const SAW_INTERNAL_ERROR_PATTERN: &str = "internal: error:";
+
+/// SAW transcript substring that identifies a symbolic memory-load failure.
+const SAW_MEMORY_LOAD_ERROR_PATTERN: &str = "Error during memory load";
+
+/// Returns `true` when the SAW transcript signals an internal simulation or
+/// memory-load error rather than a genuine semantic counterexample.  These
+/// appear as `Counterexample` sections in SAW output but are tooling failures
+/// (e.g. unresolved `std::optional` accessors under symbolic execution).
+///
+/// Patterns matched:
+/// - [`SAW_INTERNAL_ERROR_PATTERN`] — SAW subgoal failure with an internal error message
+/// - [`SAW_MEMORY_LOAD_ERROR_PATTERN`] — SAW failed to load through a symbolic pointer
+fn is_internal_simulation_error(saw_output: &str) -> bool {
+    saw_output.contains(SAW_INTERNAL_ERROR_PATTERN)
+        || saw_output.contains(SAW_MEMORY_LOAD_ERROR_PATTERN)
+}
+
 fn update_inventory(output_dir: &Path) -> Result<()> {
     let root = output_dir.parent().unwrap_or(output_dir);
     inventory::aggregate_inventory(root, &root.join("implementation_inventory.json"))
@@ -338,7 +390,7 @@ fn run_command(cmd: &mut Command, label: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::is_empty_struct_load_failure;
+    use super::{is_empty_struct_load_failure, is_internal_simulation_error};
 
     #[test]
     fn detects_memory_load_failure_signatures() {
@@ -356,5 +408,33 @@ mod tests {
         assert!(!is_empty_struct_load_failure("RESULT: VERIFIED"));
         assert!(!is_empty_struct_load_failure("Counterexample: x = 3"));
         assert!(!is_empty_struct_load_failure("z3: unknown"));
+    }
+
+    #[test]
+    fn detects_internal_simulation_errors() {
+        // internal: error: pattern (from std::optional accessor failures)
+        assert!(is_internal_simulation_error(
+            "Failed proof obligation: ?hasKey@KeyStore@sdep@@QEBA_NXZ \
+             internal: error: in ?has_value@?$optional@UEnrollmentKey@sdep@@@std@@QEBA_NXZ\n\
+             Subgoal failed: ?hasKey@KeyStore@sdep@@QEBA_NXZ \
+             internal: error: in ?has_value@?$optional@UEnrollmentKey@sdep@@@std@@QEBA_NXZ"
+        ));
+        // Error during memory load pattern
+        assert!(is_internal_simulation_error(
+            "Counterexample\nError during memory load\nRESULT: DISPROVED"
+        ));
+        // both patterns together
+        assert!(is_internal_simulation_error(
+            "internal: error: something\nError during memory load"
+        ));
+    }
+
+    #[test]
+    fn does_not_misclassify_real_counterexamples() {
+        assert!(!is_internal_simulation_error(
+            "Counterexample\n  x: 42\nSubgoal failed: ComputeChecksum\nRESULT: DISPROVED"
+        ));
+        assert!(!is_internal_simulation_error("RESULT: VERIFIED"));
+        assert!(!is_internal_simulation_error("z3: unknown"));
     }
 }
