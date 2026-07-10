@@ -249,6 +249,11 @@ pub(super) fn emit_equiv_spec_body(
 
     let mut cryptol_args = Vec::new();
     let mut execute_args = Vec::new();
+    // Cross-parameter preconditions (e.g. `llvm_precond {{ (len : [64]) <= N }}` emitted
+    // for `InReadsParam`-annotated buffer parameters) reference sibling length variables
+    // that are declared later in the parameter loop.  Collect them here and emit after all
+    // parameter declarations so every referenced variable is in scope.
+    let mut deferred_preconditions: Vec<(Vec<String>, Option<String>)> = Vec::new();
     for (i, param) in target_spec.params.iter().enumerate() {
         let iface = target_fn.params.get(i).and_then(|p| interface_of(&p.ty));
         if let Some(iface_name) = iface {
@@ -301,6 +306,12 @@ pub(super) fn emit_equiv_spec_body(
                 "    llvm_points_to {ptr_name} (llvm_term {val_name});\n",
             ));
             emit_param_preconditions_filtered(out, &param.preconditions, &param.name);
+
+            deferred_preconditions.push((
+                param.preconditions.clone(),
+                Some(param.name.clone()),
+            ));
+
             // Push the raw value name as the default Cryptol arg.
             // `--cryptol-arg-order` (consumed in
             // `emit_postcondition_and_close`) overrides this
@@ -316,7 +327,7 @@ pub(super) fn emit_equiv_spec_body(
                     "    {} <- llvm_fresh_var \"{}\" ({});\n",
                     param.name, param.name, param.saw_type,
                 ));
-                emit_param_preconditions(out, &param.preconditions);
+                deferred_preconditions.push((param.preconditions.clone(), None));
                 let arg_ty = target_fn
                     .params
                     .get(i)
@@ -351,7 +362,7 @@ pub(super) fn emit_equiv_spec_body(
                 out.push_str(&format!(
                     "    llvm_points_to {ptr_name} (llvm_term {val_name});\n",
                 ));
-                emit_param_preconditions(out, &param.preconditions);
+                deferred_preconditions.push((param.preconditions.clone(), None));
                 let arg_ty = target_fn
                     .params
                     .get(i)
@@ -360,6 +371,18 @@ pub(super) fn emit_equiv_spec_body(
                 cryptol_args.push(cryptol_arg_for(&val_name, arg_ty));
                 execute_args.push(ptr_name);
             }
+        }
+    }
+
+    // Emit all parameter preconditions after the full parameter declaration
+    // block so that cross-parameter references (e.g. `llvm_precond
+    // {{ (len : [64]) <= N }}` emitted for a buffer's `InReadsParam`
+    // annotation) are always in scope when evaluated by SAW.
+    for (preconditions, filter_name) in &deferred_preconditions {
+        if let Some(name) = filter_name {
+            emit_param_preconditions_filtered(out, preconditions, name);
+        } else {
+            emit_param_preconditions(out, preconditions);
         }
     }
 

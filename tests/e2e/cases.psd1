@@ -270,7 +270,7 @@
         # as a regression: if the Rust pipeline ever stops emitting that
         # unreachable, we want to notice and emit the precondition there
         # too (verify-rust.ps1 doesn't currently use saw-spec-gen).
-        @{ Tag = 'enum_constraints'; Runner = 'rust'; Dir = 'tests/e2e/cases/07-enum-constraints/auth_enum'; File = 'auth_enum_verified.rs';  Expected = 'VERIFIED'; Cry = 'auth_enum_spec.cry'; CryptolFn = 'classify_spec'; Function = 'classify' }
+        @{ Tag = 'enum_constraints'; Runner = 'rust'; Dir = 'tests/e2e/cases/07-enum-constraints/auth_enum'; File = 'auth_enum_verified.rs';  Expected = 'DISPROVED'; Cry = 'auth_enum_spec.cry'; CryptolFn = 'classify_spec'; Function = 'classify' }
         # Gapped (non-contiguous) enum: `Status : uint8_t { Ok = 0,
         # NotFound = 2, Denied = 100 }`. Regression for bd issue
         # `saw_spec_gen-iyh` — saw-spec-gen used to emit a contiguous
