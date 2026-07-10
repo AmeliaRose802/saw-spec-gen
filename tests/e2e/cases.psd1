@@ -541,5 +541,13 @@
         @{ Tag = 'aggregate_bridge'; Runner = 'custom'; Expected = 'VERIFIED';
            Script = 'tests/e2e/cases/12-aggregate-bridge/niche_enum_remap/Check-NicheEnumRemap.ps1';
            ScriptArgs = @{} }
+
+        # sret sub-callee havoc (issue #68): gen-verify must include the
+        # hidden sret return-pointer in llvm_execute_func for external
+        # C++ sub-callees that return a struct by value.  Requires clang;
+        # does NOT require SAW (only spec generation is checked).
+        @{ Tag = 'aggregate_bridge'; Runner = 'custom'; Expected = 'VERIFIED';
+           Script = 'tests/e2e/cases/12-aggregate-bridge/sret_sub_callee_havoc/Check-SretSubCalleeHavoc.ps1';
+           ScriptArgs = @{} }
     )
 }
