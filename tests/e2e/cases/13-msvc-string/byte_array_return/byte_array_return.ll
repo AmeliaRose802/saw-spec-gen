@@ -19,6 +19,8 @@ declare [16 x i8] @"?get_token@TokenProvider@@QEAA?AUToken@@XZ"()
 ; Function under test: calls the [16 x i8] extern (result discarded),
 ; then computes x+1.  gen-verify must handle the [16 x i8] return type
 ; when generating the override for the extern call.
+; Note: LLVM IR does not distinguish signed/unsigned at the type level;
+; `i32` is the standard representation for C `unsigned int (uint32_t)`.
 define i32 @add_one(i32 %x) {
 entry:
   %tok = call [16 x i8] @"?get_token@TokenProvider@@QEAA?AUToken@@XZ"()

@@ -30,6 +30,8 @@ declare i64 @"?size@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@
 
 ; add_one: creates a string, resizes to x+1, returns size().
 ; With functional MSVC overrides SAW proves this equals x+1.
+; Note: LLVM IR does not distinguish signed/unsigned at the type level;
+; `i32` is the standard representation for C `unsigned int (uint32_t)`.
 define i32 @add_one(i32 %x) {
 entry:
   %str = alloca %"class.std::basic_string<char,struct std::char_traits<char>,class std::allocator<char>>"
