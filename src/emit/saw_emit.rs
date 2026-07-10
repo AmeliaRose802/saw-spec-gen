@@ -68,6 +68,8 @@ pub use bitcode_overrides::{
     EmittedBitcodeOverrides,
 };
 #[allow(unused_imports)]
+pub use bitcode_overrides_functional::is_stl_functional;
+#[allow(unused_imports)]
 pub use factory::emit_interface_factory_spec;
 #[allow(unused_imports)]
 pub use llvm_spec::{

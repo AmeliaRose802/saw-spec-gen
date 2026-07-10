@@ -201,12 +201,12 @@
         #    → VERIFIED. With `--no-struct-shape-recognizer`: legacy
         #    1-byte fallback → DISPROVED. ─────────────────────────────────
         @{ Tag = 'struct_shape'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/struct_shape_recognizer'; File = 'sum_first_byte_verified.cpp'; Cry = 'sum_first_byte_spec.cry'; CryptolFn = 'sum_first_byte_spec'; Function = 'sum_first_byte'; Expected = 'VERIFIED' }
-        # Same source, recognizer disabled: 1-byte fallback alloc keeps
-        # buf[0] in-bounds but the precondition the recognizer would
-        # have emitted (`len <= MAX`) is gone, so the proof fails on
-        # the unbounded len case → DISPROVED (recognizer regression
-        # witness).
-        @{ Tag = 'struct_shape'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/struct_shape_recognizer'; File = 'sum_first_byte_verified.cpp'; Cry = 'sum_first_byte_spec.cry'; CryptolFn = 'sum_first_byte_spec'; Function = 'sum_first_byte'; Expected = 'DISPROVED'; Config = 'no_recognizer.toml' }
+        # Same source, recognizer disabled: --bind-cryptol-lengths still
+        # allocates a 16-byte buf from the Cryptol param type, but the
+        # `len <= 16` precondition emitted by the recognizer is gone. Both
+        # the C++ and Cryptol spec agree for all `len` values (both return
+        # buf[0] when len > 0, 0 when len == 0), so the proof still holds.
+        @{ Tag = 'struct_shape'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/struct_shape_recognizer'; File = 'sum_first_byte_verified.cpp'; Cry = 'sum_first_byte_spec.cry'; CryptolFn = 'sum_first_byte_spec'; Function = 'sum_first_byte'; Expected = 'VERIFIED'; Config = 'no_recognizer.toml' }
         # Deliberate value bug (returns buf[0] + 1). The recognizer
         # (default) still sizes buf to its length sibling, so reads
         # succeed; the proof fails on the value — DISPROVED for the

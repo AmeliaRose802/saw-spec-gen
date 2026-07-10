@@ -104,6 +104,15 @@ pub fn classify(mangled: &str) -> Option<StlMethod> {
     None
 }
 
+/// Returns `true` when `mangled` has a curated functional model in the
+/// bitcode override scan (i.e., `classify` would return `Some`). Used by
+/// `gen_verify` to exclude these symbols from the AST-derived
+/// `already_covered` list so the bitcode scan can emit the correct
+/// functional override instead of a generic havoc spec.
+pub fn is_stl_functional(mangled: &str) -> bool {
+    classify(mangled).is_some()
+}
+
 fn is_basic_string(mangled: &str) -> bool {
     mangled.contains("St7__cxx1112basic_string")
         || mangled.contains("St12basic_string")
