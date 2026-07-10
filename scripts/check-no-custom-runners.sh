@@ -30,7 +30,7 @@ while IFS= read -r script_path; do
         violations+=("  $script_path")
         failed=1
     fi
-done < <(grep -v '^\s*#' "$MANIFEST" | grep -oP "Script\s*=\s*'\K[^']+")
+done < <(grep -v '^[[:space:]]*#' "$MANIFEST" | grep -oP "Script\s*=\s*'\K[^']+")
 
 if [ "${#violations[@]}" -gt 0 ]; then
     echo ''
@@ -48,7 +48,7 @@ if [ "${#violations[@]}" -gt 0 ]; then
 fi
 
 if [ "$failed" -eq 0 ]; then
-    count=$(grep -v '^\s*#' "$ALLOWLIST" 2>/dev/null | grep -c "Script\s*=" || true)
+    count=$(grep -v '^[[:space:]]*#' "$ALLOWLIST" 2>/dev/null | grep -c "Script[[:space:]]*=" || true)
     echo "check-no-custom-runners: OK  (0 violations; $count temporarily allowlisted)"
 fi
 
