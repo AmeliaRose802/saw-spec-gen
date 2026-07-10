@@ -452,7 +452,15 @@ fn mutex_lock_pins_success_sentinel_return() {
 
 #[test]
 fn mutex_unlock_and_init_destroy_pin_success_sentinel() {
-    for sym in ["_Mtx_unlock", "_Mtx_init", "_Mtx_destroy"] {
+    for sym in [
+        "_Mtx_unlock",
+        "_Mtx_init",
+        "_Mtx_destroy",
+        "__gthread_mutex_lock",
+        "__gthread_mutex_unlock",
+        "pthread_mutex_lock",
+        "pthread_mutex_unlock",
+    ] {
         let t = target(sym, &["ptr"], "i32", false, BrokenReason::DeclareOnly);
         let out = emit_overrides(&[t], &[], &[], &Default::default());
         assert!(
