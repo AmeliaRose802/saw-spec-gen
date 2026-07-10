@@ -29,7 +29,6 @@ pub fn generate_override_index_with_vtable(
     by_class: &BTreeMap<String, Vec<&InterfaceMethod>>,
     constructors: &[ClassConstructor],
     classes_with_vdtor: &HashSet<String>,
-    target_triple: Option<&str>,
 ) -> String {
     let mut out = String::new();
     emit_header(&mut out);
@@ -38,8 +37,7 @@ pub fn generate_override_index_with_vtable(
     emit_per_class_helpers(&mut out, by_class, classes_with_vdtor);
     emit_override_list_comment(&mut out, &all_overrides);
     let mut all_overrides = all_overrides;
-    let is_itanium = !matches!(target_triple, Some(t) if t.contains("windows-msvc"));
-    if !constructors.is_empty() && !is_itanium {
+    if !constructors.is_empty() {
         emit_ctor_overrides(
             &mut out,
             constructors,

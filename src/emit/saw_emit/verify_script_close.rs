@@ -191,8 +191,6 @@ pub(super) fn emit_verify_step(
         let ctor_classes: HashSet<String> = iface
             .constructors
             .iter()
-            // Itanium ctor overrides are intentionally not emitted.
-            .filter(|c| !c.mangled_name.starts_with("_Z"))
             .map(|c| sanitize_name(&c.class_name).to_lowercase())
             .collect();
         for safe_class in &ctor_classes {
