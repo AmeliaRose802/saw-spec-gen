@@ -82,7 +82,7 @@ ENV PATH=/root/.saw-spec-gen/llvm/bin:/root/.saw-spec-gen/saw/bin:/root/.saw-spe
 # Download the prebuilt Linux binary from the release.
 RUN mkdir -p /root/.saw-spec-gen/exception-lower/bin \
  && curl -fsSL -o /tmp/el.tar.gz \
-      "https://github.com/AmeliaRose802/llvm-exception-lower/releases/download/latest-main/exception-lower-linux-x64.tar.gz" \
+      "https://github.com/AmeliaRose802/llvm-exception-lower/releases/download/v0.3.2/exception-lower-linux-x64.tar.gz" \
  && tar -xzf /tmp/el.tar.gz -C /root/.saw-spec-gen/exception-lower/bin/ --strip-components=1 \
  && rm -f /tmp/el.tar.gz \
  && chmod +x /root/.saw-spec-gen/exception-lower/bin/exception-lower \

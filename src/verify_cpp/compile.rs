@@ -112,12 +112,6 @@ pub(super) fn maybe_lower_exceptions(
     bc_file: &Path,
     ll_file: Option<&Path>,
 ) -> Result<()> {
-    // The exception-lower pass targets MSVC EH patterns. Running it on
-    // Itanium Linux IR can introduce malformed pointer loads that SAW
-    // then reports as UNKNOWN (orphan_override_vtable regression).
-    if !is_msvc {
-        return Ok(());
-    }
     let Some(exception_lower) = tools.exception_lower.as_deref() else {
         if is_msvc {
             eprintln!("note: exception-lower binary not available; EH will not be lowered.");
@@ -132,6 +126,18 @@ pub(super) fn maybe_lower_exceptions(
         .output()?;
     if !out.status.success() {
         eprintln!("warning: exception-lower failed; continuing with unlowered IR");
+        return Ok(());
+    }
+    // Only adopt the lowered module when the pass actually rewrote
+    // something. When there is no EH to lower the pass is a no-op, and
+    // round-tripping the bitcode back through the pipeline (copy +
+    // llvm-dis) is pure overhead — and historically a source of
+    // divergence — so we leave the original bc/ll untouched. This keeps
+    // exception lowering provably non-harmful for the common
+    // no-exception case while still running on every platform.
+    let original = std::fs::read(bc_file).ok();
+    let lowered = std::fs::read(&lowered_bc).ok();
+    if original.is_some() && original == lowered {
         return Ok(());
     }
     std::fs::copy(&lowered_bc, bc_file)?;
