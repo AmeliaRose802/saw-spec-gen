@@ -80,6 +80,7 @@ if (-not $cases -or $cases.Count -eq 0) {
 # Default tag set: everything except known-UNKNOWN research cases.
 $defaultTags = @(
     'cpp_havoc'
+    'cpp_overrides'
     'cpp_throws'
     'rust_havoc'
     'bounded_loop'
@@ -143,11 +144,7 @@ function Invoke-Case($c) {
                 CryptolFn   = $d.CryptolFn
                 Function    = $d.Function
             }
-            if ($c.InBufferSize) { $verifyArgs.InBufferSize = $c.InBufferSize }
-            if ($c.OutBufferParam) { $verifyArgs.OutBufferParam = $c.OutBufferParam }
-            if ($c.CryptolFnOut) { $verifyArgs.CryptolFnOut = $c.CryptolFnOut }
-            if ($c.MaxLenPrecond) { $verifyArgs.MaxLenPrecond = $c.MaxLenPrecond }
-            if ($c.NoStructShapeRecognizer) { $verifyArgs.NoStructShapeRecognizer = $true }
+            if ($c.Config) { $verifyArgs.Config = Resolve-RepoPath (Join-Path $c.Dir $c.Config) }
             & (Join-Path $RepoRoot 'verify.ps1') @verifyArgs *>&1 | Out-String
         }
         'rust' {
@@ -155,9 +152,14 @@ function Invoke-Case($c) {
             Remove-StaleOutputDir $c.Dir 'out_rust_' $c.File
             $rs  = Resolve-RepoPath (Join-Path $c.Dir $c.File)
             $cry = Resolve-RepoPath (Join-Path $c.Dir $d.Cry)
-            & (Join-Path $RepoRoot 'verify-rust.ps1') `
-                -RustFile $rs -CryptolSpec $cry `
-                -CryptolFn $d.CryptolFn -Function $d.Function *>&1 | Out-String
+            $rustArgs = @{
+                RustFile    = $rs
+                CryptolSpec = $cry
+                CryptolFn   = $d.CryptolFn
+                Function    = $d.Function
+            }
+            if ($c.Config) { $rustArgs.Config = Resolve-RepoPath (Join-Path $c.Dir $c.Config) }
+            & (Join-Path $RepoRoot 'verify-rust.ps1') @rustArgs *>&1 | Out-String
         }
         'equiv' {
             $d = Get-CaseDefaults $c

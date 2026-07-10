@@ -1,0 +1,5 @@
+# Restricts verification of is_success to status in {0, 1} via a variant
+# map. Auto-discovered from the sibling Cryptol spec (replaces the former
+# --variant-map CLI flag).
+[functions.is_success_spec]
+variant_map = ["x0=Success:0,Failure:1"]

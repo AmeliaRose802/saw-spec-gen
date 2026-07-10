@@ -1,0 +1,9 @@
+# Spec-shaping config for the bounded_copy override case. Auto-discovered
+# by gen-verify from the sibling Cryptol spec. Replaces the former
+# --in-buffer-size / --out-buffer-param / --cryptol-fn-out / --max-len-precond
+# CLI flags (removed: config is now the only shaping surface).
+[functions.bounded_copy_ret]
+in_buffer_size = ["src=4"]
+out_buffer_param = ["out=4"]
+cryptol_fn_out = ["out=bounded_copy_post"]
+max_len_precond = ["nb=4"]

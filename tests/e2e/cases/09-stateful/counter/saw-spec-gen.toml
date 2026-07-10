@@ -1,0 +1,7 @@
+# Whole-object post-state shaping for the counter stateful method.
+# The object is a bare uint32 incremented via a single i32 store, so it
+# is typed with the `i32` out-buffer shape. Auto-discovered from the
+# sibling Cryptol spec.
+[functions.counter_inc_ret]
+out_buffer_param = ["c=i32"]
+cryptol_fn_out = ["c=counter_inc_post"]

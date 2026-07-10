@@ -1,0 +1,5 @@
+# Return-variant narrowing for check_positive (Bit-returning Cryptol spec
+# bridged to a u8 Rust return via an if/then/else adapter). Auto-discovered
+# from the sibling Cryptol spec (replaces the former --variant-map flag).
+[functions.check_positive_spec]
+variant_map = ["return=Ok:0,Err:1"]
