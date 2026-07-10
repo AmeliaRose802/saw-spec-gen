@@ -249,10 +249,7 @@ pub(super) fn emit_equiv_spec_body(
             ));
             emit_param_preconditions_filtered(out, &param.preconditions, &param.name);
 
-            deferred_preconditions.push((
-                param.preconditions.clone(),
-                Some(param.name.clone()),
-            ));
+            deferred_preconditions.push((param.preconditions.clone(), Some(param.name.clone())));
 
             // Push the raw value name as the default Cryptol arg.
             // `--cryptol-arg-order` (consumed in
