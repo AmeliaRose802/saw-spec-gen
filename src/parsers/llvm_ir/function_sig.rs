@@ -92,17 +92,15 @@ pub fn extract_sret(
         return (None, params.to_vec(), original_return.clone());
     };
 
+    // Keep the sret annotation on the extracted param so that callers can
+    // distinguish a genuine sret slot from other WriteOnly parameters (e.g.
+    // params with a plain LLVM `writeonly` attribute).
     let out_param = ParamInfo {
         name: sret_param.name.clone(),
         ty: sret_param.ty.clone(),
         mutability: Mutability::WriteOnly,
         nullable: Nullability::NonNull,
-        annotations: sret_param
-            .annotations
-            .iter()
-            .filter(|a| !matches!(a, Annotation::Custom(s) if s == "sret"))
-            .cloned()
-            .collect(),
+        annotations: sret_param.annotations.clone(),
     };
     let remaining: Vec<ParamInfo> = params
         .iter()
@@ -309,7 +307,15 @@ mod tests {
         };
         let (out, rest, ret) = extract_sret(&[sret_param, regular], &TypeInfo::Void);
         assert!(out.is_some());
-        assert_eq!(out.as_ref().unwrap().mutability, Mutability::WriteOnly);
+        let out_param = out.as_ref().unwrap();
+        assert_eq!(out_param.mutability, Mutability::WriteOnly);
+        // Sret annotation is KEPT on the extracted param so downstream callers
+        // can distinguish it from other WriteOnly parameters (e.g. writeonly
+        // LLVM attribute on a non-sret pointer).
+        assert!(out_param
+            .annotations
+            .iter()
+            .any(|a| matches!(a, Annotation::Custom(s) if s == "sret")));
         assert!(matches!(ret, TypeInfo::Struct { .. }));
         assert_eq!(rest.len(), 1);
         assert_eq!(rest[0].name, "x");
