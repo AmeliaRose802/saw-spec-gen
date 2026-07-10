@@ -1,9 +1,8 @@
 module sret_sub_callee_spec where
 
-// Minimal Cryptol model for wrap_canonicalize.  The sub-callee
-// `canonicalize` is adversarial (havoc), so the only thing we can say
-// about the top-level function from a purely type-system standpoint is
-// that it produces some 32-bit word.  The spec below is a placeholder
-// that lets gen-verify parse and generate specs without running SAW.
+// Spec for wrap_canonicalize: calls an sret sub-callee (canonicalize)
+// but ignores the struct return value, always returning x + 1.
+// The sub-callee gets an adversarial (havoc) spec, so x + 1 is
+// the only observable behaviour of the wrapper function.
 wrap_canonicalize_spec : [32] -> [32]
-wrap_canonicalize_spec x = x
+wrap_canonicalize_spec x = x + 1
