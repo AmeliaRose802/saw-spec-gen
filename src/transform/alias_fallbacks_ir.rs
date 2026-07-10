@@ -200,9 +200,9 @@ fn ir_pointee_name_variants(ty: &TypeInfo) -> Vec<&str> {
 }
 
 /// True when the param is a hidden sret return slot.
-/// After `extract_sret`, the param retains `Annotation::Custom("sret")` so
-/// callers can distinguish it from other `WriteOnly` parameters (e.g. a
-/// plain LLVM `writeonly`-attributed non-sret pointer).
+/// `extract_sret` now preserves `Annotation::Custom("sret")` on the extracted
+/// param, so this predicate can safely distinguish sret slots from other
+/// `WriteOnly` parameters (e.g. a plain LLVM `writeonly`-attributed non-sret pointer).
 fn is_sret_param(p: &ParamInfo) -> bool {
     p.annotations
         .iter()

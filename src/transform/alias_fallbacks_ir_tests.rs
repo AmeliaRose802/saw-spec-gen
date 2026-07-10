@@ -50,7 +50,7 @@ fn ir_param(ty: TypeInfo, deref: Option<usize>, sret: bool) -> ParamInfo {
     if let Some(n) = deref {
         anns.push(Annotation::Dereferenceable(n));
     }
-    // Mirrors extract_sret: sret → WriteOnly, annotation kept.
+    // Mirrors extract_sret (new behavior): sret sets WriteOnly AND keeps the annotation.
     if sret {
         anns.push(Annotation::Custom("sret".into()));
     }
