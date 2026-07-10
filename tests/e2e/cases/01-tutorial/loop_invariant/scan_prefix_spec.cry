@@ -1,0 +1,28 @@
+// Cryptol spec for scan_prefix: count leading non-zero bytes.
+//
+// scan_prefix_spec buf len = number of leading non-zero bytes in
+//   buf[0 .. len-1], i.e. the length of the longest non-empty prefix
+//   where every byte is non-zero.
+//
+// The C++ implementation uses a variable-length while loop.  Bounded
+// SAW would need an unroll bound equal to the max possible `len`, which
+// is impractical for parser functions.  Instead, declare scan_prefix_inv
+// as a loop invariant and use saw-spec-gen's fixpoint/CHC mode.
+
+module Main where
+
+// Spec: scan_prefix walks buf until it finds a zero byte or reaches len.
+scan_prefix_spec : {n} (fin n, n <= 32) => [n][8] -> [32] -> [32]
+scan_prefix_spec buf len =
+    if len == 0
+    then 0
+    else if len > `n
+         then 0       // out-of-contract: sentinel
+         else count (buf : [n][8]) (len : [32]) 0
+
+  where
+    count : [n][8] -> [32] -> [32] -> [32]
+    count b remaining acc =
+        if remaining == 0 then acc
+        else if b @ (0 : [32]) == 0 then acc
+        else count (b >> 1) (remaining - 1) (acc + 1)

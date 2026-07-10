@@ -71,6 +71,7 @@ fn main() -> Result<()> {
             args.max_len_precond,
             args.cryptol_arg_order,
             args.variant_map,
+            args.loop_invariants,
             args.no_struct_shape_recognizer,
             args.container_layouts,
             args.config,

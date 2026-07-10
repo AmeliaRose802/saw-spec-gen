@@ -444,6 +444,7 @@ fn emit_verify_step_emits_begin_proof_marker_before_llvm_verify() {
         "add_one",
         &iface,
         vec![],
+        &[],
     );
 
     assert!(
@@ -476,6 +477,7 @@ fn emit_verify_step_emits_proved_marker_after_llvm_verify() {
         "add_one",
         &iface,
         vec![],
+        &[],
     );
 
     assert!(
@@ -510,6 +512,7 @@ fn emit_verify_step_marker_uses_mangled_independent_function_name() {
         "?compute_hash@@YAXH@Z",
         &iface,
         vec![],
+        &[],
     );
 
     assert!(
@@ -521,3 +524,6 @@ fn emit_verify_step_marker_uses_mangled_independent_function_name() {
         "got:\n{out}"
     );
 }
+
+#[path = "verify_script_close_tests.rs"]
+mod close_tests;

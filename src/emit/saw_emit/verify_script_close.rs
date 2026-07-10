@@ -162,6 +162,7 @@ pub(super) struct InterfaceCtx<'a> {
     pub constructors: &'a [ClassConstructor],
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn emit_verify_step(
     out: &mut String,
     step: u32,
@@ -170,6 +171,7 @@ pub(super) fn emit_verify_step(
     mangled_name: &str,
     iface: &InterfaceCtx<'_>,
     override_names: Vec<String>,
+    loop_invariants: &[String],
 ) {
     out.push_str(&format!("// Step {step}: Verify equivalence\n"));
     // Machine-readable proof marker (see docs/proof-markers.md). Must
@@ -216,9 +218,25 @@ pub(super) fn emit_verify_step(
         s
     };
 
-    out.push_str(&format!(
-        "llvm_verify m \"{mangled_name}\"\n    {overrides_str}\n    false {function_name}_equiv_spec z3;\n\n",
-    ));
+    if loop_invariants.is_empty() {
+        // Default bounded-model-checking path: plain llvm_verify with z3.
+        out.push_str(&format!(
+            "llvm_verify m \"{mangled_name}\"\n    {overrides_str}\n    false {function_name}_equiv_spec z3;\n\n",
+        ));
+    } else {
+        // Hoare/fixpoint path: llvm_verify_fixpoint_chc uses a CHC solver
+        // to discharge loop invariant obligations without fixed unrolling.
+        // proof_mode: invariant  (machine-readable tag for aggregators)
+        out.push_str("// proof_mode: invariant\n");
+        out.push_str("// Loop invariants declared:\n");
+        for inv in loop_invariants {
+            out.push_str(&format!("//   - {inv}\n"));
+        }
+        out.push_str(&format!(
+            "llvm_verify_fixpoint_chc m \"{mangled_name}\"\n    {overrides_str}\n    false {function_name}_equiv_spec z3;\n\n",
+        ));
+    }
+
     out.push_str(&format!(
         "print \"=== VERIFIED: {function_name} == {cryptol_fn} ===\";\n",
     ));

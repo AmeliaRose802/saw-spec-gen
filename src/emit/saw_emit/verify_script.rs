@@ -46,6 +46,7 @@ pub fn emit_verification_script(
     buffer_overrides: &BufferOverrides,
     has_source_sal_annotations: bool,
     uninterpreted: &crate::uninterpreted::UninterpretedBlock,
+    loop_invariants: &[String],
 ) -> Result<()> {
     fs::create_dir_all(output_dir)?;
 
@@ -221,6 +222,7 @@ pub fn emit_verification_script(
         mangled_name,
         &iface_ctx,
         override_names,
+        loop_invariants,
     );
 
     let script_path = output_dir.join("verify.saw");

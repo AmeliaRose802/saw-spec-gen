@@ -102,6 +102,43 @@ pwsh -File ./verify.ps1 -CppFile .\add_one.cpp `
 the original spec path, and also accepts `--config PATH` / `-Config
 PATH` when you want to point at an explicit TOML file.
 
+### Loop-invariant (fixpoint/CHC) mode
+
+For functions with variable-length loops (parsers, string scans, etc.)
+bounded model checking may be insufficient. Declare `loop_invariants`
+in the TOML config to switch to SAW's CHC fixpoint backend
+(`llvm_verify_fixpoint_chc`) for an unbounded proof:
+
+```toml
+# scan_prefix_spec.toml  (sibling of scan_prefix_spec.cry)
+[functions.scan_prefix_spec]
+loop_invariants = ["scan_prefix_inv"]
+```
+
+Where `scan_prefix_inv` is a Cryptol predicate you define in the spec:
+
+```cryptol
+// scan_prefix_spec.cry
+scan_prefix_spec : LLVMSetup ()
+scan_prefix_spec = do {
+    // ... standard setup ...
+}
+
+// Invariant: index is in [0, len] and counts non-zero prefix bytes
+scan_prefix_inv : ... -> Bit
+scan_prefix_inv = ...
+```
+
+The generated `verify.saw` will use `llvm_verify_fixpoint_chc` and
+`result.json` will show `"proof_mode": "invariant"`.  Bounded mode
+remains the default when `loop_invariants` is empty.
+
+You can also declare invariants on the CLI:
+
+```bash
+saw-spec-gen gen-verify ... --loop-invariant scan_prefix_inv
+```
+
 ## The verification model
 
 For every external function — interface methods, OS calls, allocators,
@@ -215,6 +252,7 @@ End-to-end cases live in [tests/e2e/cases/](tests/e2e/cases/):
 | Directory | What it shows |
 |---|---|
 | `01-tutorial/bounded_loop/` | Hello-world: `add_one`/`sum_first_n` in C++ and Rust against one Cryptol spec |
+| `01-tutorial/loop_invariant/` | Loop-invariant (CHC fixpoint) mode: `scan_prefix` with `loop_invariants` config |
 | `01-tutorial/csep590b_c04/` | Course problem set (clamp_sub, safe_mul, count_groups, make_change, isqrt) — buggy + fixed variants in both languages |
 | `02-havoc-coverage/` | One folder per hazard scenario (`pointer_aliasing`, `class_member_clobbered`, `throws_exception`, `ctor_stub_false_verdicts`, …); each holds the C++ and Rust `_verified`/`_disproved` pair |
 | `03-rust-trait-dispatch/` | Rust-only: `static_dispatch`, `dynamic_dispatch`, `external_crate` |

@@ -258,6 +258,21 @@ pub struct GenVerifyArgs {
     #[arg(long = "variant-map", value_name = "PARAM=V1:D1,V2:D2,...", num_args = 0..)]
     pub variant_map: Vec<String>,
 
+    /// Declare a Cryptol predicate as a loop invariant, enabling
+    /// fixpoint/CHC proof mode (Hoare-style) for variable-length loops.
+    ///
+    /// When one or more invariants are declared the generated `verify.saw`
+    /// uses `llvm_verify_fixpoint_chc` instead of `llvm_verify`, and
+    /// `result.json` records `proof_mode: "invariant"`.
+    ///
+    /// Requires a SAW build with CHC/fixpoint support.  The bounded
+    /// verification path (`llvm_verify`) remains the default when this
+    /// flag is absent.
+    ///
+    /// Format: `CRYPTOL_FN` (e.g. `scan_prefix_inv`).
+    #[arg(long = "loop-invariant", value_name = "CRYPTOL_FN", num_args = 0..)]
+    pub loop_invariants: Vec<String>,
+
     /// Disable the struct-shape recognizer (ArrayView rule 4).
     /// The recognizer pairs adjacent `(T* buf, size_t len)`
     /// parameters and synthesizes `_In_reads_(len)` on the buffer

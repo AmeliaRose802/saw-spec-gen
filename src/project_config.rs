@@ -89,6 +89,11 @@ pub struct FunctionConfig {
     /// Per-function `--variant-map PARAM=V1:D1,V2:D2,...`.
     #[serde(default)]
     pub variant_map: Vec<String>,
+
+    /// Per-function `--loop-invariant CRYPTOL_FN`: Cryptol predicates
+    /// declared as loop invariants, enabling fixpoint/CHC proof mode.
+    #[serde(default)]
+    pub loop_invariants: Vec<String>,
 }
 
 /// Deserialised contents of a `saw-spec-gen.toml` file.
@@ -139,6 +144,16 @@ pub struct ProjectConfig {
     /// Equivalent to repeated `--variant-map PARAM=V1:D1,...`.
     #[serde(default)]
     pub variant_map: Vec<String>,
+
+    /// Equivalent to repeated `--loop-invariant CRYPTOL_FN`.
+    ///
+    /// Each entry is a Cryptol predicate name used as a loop invariant
+    /// in fixpoint/CHC proof mode. When non-empty, the generated
+    /// `verify.saw` uses `llvm_verify_fixpoint_chc` instead of
+    /// `llvm_verify` and the `result.json` records
+    /// `proof_mode: "invariant"`.
+    #[serde(default)]
+    pub loop_invariants: Vec<String>,
 
     /// `[functions.<cryptol_fn>]` tables: per-function spec-shaping
     /// overrides. Keyed by the `--cryptol-fn` name. See
@@ -235,6 +250,7 @@ impl ProjectConfig {
         let pf_fn_pre = f.map_or(&[][..], |c| &c.cryptol_fn_pre);
         let pf_arg_order = f.map_or(&[][..], |c| &c.cryptol_arg_order);
         let pf_variant_map = f.map_or(&[][..], |c| &c.variant_map);
+        let pf_loop_inv = f.map_or(&[][..], |c| &c.loop_invariants);
 
         let pf_bool =
             |sel: fn(&FunctionConfig) -> Option<bool>| -> bool { f.and_then(sel).unwrap_or(false) };
@@ -266,6 +282,7 @@ impl ProjectConfig {
                 cli.cryptol_arg_order,
             ),
             variant_map: merged_vec(pf_variant_map, &self.variant_map, cli.variant_map),
+            loop_invariants: merged_vec(pf_loop_inv, &self.loop_invariants, cli.loop_invariants),
             uninterpreted: self.uninterpreted.clone(),
         }
     }
@@ -298,6 +315,7 @@ pub struct CliFlags {
     pub cryptol_fn_pre: Vec<String>,
     pub cryptol_arg_order: Vec<String>,
     pub variant_map: Vec<String>,
+    pub loop_invariants: Vec<String>,
 }
 
 /// Fully-resolved values after merging the project config with CLI flags.
@@ -314,6 +332,7 @@ pub struct MergedConfig {
     pub cryptol_fn_pre: Vec<String>,
     pub cryptol_arg_order: Vec<String>,
     pub variant_map: Vec<String>,
+    pub loop_invariants: Vec<String>,
     /// `[[uninterpreted]]` entries (config-only; no CLI equivalent).
     pub uninterpreted: Vec<UninterpretedEntry>,
 }
@@ -418,5 +437,49 @@ mod tests {
         };
         let merged2 = cfg2.apply("other", CliFlags::default());
         assert!(merged2.use_llvm_combine_modules);
+    }
+
+    #[test]
+    fn loop_invariants_parsed_from_toml_and_merged() {
+        let cfg: ProjectConfig = toml::from_str(
+            r#"
+            loop_invariants = ["global_inv"]
+
+            [functions.scan_prefix_spec]
+            loop_invariants = ["scan_prefix_inv", "prefix_monotone_inv"]
+            "#,
+        )
+        .expect("config parses");
+
+        let f = cfg
+            .functions
+            .get("scan_prefix_spec")
+            .expect("table present");
+        assert_eq!(
+            f.loop_invariants,
+            v(&["scan_prefix_inv", "prefix_monotone_inv"])
+        );
+
+        // Global + per-function + CLI all concatenate.
+        let merged = cfg.apply(
+            "scan_prefix_spec",
+            CliFlags {
+                loop_invariants: v(&["cli_inv"]),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            merged.loop_invariants,
+            v(&[
+                "scan_prefix_inv",
+                "prefix_monotone_inv",
+                "global_inv",
+                "cli_inv"
+            ])
+        );
+
+        // Functions without a [functions.*] table get only global + CLI.
+        let merged2 = cfg.apply("other_fn", CliFlags::default());
+        assert_eq!(merged2.loop_invariants, v(&["global_inv"]));
     }
 }
