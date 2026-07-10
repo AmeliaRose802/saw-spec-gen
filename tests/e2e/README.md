@@ -49,7 +49,7 @@ $env:SKIP_SAW_TESTS = '1'
 | `int_ops`            | `tests/e2e/cases/06-int-ops/**` — integer-op coverage fillers (multi-arg signed min, predicate bit-trick, byte swap, u8 popcount). |
 | `cpp_stateful`       | `tests/e2e/cases/09-stateful/**` — stateful-method whole-object post-state via out-buffer postconditions, including inferred mutable `this` receivers, byte buffers, typed wide fields (`i32`), and named heterogeneous structs with padding (`llvm_struct`).  |
 | `aggregate_bridge`   | `tests/e2e/cases/12-aggregate-bridge/**` — aggregate/struct ABI bridge tests: packed tuple returns, sret byte-buffer allocation, niche-packed enum remaps, and sret sub-callee havoc specs (issue #68). |
-| `msvc_string`        | `tests/e2e/cases/13-msvc-string/**` — MSVC STL override return-type regression tests. Uses pre-written LLVM IR (no C++ compilation) so runs on any platform. Verifies `classify_basic_string_msvc`, `is_basic_string_alias`, and `[N x i8]` return type handling. |
+| `msvc_string`        | `tests/e2e/cases/13-msvc-string/**` — MSVC STL override return-type regression tests (issue #73). C++ source compiled with clang. Exercises `std::string` resize/size and extern aggregate-return callees; MSVC-specific classification and `[N x i8]` return handling covered by unit tests. |
 | `rust_adversarial`   | `tests/e2e/cases/99-research/rust_adversarial/**` — research cases for known verifier blind spots.  |
 | `box_allocator`      | `tests/e2e/cases/99-research/box_allocator` — excluded by default; produces `UNKNOWN` under the current pipeline. |
 

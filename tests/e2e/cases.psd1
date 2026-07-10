@@ -565,25 +565,28 @@
            Function = 'wrap_canonicalize' }
 
         # ── 13-msvc-string ───────────────────────────────────────────────────
-        # Regression tests for the MSVC STL override return-type fix.
-        # Each case assembles a pre-written LLVM IR file (no C++ compilation
-        # needed), runs gen-verify, and verifies with SAW.
+        # Regression tests for the MSVC STL override return-type fix (issue #73).
+        # On Linux (Itanium ABI) these exercise the same code paths via clang;
+        # MSVC-specific classification/return-type code is covered by unit tests.
 
-        # MSVC-mangled basic_string methods (??0 ctor, ??1 dtor, ?resize@,
-        # ?size@) must be classified as functional overrides, not generic havoc.
-        # Also exercises is_basic_string_alias accepting full-template MSVC
-        # struct names containing "char_traits".
-        @{ Tag = 'msvc_string'; Runner = 'llvm_ir'
+        # classify_basic_string / is_basic_string_alias: std::string resize+size
+        # round-trip.  MSVC-mangled paths tested by bitcode_overrides_tests_msvc.rs.
+        @{ Tag = 'msvc_string'; Runner = 'cpp'
            Dir = 'tests/e2e/cases/13-msvc-string/msvc_string_classify'
-           File = 'msvc_resize_size.ll'
-           Expected = 'VERIFIED' }
+           File = 'add_one_verified.cpp'; Expected = 'VERIFIED' }
+        @{ Tag = 'msvc_string'; Runner = 'cpp'
+           Dir = 'tests/e2e/cases/13-msvc-string/msvc_string_classify'
+           File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
 
-        # [16 x i8] aggregate return type must emit
-        # `llvm_fresh_var "rv" (llvm_array 16 (llvm_int 8))` in the override,
-        # not a missing llvm_return (pre-fix) that caused SAW type-mismatch.
-        @{ Tag = 'msvc_string'; Runner = 'llvm_ir'
+        # extern aggregate-return callee: gen-verify must emit a correct havoc
+        # spec for get_token (sret on Linux, [N x i8] on MSVC).  add_one
+        # discards the return so x+1 is deterministic and SAW-verifiable.
+        # [N x i8] return parsing tested by extern_override_scan_tests_compound.rs.
+        @{ Tag = 'msvc_string'; Runner = 'cpp'
            Dir = 'tests/e2e/cases/13-msvc-string/byte_array_return'
-           File = 'byte_array_return.ll'
-           Expected = 'VERIFIED' }
+           File = 'add_one_verified.cpp'; Expected = 'VERIFIED' }
+        @{ Tag = 'msvc_string'; Runner = 'cpp'
+           Dir = 'tests/e2e/cases/13-msvc-string/byte_array_return'
+           File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
     )
 }
