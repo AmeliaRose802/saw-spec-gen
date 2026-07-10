@@ -1,7 +1,7 @@
 use super::*;
 use crate::transform::extern_override_scan::{BrokenReason, OverrideTarget};
 
-fn target(
+pub(super) fn target(
     symbol: &str,
     params: &[&str],
     ret: &str,
@@ -11,8 +11,12 @@ fn target(
     target_with_writes(symbol, params, ret, variadic, reason, &[])
 }
 
-/// Same as [`target`] but lets tests specify per-target written globals.
-fn target_with_writes(
+/// Same as [`target`] but lets the test specify which mutable globals
+/// the scanner would have observed this target's body writing. Used
+/// by `globals_get_adversarial_post_clobber` to assert that the
+/// emitter clobbers exactly the per-target written set rather than
+/// the module-wide mutable-global list.
+pub(super) fn target_with_writes(
     symbol: &str,
     params: &[&str],
     ret: &str,
@@ -510,11 +514,5 @@ fn ordinary_int_return_is_not_pinned() {
     assert!(!out.snippet.contains("_Thrd_success"));
 }
 
-#[test]
-fn msvc_mutex_helper_pins_noop_bool_return() {
-    let sym = "?_Verify_ownership_levels@_Mutex_base@std@@IEAA_NXZ";
-    let t = target(sym, &["ptr"], "i1", false, BrokenReason::MsvcMutexHelper);
-    let out = emit_overrides(&[t], &[], &[], &Default::default());
-    let snip = &out.snippet;
-    assert!(snip.contains("{{ 1 : [1] }}") && snip.contains("[msvc-mutex-helper]"));
-}
+#[path = "bitcode_overrides_tests_msvc.rs"]
+mod msvc_tests;

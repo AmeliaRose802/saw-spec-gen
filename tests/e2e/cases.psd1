@@ -545,5 +545,30 @@
            Cry = 'sret_sub_callee_spec.cry';
            CryptolFn = 'wrap_canonicalize_spec';
            Function = 'wrap_canonicalize' }
+
+        # ── 13-msvc-string ───────────────────────────────────────────────────
+        # Regression tests for the MSVC STL override return-type fix (issue #73).
+        # On Linux (Itanium ABI) these exercise the same code paths via clang;
+        # MSVC-specific classification/return-type code is covered by unit tests.
+
+        # classify_basic_string / is_basic_string_alias: std::string resize+size
+        # round-trip.  MSVC-mangled paths tested by bitcode_overrides_tests_msvc.rs.
+        @{ Tag = 'msvc_string'; Runner = 'cpp'
+           Dir = 'tests/e2e/cases/13-msvc-string/msvc_string_classify'
+           File = 'add_one_verified.cpp'; Expected = 'VERIFIED' }
+        @{ Tag = 'msvc_string'; Runner = 'cpp'
+           Dir = 'tests/e2e/cases/13-msvc-string/msvc_string_classify'
+           File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
+
+        # extern aggregate-return callee: gen-verify must emit a correct havoc
+        # spec for get_token (sret on Linux, [N x i8] on MSVC).  add_one
+        # discards the return so x+1 is deterministic and SAW-verifiable.
+        # [N x i8] return parsing tested by extern_override_scan_tests_compound.rs.
+        @{ Tag = 'msvc_string'; Runner = 'cpp'
+           Dir = 'tests/e2e/cases/13-msvc-string/byte_array_return'
+           File = 'add_one_verified.cpp'; Expected = 'VERIFIED' }
+        @{ Tag = 'msvc_string'; Runner = 'cpp'
+           Dir = 'tests/e2e/cases/13-msvc-string/byte_array_return'
+           File = 'add_one_disproved.cpp'; Expected = 'DISPROVED' }
     )
 }

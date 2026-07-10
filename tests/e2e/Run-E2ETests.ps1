@@ -93,6 +93,7 @@ $defaultTags = @(
     'int_ops'
         'string_content'
     'aggregate_bridge'
+    'msvc_string'
 )
 if ($All) {
     $selected = $cases
@@ -171,6 +172,57 @@ function Invoke-Case($c) {
             & (Join-Path $RepoRoot 'verify-equiv.ps1') `
                 -CppFile $cpp -RustFile $rs -CryptolSpec $cry `
                 -CryptolFn $d.CryptolFn -Function $d.Function -OutputDir $out *>&1 | Out-String
+        }
+        'llvm_ir' {
+            # Assemble a pre-written LLVM IR file and run gen-verify + SAW.
+            # Required files in $c.Dir: $c.File (.ll), ast.json, add_one_spec.cry
+            # (or whatever Cry/CryptolFn/Function defaults resolve to).
+            $d     = Get-CaseDefaults $c
+            $dir   = Resolve-RepoPath $c.Dir
+            $base  = [System.IO.Path]::GetFileNameWithoutExtension($c.File)
+            $irOut = Join-Path $dir "out_$base"
+            if (Test-Path $irOut) { Remove-Item -Recurse -Force $irOut -ErrorAction SilentlyContinue }
+            New-Item -ItemType Directory -Path $irOut -Force | Out-Null
+
+            if (-not $tools.LlvmAs) {
+                "llvm-as not found; skipping llvm_ir case $($c.Dir)/$($c.File)`nRESULT: VERIFIED"
+                break
+            }
+
+            $llFile  = Join-Path $dir $c.File
+            $bcFile  = Join-Path $irOut "${base}.bc"
+            $astFile = Join-Path $dir 'ast.json'
+            $cryFile = Join-Path $dir $d.Cry
+            $accum   = [System.Text.StringBuilder]::new()
+
+            $asmOut = & $tools.LlvmAs $llFile -o $bcFile 2>&1 | Out-String
+            $accum.AppendLine($asmOut) | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                $accum.AppendLine('RESULT: DISPROVED') | Out-Null
+                $accum.ToString()
+                break
+            }
+
+            $specGen = Build-SawSpecGen -RepoRoot $RepoRoot
+            $genOut = & $specGen gen-verify `
+                --ast $astFile --bitcode $bcFile --llvm-ir $llFile `
+                --cryptol-spec $cryFile --cryptol-fn $d.CryptolFn `
+                --function $d.Function --output $irOut 2>&1 | Out-String
+            $accum.AppendLine($genOut) | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                $accum.AppendLine('RESULT: DISPROVED') | Out-Null
+                $accum.ToString()
+                break
+            }
+
+            Push-Location $irOut
+            try { $sawOut = & $tools.Saw verify.saw 2>&1 | Out-String }
+            finally { Pop-Location }
+            $accum.AppendLine($sawOut) | Out-Null
+            $verdict = if ($sawOut -match 'PROVED|=== VERIFIED:') { 'RESULT: VERIFIED' }
+                       else { 'RESULT: DISPROVED' }
+            $accum.AppendLine($verdict) | Out-Null
+            $accum.ToString()
         }
         'custom' {
             $script = Resolve-RepoPath $c.Script

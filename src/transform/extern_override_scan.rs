@@ -402,7 +402,10 @@ fn leading_type_token(p: &str) -> String {
 
 fn extract_return_type_token(prefix: &str) -> String {
     // Walk tokens right-to-left; the return type is the last token that
-    // isn't a known keyword.
+    // isn't a known keyword.  We use a bracket-aware splitter so that
+    // compound LLVM types such as `[16 x i8]` or `{ i64, ptr }` are
+    // treated as a single token rather than being torn apart by the
+    // space between `[16`, `x`, and `i8]`.
     let known = [
         "define",
         "declare",
@@ -440,14 +443,14 @@ fn extract_return_type_token(prefix: &str) -> String {
         "zeroext",
         "signext",
     ];
-    let tokens: Vec<&str> = prefix.split_whitespace().collect();
+    let tokens = split_bracket_tokens(prefix);
     for t in tokens.iter().rev() {
         // Calling conventions can also appear as `cc 10` etc. Skip
         // bare numbers.
         if t.parse::<i64>().is_ok() {
             continue;
         }
-        if known.contains(t) {
+        if known.contains(&t.as_str()) {
             continue;
         }
         if t.starts_with("alignstack")
@@ -456,10 +459,14 @@ fn extract_return_type_token(prefix: &str) -> String {
         {
             continue;
         }
-        return t.to_string();
+        return t.clone();
     }
     "void".to_string()
 }
+
+#[path = "extern_override_scan_helpers.rs"]
+mod helpers;
+use helpers::split_bracket_tokens;
 
 fn extract_call_target(line: &str) -> Option<String> {
     // Match both `call ... @name(...)` and `invoke ... @name(...)`.

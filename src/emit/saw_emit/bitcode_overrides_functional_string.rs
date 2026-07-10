@@ -52,13 +52,21 @@ pub fn discover_string_layout(struct_defs: &HashMap<String, IrStructDef>) -> Opt
 
 fn is_basic_string_alias(name: &str) -> bool {
     let n = name;
+    // On GCC/Clang the LLVM type is `class.std::__cxx11::basic_string` (no
+    // template args in the name). On MSVC the full template is spelled out:
+    // `class.std::basic_string<char,struct std::char_traits<char>,...>`.
+    // Both contain `basic_string`; neither contains `_Alloc_hider` or the
+    // streaming variants. We no longer exclude `char_traits` here because the
+    // MSVC full-template name naturally includes it as a template argument.
     (n.starts_with("class.std::") || n.starts_with("class.std."))
         && n.contains("basic_string")
         && !n.contains("_Alloc_hider")
-        && !n.contains("char_traits")
         && !n.contains("basic_stringbuf")
         && !n.contains("basic_stringstream")
 }
+
+/// MSVC resize prefix: `resize(size_type, char)` IR always has (this*, i64, i8).
+const MSVC_RESIZE_PREFIX: &str = "?resize@?$basic_string@";
 
 /// Emit a SAW spec block + `llvm_unsafe_assume_spec` binding for one
 /// recognized basic_string method. `safe` is the sanitized identifier
@@ -108,7 +116,12 @@ pub fn emit_string_override(
         }
         StlMethod::BasicStringResize => {
             out.push_str("    n <- llvm_fresh_var \"n\" (llvm_int 64);\n");
-            out.push_str("    llvm_execute_func [s, llvm_term n];\n");
+            if symbol.starts_with(MSVC_RESIZE_PREFIX) {
+                out.push_str("    ch <- llvm_fresh_var \"ch\" (llvm_int 8);\n");
+                out.push_str("    llvm_execute_func [s, llvm_term n, llvm_term ch];\n");
+            } else {
+                out.push_str("    llvm_execute_func [s, llvm_term n];\n");
+            }
             out.push_str(&format!(
                 "    llvm_points_to (llvm_elem s {idx}) (llvm_term n);\n",
             ));

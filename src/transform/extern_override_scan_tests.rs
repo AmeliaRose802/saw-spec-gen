@@ -469,6 +469,9 @@ declare void @user_helper()
     );
 }
 
+#[path = "extern_override_scan_tests_compound.rs"]
+mod compound_tests;
+
 #[test]
 fn msvc_mutex_helper_defined_in_module_is_flagged() {
     // `_Verify_ownership_levels` is defined in-module with `linkonce_odr`

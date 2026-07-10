@@ -116,6 +116,13 @@ fn is_vector(mangled: &str) -> bool {
 }
 
 fn classify_basic_string(m: &str) -> Option<StlMethod> {
+    // MSVC mangling starts with `?`; Itanium uses `_Z` or plain identifiers.
+    // Dispatch to the MSVC classifier first so that MSVC ctor/dtor/operator
+    // names (??0, ??1, ??4) and named methods (?size@, ?data@, …) are handled
+    // before the Itanium suffix checks below.
+    if m.starts_with('?') {
+        return classify_basic_string_msvc(m);
+    }
     // From-cstr ctor must precede default ctor (both start with C1/C2).
     if has_suffix_any(m, &["C1EPKc", "C2EPKc", "EC1EPKc", "EC2EPKc"]) {
         return Some(StlMethod::BasicStringCtorFromCStr);
@@ -171,6 +178,73 @@ fn classify_basic_string(m: &str) -> Option<StlMethod> {
         m,
         &["7reserveEm", "E7reserveEm", "7reserveEj", "E7reserveEj"],
     ) {
+        return Some(StlMethod::BasicStringSizeNeutralMutator);
+    }
+    None
+}
+
+/// Classify an MSVC-mangled `?method@?$basic_string@…` symbol.
+///
+/// MSVC decorates methods as `?name@?$basic_string@<params>@@<callconv><ret>`.
+/// We match on the leading method-name segment; for overloads we further
+/// inspect the parameter encoding (e.g. `@PEBD@Z` = `const char*` arg).
+fn classify_basic_string_msvc(m: &str) -> Option<StlMethod> {
+    // Destructors: ??1?$basic_string@…
+    if m.starts_with("??1?$basic_string@") {
+        return Some(StlMethod::BasicStringDtor);
+    }
+    // Constructors: ??0?$basic_string@…
+    if m.starts_with("??0?$basic_string@") {
+        // From-cstr ctor: has `PEBD` (const char*) in params — check before default.
+        if m.contains("@PEBD@Z") || m.contains("@PEBD_N@Z") {
+            return Some(StlMethod::BasicStringCtorFromCStr);
+        }
+        // Copy ctor: has `AEBV?$basic_string@` (const basic_string&) in params.
+        if m.contains("AEBV?$basic_string@") {
+            return Some(StlMethod::BasicStringCtorCopy);
+        }
+        // Default ctor: no args (`@XZ` suffix).
+        if m.ends_with("@XZ") {
+            return Some(StlMethod::BasicStringCtorDefault);
+        }
+        return None;
+    }
+    // operator= : ??4?$basic_string@…
+    if m.starts_with("??4?$basic_string@") {
+        if m.contains("@PEBD@Z") {
+            return Some(StlMethod::BasicStringOpEqCStr);
+        }
+        if m.contains("AEBV?$basic_string@") {
+            return Some(StlMethod::BasicStringOpEqStr);
+        }
+        return None;
+    }
+    // Named methods: ?name@?$basic_string@…
+    if m.starts_with("?size@?$basic_string@") || m.starts_with("?length@?$basic_string@") {
+        return Some(StlMethod::BasicStringSize);
+    }
+    if m.starts_with("?resize@?$basic_string@") {
+        return Some(StlMethod::BasicStringResize);
+    }
+    if m.starts_with("?data@?$basic_string@") || m.starts_with("?c_str@?$basic_string@") {
+        return Some(StlMethod::BasicStringByteViewNoArg);
+    }
+    if m.starts_with("?assign@?$basic_string@") {
+        if m.contains("@PEBD@Z") {
+            return Some(StlMethod::BasicStringAssignCStr);
+        }
+        if m.contains("AEBV?$basic_string@") {
+            return Some(StlMethod::BasicStringAssignStr);
+        }
+        return None;
+    }
+    if m.starts_with("?empty@?$basic_string@") {
+        return Some(StlMethod::BasicStringEmpty);
+    }
+    if m.starts_with("?capacity@?$basic_string@") {
+        return Some(StlMethod::BasicStringSizeNeutralScalarQuery);
+    }
+    if m.starts_with("?reserve@?$basic_string@") {
         return Some(StlMethod::BasicStringSizeNeutralMutator);
     }
     None
@@ -375,5 +449,56 @@ mod tests {
             &mut out, "_Z3fooi", "f", "ov_f", &layouts,
         ));
         assert!(out.is_empty());
+    }
+
+    // ── MSVC mangling ────────────────────────────────────────────────────────
+
+    #[test]
+    fn classify_msvc_basic_string_size() {
+        // MSVC-mangled `std::basic_string<char,...>::size()`.
+        let sym = "?size@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEBA_KXZ";
+        assert_eq!(classify(sym), Some(StlMethod::BasicStringSize));
+    }
+
+    #[test]
+    fn classify_msvc_basic_string_length() {
+        let sym = "?length@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEBA_KXZ";
+        assert_eq!(classify(sym), Some(StlMethod::BasicStringSize));
+    }
+
+    #[test]
+    fn classify_msvc_basic_string_resize() {
+        let sym = "?resize@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAAX_K@Z";
+        assert_eq!(classify(sym), Some(StlMethod::BasicStringResize));
+    }
+
+    #[test]
+    fn classify_msvc_basic_string_data() {
+        let sym = "?data@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAAPEADXZ";
+        assert_eq!(classify(sym), Some(StlMethod::BasicStringByteViewNoArg));
+    }
+
+    #[test]
+    fn classify_msvc_basic_string_default_ctor() {
+        let sym = "??0?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAA@XZ";
+        assert_eq!(classify(sym), Some(StlMethod::BasicStringCtorDefault));
+    }
+
+    #[test]
+    fn classify_msvc_basic_string_from_cstr_ctor() {
+        let sym = "??0?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAA@PEBD@Z";
+        assert_eq!(classify(sym), Some(StlMethod::BasicStringCtorFromCStr));
+    }
+
+    #[test]
+    fn classify_msvc_basic_string_dtor() {
+        let sym = "??1?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAA@XZ";
+        assert_eq!(classify(sym), Some(StlMethod::BasicStringDtor));
+    }
+
+    #[test]
+    fn classify_msvc_basic_string_empty() {
+        let sym = "?empty@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEBA_NXZ";
+        assert_eq!(classify(sym), Some(StlMethod::BasicStringEmpty));
     }
 }

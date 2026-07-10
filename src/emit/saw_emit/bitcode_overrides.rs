@@ -397,6 +397,12 @@ fn emit_one(
                 out.push_str("    llvm_return (llvm_term rv);\n");
             }
         }
+        ReturnSetup::ByteArray(n) => {
+            out.push_str(&format!(
+                "    rv <- llvm_fresh_var \"rv\" (llvm_array {n} (llvm_int 8));\n"
+            ));
+            out.push_str("    llvm_return (llvm_term rv);\n");
+        }
         ReturnSetup::Pointer => {
             out.push_str("    rv <- llvm_fresh_pointer (llvm_int 8);\n");
             out.push_str("    llvm_return rv;\n");
@@ -430,6 +436,7 @@ enum ParamSetup {
 enum ReturnSetup {
     Void,
     Int(u32),
+    ByteArray(u32),
     Pointer,
     Unsupported,
 }
@@ -469,6 +476,22 @@ fn ir_return_setup(ir_ty: &str) -> ReturnSetup {
     if let Some(bits_str) = ir_ty.strip_prefix('i') {
         if let Ok(bits) = bits_str.parse::<u32>() {
             return ReturnSetup::Int(bits);
+        }
+    }
+    // Handle `[N x i8]` — MSVC sometimes returns small aggregates in this form.
+    // Only `i8` element arrays are handled: MSVC's ABI expresses opaque
+    // small-struct returns as byte arrays (`[N x i8]`) which SAW accepts via
+    // `llvm_array N (llvm_int 8)`.  Other element types (e.g. `[4 x i32]`)
+    // are not covered because their SAW representation differs and an incorrect
+    // override would silently pass the spec while masking real type mismatches;
+    // hand-written specs should cover those cases.
+    if let Some(inner) = ir_ty.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+        if let Some((n_str, elem)) = inner.split_once(" x ") {
+            if elem.trim() == "i8" {
+                if let Ok(n) = n_str.trim().parse::<u32>() {
+                    return ReturnSetup::ByteArray(n);
+                }
+            }
         }
     }
     ReturnSetup::Unsupported

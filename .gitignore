@@ -10,6 +10,9 @@ Cargo.lock
 **/*_ast.json
 tests/e2e/cases/specs/
 
+# Exception: pre-written LLVM IR source files used as e2e test fixtures.
+!tests/e2e/cases/**/*.ll
+
 # Generated tool outputs (saw-spec-gen produces these per-demo)
 **/out_*/
 tests/e2e/cases/rust_specs/
