@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    E2E test: verify that gen-verify-rust composes --variant-map with
+    E2E test: verify that gen-verify-rust composes a config `variant_map` with
     the VariantRemap bridge for niche-packed enum returns.
     The Cryptol spec returns [8] with 3 variants; Rust returns u8
     with only 2 reachable variants. The VariantRemap bridge emits
@@ -41,19 +41,17 @@ $bcFile = Join-Path $outDir 'activate_verified.bc'
 $llFile = Join-Path $outDir 'activate_verified.ll'
 & $llvmDis $bcFile -o $llFile 2>&1 | Write-Host
 
-# ── Call gen-verify-rust with --variant-map on both param and return ──
+# ── Call gen-verify-rust; variant maps come from saw-spec-gen.toml ────
 & $specGen gen-verify-rust `
     --llvm-ir      $llFile `
     --bitcode      $bcFile `
     --cryptol-spec $cryFile `
     --cryptol-fn   activate_spec `
     --function     activate `
-    --output       $outDir `
-    --variant-map  'return=Success:0,AlreadyActive:1' `
-    --variant-map  'x0=Success:1,AlreadyActive:2' 2>&1 | Write-Host
+    --output       $outDir 2>&1 | Write-Host
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "gen-verify-rust with variant-map failed"
+    Write-Error "gen-verify-rust with config variant maps failed"
     Write-Host "RESULT: DISPROVED"
     exit 1
 }

@@ -1,0 +1,8 @@
+# Whole-object post-state shaping for the enrollment stateful method.
+# The object is a named heterogeneous struct with padding, typed via the
+# `struct:EnrollmentKey` out-buffer shape so SAW keeps typed i8/i64 cells
+# and leaves padding bytes unconstrained. Auto-discovered from the
+# sibling Cryptol spec.
+[functions.enroll_key_ret]
+out_buffer_param = ["k=struct:EnrollmentKey"]
+cryptol_fn_out = ["k=enroll_key_post"]

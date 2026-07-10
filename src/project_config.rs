@@ -1,15 +1,17 @@
 //! Project-level configuration loaded from `saw-spec-gen.toml`.
 //!
-//! All fields mirror CLI flags on the `gen-verify` subcommand and act as
-//! project-wide defaults.  **CLI flags always win**: a flag explicitly
-//! passed on the command line overrides the config value.
+//! These fields are the *only* way to shape generated specs. All spec
+//! shaping (buffer sizes, out-buffer bindings, variant maps, alias
+//! overrides, recognizer toggles) is configured here; the corresponding
+//! `gen-verify` CLI flags have been removed. Per-function tables win over
+//! the global values — see [`ProjectConfig::apply`].
 //!
 //! ## Auto-discovery
 //!
 //! `ProjectConfig::discover(dir)` walks from `dir` up to the filesystem root
 //! looking for the first `saw-spec-gen.toml` it finds — the same way rustfmt
-//! and cargo locate their config files.  No `--config` flag is needed when
-//! the file lives at the repo root.
+//! and cargo locate their config files.  Pass `--config PATH` to point at an
+//! explicit file instead.
 //!
 //! ## Example `saw-spec-gen.toml`
 //!
@@ -19,7 +21,7 @@
 //!
 //! # Per-function shaping, keyed by Cryptol fn name. Applies only when
 //! # gen-verify runs with `--cryptol-fn canonicalize_lp`. Resolved before
-//! # the global values and any CLI flags.
+//! # (and overriding) the global values.
 //! [functions.canonicalize_lp]
 //! in_buffer_size   = ["m=4", "b=4"]
 //! out_buffer_param = ["out=10"]
@@ -215,14 +217,14 @@ impl ProjectConfig {
         }
     }
 
-    /// Merge per-function config, global config, and CLI flags for the
-    /// Cryptol function named `function`.
+    /// Merge per-function config with global config for the Cryptol
+    /// function named `function`.
     ///
-    /// Resolution order, low precedence first: **per-function config →
-    /// global config → CLI**. For `Vec` fields all three layers are
-    /// concatenated in that order (CLI entries extend, never replace, the
-    /// config-declared ones). For booleans, `true` from any layer wins.
-    pub fn apply(&self, function: &str, cli: CliFlags) -> MergedConfig {
+    /// For `Vec` fields both layers are concatenated (per-function
+    /// entries first, then global), preserving the ordering the previous
+    /// CLI-aware merge used. For booleans, `true` from either layer wins.
+    /// There is no CLI layer — shaping is config-only.
+    pub fn apply(&self, function: &str) -> MergedConfig {
         let f = self.functions.get(function);
 
         // Per-function slices (empty when no `[functions.<fn>]` table).
@@ -240,64 +242,34 @@ impl ProjectConfig {
             |sel: fn(&FunctionConfig) -> Option<bool>| -> bool { f.and_then(sel).unwrap_or(false) };
 
         MergedConfig {
-            no_struct_shape_recognizer: cli.no_struct_shape_recognizer
-                || pf_bool(|c| c.no_struct_shape_recognizer)
+            no_struct_shape_recognizer: pf_bool(|c| c.no_struct_shape_recognizer)
                 || self.no_struct_shape_recognizer.unwrap_or(false),
-            use_llvm_combine_modules: cli.use_llvm_combine_modules
-                || pf_bool(|c| c.use_llvm_combine_modules)
+            use_llvm_combine_modules: pf_bool(|c| c.use_llvm_combine_modules)
                 || self.use_llvm_combine_modules.unwrap_or(false),
-            spec_only_on_missing: cli.spec_only_on_missing
-                || pf_bool(|c| c.spec_only_on_missing)
+            spec_only_on_missing: pf_bool(|c| c.spec_only_on_missing)
                 || self.spec_only_on_missing.unwrap_or(false),
-            alias_size: merged_vec(pf_alias_size, &self.alias_size, cli.alias_size),
-            alias_enum: merged_vec(pf_alias_enum, &self.alias_enum, cli.alias_enum),
-            in_buffer_size: merged_vec(pf_in_buffer, &self.in_buffer_size, cli.in_buffer_size),
-            max_len_precond: merged_vec(pf_max_len, &self.max_len_precond, cli.max_len_precond),
-            out_buffer_param: merged_vec(
-                pf_out_buffer,
-                &self.out_buffer_param,
-                cli.out_buffer_param,
-            ),
-            cryptol_fn_out: merged_vec(pf_fn_out, &self.cryptol_fn_out, cli.cryptol_fn_out),
-            cryptol_fn_pre: merged_vec(pf_fn_pre, &self.cryptol_fn_pre, cli.cryptol_fn_pre),
-            cryptol_arg_order: merged_vec(
-                pf_arg_order,
-                &self.cryptol_arg_order,
-                cli.cryptol_arg_order,
-            ),
-            variant_map: merged_vec(pf_variant_map, &self.variant_map, cli.variant_map),
+            alias_size: merged_vec(pf_alias_size, &self.alias_size),
+            alias_enum: merged_vec(pf_alias_enum, &self.alias_enum),
+            in_buffer_size: merged_vec(pf_in_buffer, &self.in_buffer_size),
+            max_len_precond: merged_vec(pf_max_len, &self.max_len_precond),
+            out_buffer_param: merged_vec(pf_out_buffer, &self.out_buffer_param),
+            cryptol_fn_out: merged_vec(pf_fn_out, &self.cryptol_fn_out),
+            cryptol_fn_pre: merged_vec(pf_fn_pre, &self.cryptol_fn_pre),
+            cryptol_arg_order: merged_vec(pf_arg_order, &self.cryptol_arg_order),
+            variant_map: merged_vec(pf_variant_map, &self.variant_map),
             uninterpreted: self.uninterpreted.clone(),
         }
     }
 }
 
-/// Concatenate per-function, global, and CLI `Vec<String>` layers in
-/// precedence order (low → high). Later layers extend, never replace.
-fn merged_vec(per_fn: &[String], global: &[String], cli: Vec<String>) -> Vec<String> {
-    let mut v = Vec::with_capacity(per_fn.len() + global.len() + cli.len());
+/// Concatenate the per-function and global `Vec<String>` layers in the
+/// same order the previous CLI-aware merge used (per-function first, then
+/// global). Later layers extend, never replace.
+fn merged_vec(per_fn: &[String], global: &[String]) -> Vec<String> {
+    let mut v = Vec::with_capacity(per_fn.len() + global.len());
     v.extend(per_fn.iter().cloned());
     v.extend(global.iter().cloned());
-    v.extend(cli);
     v
-}
-
-/// CLI flag values forwarded into [`ProjectConfig::apply`]. Bundled into a
-/// struct so the merge signature stays readable as the set of shaping
-/// flags grows.
-#[derive(Debug, Default)]
-pub struct CliFlags {
-    pub no_struct_shape_recognizer: bool,
-    pub use_llvm_combine_modules: bool,
-    pub spec_only_on_missing: bool,
-    pub alias_size: Vec<String>,
-    pub alias_enum: Vec<String>,
-    pub in_buffer_size: Vec<String>,
-    pub max_len_precond: Vec<String>,
-    pub out_buffer_param: Vec<String>,
-    pub cryptol_fn_out: Vec<String>,
-    pub cryptol_fn_pre: Vec<String>,
-    pub cryptol_arg_order: Vec<String>,
-    pub variant_map: Vec<String>,
 }
 
 /// Fully-resolved values after merging the project config with CLI flags.
@@ -349,7 +321,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_concatenates_per_function_global_then_cli() {
+    fn apply_concatenates_per_function_then_global() {
         let mut cfg = ProjectConfig {
             in_buffer_size: v(&["global=2"]),
             ..Default::default()
@@ -364,19 +336,10 @@ mod tests {
             },
         );
 
-        let merged = cfg.apply(
-            "canonicalize_lp",
-            CliFlags {
-                in_buffer_size: v(&["cli=8"]),
-                ..Default::default()
-            },
-        );
+        let merged = cfg.apply("canonicalize_lp");
 
-        // per-function, then global, then CLI.
-        assert_eq!(
-            merged.in_buffer_size,
-            v(&["m=4", "b=4", "global=2", "cli=8"])
-        );
+        // per-function, then global.
+        assert_eq!(merged.in_buffer_size, v(&["m=4", "b=4", "global=2"]));
         assert_eq!(merged.out_buffer_param, v(&["out=10"]));
         assert_eq!(merged.cryptol_fn_out, v(&["out=canonicalize_lp_post"]));
     }
@@ -387,14 +350,8 @@ mod tests {
             out_buffer_param: v(&["g=1"]),
             ..Default::default()
         };
-        let merged = cfg.apply(
-            "no_such_fn",
-            CliFlags {
-                out_buffer_param: v(&["c=2"]),
-                ..Default::default()
-            },
-        );
-        assert_eq!(merged.out_buffer_param, v(&["g=1", "c=2"]));
+        let merged = cfg.apply("no_such_fn");
+        assert_eq!(merged.out_buffer_param, v(&["g=1"]));
     }
 
     #[test]
@@ -407,8 +364,8 @@ mod tests {
                 ..Default::default()
             },
         );
-        // per-function true, no global, no CLI.
-        let merged = cfg.apply("f", CliFlags::default());
+        // per-function true, no global.
+        let merged = cfg.apply("f");
         assert!(merged.spec_only_on_missing);
 
         // global true reaches an unrelated function.
@@ -416,7 +373,7 @@ mod tests {
             use_llvm_combine_modules: Some(true),
             ..Default::default()
         };
-        let merged2 = cfg2.apply("other", CliFlags::default());
+        let merged2 = cfg2.apply("other");
         assert!(merged2.use_llvm_combine_modules);
     }
 }

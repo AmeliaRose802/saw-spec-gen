@@ -21,12 +21,6 @@ fn main() -> Result<()> {
             args.cxx_standard,
             args.clang_flags,
             args.config,
-            args.in_buffer_size,
-            args.out_buffer_param,
-            args.cryptol_fn_out,
-            args.max_len_precond,
-            args.no_struct_shape_recognizer,
-            args.spec_only_on_missing,
         ),
         Commands::FromClangAst {
             input,
@@ -60,19 +54,6 @@ fn main() -> Result<()> {
             args.cryptol_fn,
             args.function,
             args.output,
-            args.alias_size,
-            args.alias_enum,
-            args.use_llvm_combine_modules,
-            args.spec_only_on_missing,
-            args.in_buffer_size,
-            args.out_buffer_param,
-            args.cryptol_fn_out,
-            args.cryptol_fn_pre,
-            args.max_len_precond,
-            args.cryptol_arg_order,
-            args.variant_map,
-            args.no_struct_shape_recognizer,
-            args.container_layouts,
             args.config,
         ),
         Commands::GenRustTraitStubs { schema, output } => {
@@ -85,14 +66,7 @@ fn main() -> Result<()> {
             args.cryptol_fn,
             args.function,
             args.output,
-            args.spec_only_on_missing,
-            args.in_buffer_size,
-            args.out_buffer_param,
-            args.cryptol_fn_out,
-            args.cryptol_fn_pre,
-            args.max_len_precond,
-            args.cryptol_arg_order,
-            args.variant_map,
+            args.config,
         ),
         Commands::VerifyRust(args) => {
             let code = commands::verify_rust_cmd(saw_spec_gen::verify_rust::VerifyRustArgs {
@@ -101,7 +75,7 @@ fn main() -> Result<()> {
                 cryptol_fn: args.cryptol_fn,
                 function: args.function,
                 output_dir: args.output,
-                spec_only_on_missing: args.spec_only_on_missing,
+                config: args.config,
             })?;
             std::process::exit(code);
         }

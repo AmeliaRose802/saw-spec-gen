@@ -1,0 +1,6 @@
+# Whole-object post-state shaping for the block stateful method
+# (uint8[4] buffer XOR-ed byte-by-byte). Auto-discovered from the
+# sibling Cryptol spec.
+[functions.block_mask_ret]
+out_buffer_param = ["b=4"]
+cryptol_fn_out = ["b=block_mask_post"]

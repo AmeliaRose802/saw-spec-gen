@@ -1,0 +1,6 @@
+# Whole-object post-state shaping for the session stateful method
+# (multi-field object with preserved tag bytes). Auto-discovered from
+# the sibling Cryptol spec.
+[functions.session_open_ret]
+out_buffer_param = ["s=4"]
+cryptol_fn_out = ["s=session_open_post"]

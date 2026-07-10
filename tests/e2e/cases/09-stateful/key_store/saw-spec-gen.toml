@@ -1,0 +1,5 @@
+# Whole-object post-state shaping for the key_store stateful method.
+# Auto-discovered from the sibling Cryptol spec.
+[functions.key_store_activate_ret]
+out_buffer_param = ["ks=1"]
+cryptol_fn_out = ["ks=key_store_activate_post"]

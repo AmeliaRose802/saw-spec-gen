@@ -17,7 +17,7 @@ pub struct VerifyRustArgs {
     pub cryptol_fn: String,
     pub function: String,
     pub output_dir: Option<PathBuf>,
-    pub spec_only_on_missing: bool,
+    pub config: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +49,25 @@ pub fn run(args: VerifyRustArgs) -> Result<VerifyRustOutcome> {
         .with_context(|| format!("failed to resolve {}", args.rust_file.display()))?;
     let cryptol_spec = fs::canonicalize(&args.cryptol_spec)
         .with_context(|| format!("failed to resolve {}", args.cryptol_spec.display()))?;
+    // Resolve config (explicit path or spec-relative auto-discovery).
+    // `spec_only_on_missing` drives this command's soft-exit; the
+    // forked `gen-verify-rust` subprocess discovers config itself.
+    let config = args
+        .config
+        .as_ref()
+        .map(|p| {
+            fs::canonicalize(p).with_context(|| format!("failed to resolve config {}", p.display()))
+        })
+        .transpose()?;
+    let spec_only_on_missing = {
+        let cwd = std::env::current_dir()?;
+        match config.as_deref() {
+            Some(p) => crate::project_config::ProjectConfig::load(p)?,
+            None => crate::project_config::ProjectConfig::discover_for_spec(&cryptol_spec, &cwd)?,
+        }
+        .apply(&args.cryptol_fn)
+        .spec_only_on_missing
+    };
     let base_name = rust_file
         .file_stem()
         .and_then(|s| s.to_str())
@@ -159,15 +178,15 @@ pub fn run(args: VerifyRustArgs) -> Result<VerifyRustOutcome> {
         .arg(&args.function)
         .arg("--output")
         .arg(&output_dir);
-    if args.spec_only_on_missing {
-        gen_cmd.arg("--spec-only-on-missing");
+    if let Some(config) = config.as_deref() {
+        gen_cmd.arg("--config").arg(config);
     }
     run_and_print(&mut gen_cmd)?;
 
     let saw_script = output_dir.join("verify_rust.saw");
     let meta_path = output_dir.join("verify_rust.meta.json");
     if !saw_script.exists() || !meta_path.exists() {
-        if args.spec_only_on_missing && output_dir.join("result.json").exists() {
+        if spec_only_on_missing && output_dir.join("result.json").exists() {
             println!("RESULT: NOT_ATTEMPTED");
             return Ok(VerifyRustOutcome::NotAttempted);
         }

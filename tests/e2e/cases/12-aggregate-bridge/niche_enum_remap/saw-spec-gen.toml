@@ -1,0 +1,5 @@
+# Niche-packed enum remap: composes a return variant map with a param
+# variant map for activate. Auto-discovered from the sibling Cryptol spec
+# (replaces the former repeated --variant-map CLI flags).
+[functions.activate_spec]
+variant_map = ["return=Success:0,AlreadyActive:1", "x0=Success:1,AlreadyActive:2"]

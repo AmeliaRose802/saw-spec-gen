@@ -2,9 +2,10 @@
 // docs/03-stateful-method-specs.md), exercised against a REAL
 // `std::mutex` — not a hand-declared stand-in.
 //
-// `std::lock_guard<std::mutex>` lowers (on the MSVC/UCRT toolchain) to
-// calls into the declare-only threading status primitives `_Mtx_lock`
-// / `_Mtx_unlock`, which return `_Thrd_result` (success == 0).
+// `std::lock_guard<std::mutex>` lowers to declare-only threading
+// primitives that return 0 on success (MSVC: `_Mtx_lock` /
+// `_Mtx_unlock`; Linux/libstdc++: `__gthread_mutex_lock` /
+// `__gthread_mutex_unlock`, often forwarding to `pthread_mutex_*`).
 // saw-spec-gen emits an assumed override for each and, via
 // `status_primitives::success_sentinel`, pins the return to that
 // sentinel instead of a fresh symbolic value. It also seeds the

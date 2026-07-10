@@ -48,43 +48,12 @@ pub struct VerifyArgs {
     ///
     /// When omitted, `verify-cpp` preserves `gen-verify`'s normal
     /// spec-relative auto-discovery by passing the original
-    /// `--cryptol-spec` path through unchanged. Prefer versioned
-    /// config files for shaping.
+    /// `--cryptol-spec` path through unchanged. All spec shaping
+    /// (buffer sizes, out-buffer bindings, length preconditions,
+    /// struct-shape toggles, spec-only-on-missing) lives in the config
+    /// file — there are no shaping CLI flags.
     #[arg(long = "config", value_name = "PATH")]
     pub config: Option<PathBuf>,
-
-    /// Declare a read-only input buffer override.
-    ///
-    /// Format: `NAME=SHAPE` (for example `src=32` or `data=4xi8`).
-    #[arg(long = "in-buffer-size", value_name = "NAME=SHAPE", num_args = 0..)]
-    pub in_buffer_size: Vec<String>,
-
-    /// Declare a writable output buffer override.
-    ///
-    /// Format: `NAME=SHAPE` or `NAME=auto` (for example `out=32`).
-    #[arg(long = "out-buffer-param", value_name = "NAME=SHAPE|auto", num_args = 0..)]
-    pub out_buffer_param: Vec<String>,
-
-    /// Bind an out-buffer to a Cryptol postcondition function.
-    ///
-    /// Format: `OUT_PARAM=FN` (for example `out=bounded_copy_post`).
-    #[arg(long = "cryptol-fn-out", value_name = "OUT_PARAM=FN", num_args = 0..)]
-    pub cryptol_fn_out: Vec<String>,
-
-    /// Emit a scalar length precondition before the call.
-    ///
-    /// Format: `NAME=VAL` (for example `len=32`).
-    #[arg(long = "max-len-precond", value_name = "NAME=VAL", num_args = 0..)]
-    pub max_len_precond: Vec<String>,
-
-    /// Disable the struct-shape recognizer.
-    #[arg(long = "no-struct-shape-recognizer", default_value_t = false)]
-    pub no_struct_shape_recognizer: bool,
-
-    /// Soft-exit with a `result.json` status of `not_attempted` when the
-    /// target function has no matching implementation symbol.
-    #[arg(long = "spec-only-on-missing", default_value_t = false)]
-    pub spec_only_on_missing: bool,
 }
 
 /// Arguments for the `gen-verify` subcommand (C++ and unified C++/Rust path).
@@ -136,143 +105,6 @@ pub struct GenVerifyArgs {
     #[arg(short, long)]
     pub output: PathBuf,
 
-    /// Override the byte size of a specific C++ type name when the
-    /// post-processing pass can't resolve `llvm_alias "NAME"` from
-    /// the AST or LLVM IR.  Pass `--alias-size NAME=BYTES` once per
-    /// override; emits `llvm_array BYTES (llvm_int 8)` for that
-    /// name.  Use this for types whose only `dereferenceable(N)`
-    /// attribute lives in a separate bitcode module (e.g.
-    /// `std::tuple<…>` sret returns from interface methods
-    /// implemented in a different .bc file).
-    #[arg(long = "alias-size", value_name = "NAME=BYTES", num_args = 0..)]
-    pub alias_size: Vec<String>,
-
-    /// Override the bit width of a specific enum type name when the
-    /// AST is missing the `EnumDecl` definition (e.g. only a forward
-    /// declaration is reachable).  Pass `--alias-enum NAME=BITS`
-    /// once per override; emits `llvm_int BITS` for that name.
-    #[arg(long = "alias-enum", value_name = "NAME=BITS", num_args = 0..)]
-    pub alias_enum: Vec<String>,
-
-    /// Emit `llvm_combine_modules` in the generated `verify.saw`
-    /// instead of pre-linking `main.bc` + `vtable_stubs.bc` with
-    /// `llvm-link` at gen time.
-    ///
-    /// Default (off): pre-link with `llvm-link` and have SAW load a
-    /// single `code.combined.bc`. Works with the stock GaloisInc
-    /// SAW v1.5 release tarball.
-    ///
-    /// On (this flag): keep the old behavior. Produces a script
-    /// that needs SAW master / a fork that includes the
-    /// `llvm_combine_modules` primitive (merged upstream after the
-    /// v1.5 tag).
-    ///
-    /// Has no effect when there are no interface (virtual) methods
-    /// to stub — the single-module load path is always used in that
-    /// case.
-    #[arg(long = "use-llvm-combine-modules", default_value_t = false)]
-    pub use_llvm_combine_modules: bool,
-
-    /// Soft-exit (writing a `result.json` with `status:
-    /// not_attempted` and a human-readable `reason`) instead of
-    /// erroring out when the Cryptol `--function` has no matching
-    /// C++ symbol in the AST / no mangled name / no derivable
-    /// constraint spec.
-    ///
-    /// Intended for batch pipelines that drive `gen-verify` over
-    /// every top-level Cryptol definition in a spec module.
-    #[arg(long = "spec-only-on-missing", default_value_t = false)]
-    pub spec_only_on_missing: bool,
-
-    /// Declare a C++ pointer parameter as a read-only input
-    /// buffer of a known shape, instead of inferring a 1-byte
-    /// alloc from the bare pointer type.
-    ///
-    /// Format: `NAME=SHAPE`, SHAPE = `BYTES` (byte buffer) |
-    /// `iW` (single wide scalar field) | `NxiW` (wide array) |
-    /// `struct:Type` (named LLVM struct) | `{f1,f2,...}`
-    /// (heterogeneous struct, fields are themselves SHAPEs) |
-    /// `<{f1,f2,...}>` (packed struct, no padding).
-    #[arg(long = "in-buffer-size", value_name = "NAME=SHAPE", num_args = 0..)]
-    pub in_buffer_size: Vec<String>,
-
-    /// Declare a C++ pointer parameter as a writable output
-    /// buffer of a known shape. The generated spec allocates a
-    /// typed region, binds a fresh `<NAME>_pre` to its pre-call
-    /// contents, and (with `--cryptol-fn-out NAME=FN`) post-asserts
-    /// `llvm_points_to <NAME>_ptr (llvm_term {{ FN ... }})`.
-    ///
-    /// Format: `NAME=SHAPE` or `NAME=auto`. SHAPE = `BYTES`
-    /// (byte buffer, for byte-granular fields) | `iW` (a single
-    /// wide scalar field, e.g. a `uint32` loaded as one i32 a byte
-    /// array can't model) | `NxiW` (wide array, e.g. `4xi32`) |
-    /// `struct:Type` (named LLVM struct, e.g.
-    /// `struct:EnrollmentKey`) | `{f1,f2,...}` (heterogeneous struct
-    /// for mixed-width layouts, e.g. `{16xi8,i8}` for a Uuid+bool) |
-    /// `<{f1,f2,...}>` (packed struct). `auto` keeps the inferred
-    /// pointee type.
-    #[arg(long = "out-buffer-param", value_name = "NAME=SHAPE|auto", num_args = 0..)]
-    pub out_buffer_param: Vec<String>,
-
-    /// Bind a Cryptol function to the post-call contents of an
-    /// out-buffer declared with `--out-buffer-param`. The
-    /// generated spec emits a `llvm_points_to` post-condition
-    /// asserting the buffer holds `FN <args>` after the call.
-    /// Argument ordering follows `--cryptol-arg-order FN=...`
-    /// when supplied, else the positional default.
-    ///
-    /// Format: `OUT_PARAM=FN`. Pass once per out-buffer.
-    #[arg(long = "cryptol-fn-out", value_name = "OUT_PARAM=FN", num_args = 0..)]
-    pub cryptol_fn_out: Vec<String>,
-
-    /// Optional Cryptol pre-state predicate emitted as
-    /// `llvm_precond {{ FN ... }}` immediately before
-    /// `llvm_execute_func`.
-    ///
-    /// Format: `FN`. Pass at most once.
-    #[arg(long = "cryptol-fn-pre", value_name = "FN", num_args = 0..=1)]
-    pub cryptol_fn_pre: Vec<String>,
-
-    /// Emit an `llvm_precond {{ NAME <= VAL }}` constraint just
-    /// before `llvm_execute_func`. Use to bound scalar length
-    /// parameters to the declared buffer size.
-    ///
-    /// Format: `NAME=VAL`. Pass once per bound.
-    #[arg(long = "max-len-precond", value_name = "NAME=VAL", num_args = 0..)]
-    pub max_len_precond: Vec<String>,
-
-    /// Override the Cryptol-side argument order for a function
-    /// referenced via `--cryptol-fn` or `--cryptol-fn-out`.
-    /// Each token is either `<param_name>` or `@pre.<param_name>`.
-    ///
-    /// Format: `FN=arg1,arg2,...`. Pass once per Cryptol fn.
-    #[arg(long = "cryptol-arg-order", value_name = "FN=arg1,arg2,...", num_args = 0..)]
-    pub cryptol_arg_order: Vec<String>,
-
-    /// Restrict verification to a subset of enum variants when
-    /// the impl has fewer variants than the canonical spec
-    /// (Rust path only).
-    /// Format: `PARAM=V1:disc1,V2:disc2,...` (e.g.
-    /// `x0=Success:0,AlreadyActive:1`). Use `return=V1:D1,...`
-    /// for a narrowing adapter on the return type.
-    #[arg(long = "variant-map", value_name = "PARAM=V1:D1,V2:D2,...", num_args = 0..)]
-    pub variant_map: Vec<String>,
-
-    /// Disable the struct-shape recognizer (ArrayView rule 4).
-    /// The recognizer pairs adjacent `(T* buf, size_t len)`
-    /// parameters and synthesizes `_In_reads_(len)` on the buffer
-    /// when neither carries a size annotation.
-    #[arg(long = "no-struct-shape-recognizer", default_value_t = false)]
-    pub no_struct_shape_recognizer: bool,
-
-    /// Optional container-layout TOML catalog (ArrayView rule 5).
-    /// Merged over the built-in defaults.
-    /// **No-op today + scheduled for deletion** in favor of AST-
-    /// driven auto-derivation (saw_spec_gen-530, -qms, -0nf).
-    /// Passing this flag prints a stderr warning.
-    #[arg(long = "container-layouts", value_name = "PATH")]
-    pub container_layouts: Option<PathBuf>,
-
     /// Path to a per-invocation config file (TOML).
     ///
     /// When omitted, saw-spec-gen looks for config in this order:
@@ -283,12 +115,13 @@ pub struct GenVerifyArgs {
     ///   2. `saw-spec-gen.toml` walking up from the spec's directory.
     ///   3. `saw-spec-gen.toml` walking up from the current working directory.
     ///
-    /// Config values act as defaults; explicit CLI flags always override them.
-    ///
-    /// Per-function shaping can be declared in `[functions.<cryptol_fn>]`
-    /// tables (keyed by `--cryptol-fn`), carrying the same buffer/shape
-    /// flags. Resolution order is per-function config → global config →
-    /// CLI, so a typed config replaces hand-coded driver-script flags.
+    /// All spec shaping — buffer sizes, out-buffer bindings, length
+    /// preconditions, alias sizes/enums, variant maps, argument order,
+    /// struct-shape toggles, `llvm_combine_modules`, and
+    /// `spec-only-on-missing` — is declared in the config file. Global
+    /// keys apply everywhere; `[functions.<cryptol_fn>]` tables (keyed by
+    /// `--cryptol-fn`) carry per-function overrides. There are no shaping
+    /// CLI flags.
     #[arg(long = "config", value_name = "PATH")]
     pub config: Option<PathBuf>,
 }
@@ -323,51 +156,17 @@ pub struct GenVerifyRustArgs {
     #[arg(short, long)]
     pub output: PathBuf,
 
-    /// Soft-exit with `result.json` status `not_attempted`
-    /// instead of erroring when `--function` has no matching
-    /// Rust symbol in the LLVM IR.
-    #[arg(long = "spec-only-on-missing", default_value_t = false)]
-    pub spec_only_on_missing: bool,
-
-    /// Read-only input buffer override. Format: `NAME=SHAPE`
-    /// (SHAPE = `BYTES` | `iW` | `NxiW` | `{f1,f2,...}` |
-    /// `<{f1,f2,...}>`).
-    #[arg(long = "in-buffer-size", value_name = "NAME=SHAPE", num_args = 0..)]
-    pub in_buffer_size: Vec<String>,
-
-    /// Writable output buffer override. Format: `NAME=SHAPE`
-    /// (SHAPE = `BYTES` | `iW` | `NxiW` | `{f1,f2,...}` |
-    /// `<{f1,f2,...}>`) or `NAME=auto`.
-    #[arg(long = "out-buffer-param", value_name = "NAME=SHAPE|auto", num_args = 0..)]
-    pub out_buffer_param: Vec<String>,
-
-    /// Cryptol fn for out-buffer postcondition. Format: `OUT_PARAM=FN`.
-    #[arg(long = "cryptol-fn-out", value_name = "OUT_PARAM=FN", num_args = 0..)]
-    pub cryptol_fn_out: Vec<String>,
-
-    /// Optional Cryptol pre-state predicate emitted as
-    /// `llvm_precond {{ FN ... }}` immediately before
-    /// `llvm_execute_func`.
-    #[arg(long = "cryptol-fn-pre", value_name = "FN", num_args = 0..=1)]
-    pub cryptol_fn_pre: Vec<String>,
-
-    /// Emit `llvm_precond {{ NAME <= VAL }}`. Format: `NAME=VAL`.
-    #[arg(long = "max-len-precond", value_name = "NAME=VAL", num_args = 0..)]
-    pub max_len_precond: Vec<String>,
-
-    /// Explicit Cryptol argument order. Format: `FN=arg1,arg2,...`.
-    #[arg(long = "cryptol-arg-order", value_name = "FN=arg1,arg2,...", num_args = 0..)]
-    pub cryptol_arg_order: Vec<String>,
-
-    /// Restrict verification to a subset of enum variants when
-    /// the impl has fewer variants than the canonical spec.
-    /// Format: `PARAM=V1:disc1,V2:disc2,...` (e.g.
-    /// `x0=Success:0,AlreadyActive:1`). The generated spec
-    /// emits a membership precondition restricting the parameter
-    /// to the listed discriminants, and a narrowing adapter for
-    /// the return value. Pass once per parameter.
-    #[arg(long = "variant-map", value_name = "PARAM=V1:D1,V2:D2,...", num_args = 0..)]
-    pub variant_map: Vec<String>,
+    /// Path to a per-invocation config file (TOML).
+    ///
+    /// When omitted, config is auto-discovered from the `--cryptol-spec`
+    /// location (sibling `<stem>.toml`, then `saw-spec-gen.toml` walking
+    /// up). All spec shaping — buffer sizes, out-buffer bindings, length
+    /// preconditions, variant maps, argument order, and
+    /// `spec-only-on-missing` — lives in the config file, either as
+    /// global keys or `[functions.<cryptol_fn>]` tables. There are no
+    /// shaping CLI flags.
+    #[arg(long = "config", value_name = "PATH")]
+    pub config: Option<PathBuf>,
 }
 
 /// Arguments for the native `verify-rust` pipeline runner.
@@ -393,8 +192,11 @@ pub struct VerifyRustRunArgs {
     #[arg(short, long)]
     pub output: Option<PathBuf>,
 
-    /// Soft-exit with `result.json` status `not_attempted`
-    /// when no matching implementation symbol exists.
-    #[arg(long = "spec-only-on-missing", default_value_t = false)]
-    pub spec_only_on_missing: bool,
+    /// Path to a per-invocation config file (TOML).
+    ///
+    /// When omitted, config is auto-discovered from the `--cryptol-spec`
+    /// location. `spec-only-on-missing` and all spec shaping live in the
+    /// config file — there are no shaping CLI flags.
+    #[arg(long = "config", value_name = "PATH")]
+    pub config: Option<PathBuf>,
 }
