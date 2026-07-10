@@ -65,6 +65,28 @@ fn verify_subcommand_writes_disproved_result_details() {
     assert_eq!(result["counterexample"][0]["value"], "42");
     assert_eq!(result["expected"], "7");
     assert_eq!(result["actual"], "0");
+    assert_eq!(result["reason_code"], "disproved_counterexample");
+}
+
+#[test]
+fn verify_subcommand_classifies_internal_simulation_error_as_unknown() {
+    let env = FakeVerifyEnv::new(SawMode::InternalError);
+    let out_dir = env.root.path().join("out_internal_error");
+
+    let status = env.run_verify(&out_dir);
+    assert_eq!(
+        status.code(),
+        Some(2),
+        "internal error should exit 2 (UNKNOWN)"
+    );
+
+    let result: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(out_dir.join("result.json")).unwrap())
+            .unwrap();
+    assert_eq!(result["schema_version"], "1");
+    assert_eq!(result["verdict"], "UNKNOWN");
+    assert_eq!(result["counterexample"], serde_json::json!([]));
+    assert_eq!(result["reason_code"], "unknown_internal_memory_error");
 }
 
 #[test]
@@ -130,6 +152,7 @@ struct FakeVerifyEnv {
 enum SawMode {
     Verified,
     Disproved,
+    InternalError,
 }
 
 impl FakeVerifyEnv {
@@ -239,6 +262,9 @@ EOF
             }
             SawMode::Disproved => {
                 "#!/usr/bin/env bash\nif [[ \"$1\" == \"_eval_cex.saw\" ]]; then echo 'CRYPTOL_RESULT=7'; else printf 'Counterexample\\n  x: 42\\nSubgoal failed: _Z15ComputeChecksumPKhm\\n'; fi\n"
+            }
+            SawMode::InternalError => {
+                "#!/usr/bin/env bash\nprintf 'Counterexample\\nFailed proof obligation: ComputeChecksum internal: error: in SomeHelper\\nSubgoal failed: ComputeChecksum internal: error: in SomeHelper\\nError during memory load\\n'\n"
             }
         };
         write_script(&fake_bin.join("saw"), saw_body);

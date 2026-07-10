@@ -38,6 +38,7 @@ at `<output-dir>/cpp/result.json` and `<output-dir>/rust/result.json`.
 | `solver`         | string \| null                                    | yes      | Solver SAW dispatched to (currently always `"z3"` when set). |
 | `time_secs`      | number \| null                                    | yes      | Wall-clock seconds the SAW invocation took, when measured. |
 | `impl_file`      | string \| null                                    | yes      | Source file basename (the `.cpp` / `.rs` that produced the bitcode/MIR).  For `side="equiv"`, both basenames joined with `" | "`. |
+| `reason_code`    | string \| null                                    | yes      | Machine-readable reason for the verdict.  `null` for `VERIFIED`.  See [Reason codes](#reason-codes) below. |
 
 All optional consumer fields are emitted as `null` (or `[]` for
 `counterexample`) rather than omitted, so the keyset is stable.
@@ -48,9 +49,20 @@ All optional consumer fields are emitted as `null` (or `[]` for
 |------------------|-----------------------------------------------------------|
 | `VERIFIED`       | SAW proved the implementation matches `cryptol_fn` on every input. |
 | `DISPROVED`      | SAW returned a counterexample (recorded in `counterexample`). |
-| `UNKNOWN`        | SAW returned neither `VERIFIED` nor a counterexample (timeout, parser error, etc.). |
+| `UNKNOWN`        | SAW returned neither `VERIFIED` nor a counterexample (timeout, parser error, internal simulation error, etc.). |
 | `EQUIVALENT`     | (`side="equiv"` only) both C++ and Rust sides individually `VERIFIED`. |
 | `NOT EQUIVALENT` | (`side="equiv"` only) at least one side disagreed with `cryptol_fn`. |
+
+### Reason codes
+
+`reason_code` disambiguates `UNKNOWN` and `DISPROVED` verdicts for downstream tooling.
+
+| `reason_code`                    | Verdict(s)        | Meaning |
+|----------------------------------|-------------------|---------|
+| `disproved_counterexample`       | `DISPROVED`       | SAW produced a genuine semantic counterexample to the proof obligation. |
+| `unknown_internal_memory_error`  | `UNKNOWN`         | SAW reported an internal simulation or memory-load error (e.g. unresolved `std::optional` accessor under symbolic execution).  Not a model mismatch. |
+| *(null)*                         | `VERIFIED`        | Proof succeeded; no reason code needed. |
+| *(null)*                         | `UNKNOWN`         | Generic unknown — SAW returned neither `VERIFIED` nor a counterexample (timeout, parser error, etc.). |
 
 ### Example — `VERIFIED`
 

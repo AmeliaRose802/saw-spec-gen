@@ -27,6 +27,7 @@ struct VerifyResult<'a> {
     solver: Option<&'a str>,
     time_secs: Option<f64>,
     impl_file: Option<&'a str>,
+    reason_code: Option<&'a str>,
 }
 
 #[derive(Serialize)]
@@ -61,6 +62,7 @@ pub fn write_verify_result(
     solver: Option<&str>,
     time_secs: Option<f64>,
     impl_file: Option<&str>,
+    reason_code: Option<&str>,
 ) -> Result<()> {
     let payload = VerifyResult {
         schema_version: RESULT_SCHEMA_VERSION,
@@ -74,6 +76,7 @@ pub fn write_verify_result(
         solver,
         time_secs,
         impl_file,
+        reason_code,
     };
     write_payload(output_dir, &payload)
 }
@@ -137,6 +140,7 @@ mod tests {
             Some("z3"),
             Some(1.25),
             Some("f.cpp"),
+            Some("disproved_counterexample"),
         )
         .unwrap();
         let json: serde_json::Value =
@@ -149,6 +153,7 @@ mod tests {
         assert_eq!(json["actual"], "0");
         assert_eq!(json["solver"], "z3");
         assert_eq!(json["impl_file"], "f.cpp");
+        assert_eq!(json["reason_code"], "disproved_counterexample");
     }
 
     #[test]
