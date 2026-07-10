@@ -465,6 +465,10 @@ fn ir_return_setup(ir_ty: &str) -> ReturnSetup {
         }
     }
     // Handle `[N x i8]` — MSVC sometimes returns small aggregates in this form.
+    // Only `i8` element arrays are handled: MSVC's ABI expresses opaque
+    // small-struct returns as byte arrays (`[N x i8]`); other element types
+    // (e.g. `[4 x i32]`) fall through to Unsupported rather than risk an
+    // incorrect override — a hand-written spec should cover those cases.
     if let Some(inner) = ir_ty.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
         if let Some((n_str, elem)) = inner.split_once(" x ") {
             if elem.trim() == "i8" {

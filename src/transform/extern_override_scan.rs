@@ -455,7 +455,7 @@ fn extract_return_type_token(prefix: &str) -> String {
     "void".to_string()
 }
 
-/// Split `s` on whitespace, keeping bracket-enclosed spans as one token.
+/// Split `s` on whitespace keeping bracket-enclosed spans as one token (depth only, no pair-check).
 fn split_bracket_tokens(s: &str) -> Vec<String> {
     let (mut out, mut cur, mut depth) = (Vec::new(), String::new(), 0i32);
     for b in s.bytes() {
