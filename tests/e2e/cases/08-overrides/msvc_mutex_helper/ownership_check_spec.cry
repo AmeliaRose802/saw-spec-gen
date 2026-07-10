@@ -1,0 +1,8 @@
+module ownership_check_spec where
+
+// A lock-guarded increment using std::recursive_mutex.  Any
+// std::_Mutex_base helpers (e.g. _Verify_ownership_levels) are overridden
+// as no-ops in sequential proofs (ownership always valid when uncontended),
+// so the function reduces to a plain increment.
+ownership_check_spec : [32] -> [32]
+ownership_check_spec x = x + 1

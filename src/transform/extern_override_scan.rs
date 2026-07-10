@@ -90,6 +90,13 @@ pub enum BrokenReason {
     /// body but tends to panic deep inside libstdc++ allocator
     /// helpers (`Cannot mux LLVM values`). Force-havoc instead.
     StlOverride,
+    /// The symbol is a known MSVC `_Mutex_base` internal helper
+    /// (e.g. `_Verify_ownership_levels`) defined in-module with
+    /// `linkonce_odr` linkage. It performs typed reads on mutex
+    /// internals that cause "Error during memory load" under SAW
+    /// symbolic execution when the struct is modeled as flat bytes.
+    /// Safe to no-op in sequential proofs.
+    MsvcMutexHelper,
 }
 
 /// Per-function parsed snapshot used internally by [`scan`].
@@ -159,6 +166,8 @@ pub fn scan(ir: &str, target_symbol: &str) -> Vec<OverrideTarget> {
             BrokenReason::UsesVarargsIntrinsic
         } else if crate::emit::saw_emit::stl_overrides::matches(&f.name) {
             BrokenReason::StlOverride
+        } else if crate::emit::saw_emit::status_primitives::is_msvc_mutex_helper(&f.name) {
+            BrokenReason::MsvcMutexHelper
         } else {
             continue;
         };
@@ -455,32 +464,9 @@ fn extract_return_type_token(prefix: &str) -> String {
     "void".to_string()
 }
 
-/// Split `s` on whitespace keeping bracket-enclosed spans as one token (depth only, no pair-check).
-fn split_bracket_tokens(s: &str) -> Vec<String> {
-    let (mut tokens, mut current_token, mut bracket_depth) = (Vec::new(), String::new(), 0i32);
-    for b in s.bytes() {
-        match b {
-            b'[' | b'(' | b'{' | b'<' => {
-                bracket_depth += 1;
-                current_token.push(b as char);
-            }
-            b']' | b')' | b'}' | b'>' => {
-                bracket_depth -= 1;
-                current_token.push(b as char);
-            }
-            b' ' | b'\t' if bracket_depth == 0 => {
-                if !current_token.is_empty() {
-                    tokens.push(std::mem::take(&mut current_token));
-                }
-            }
-            _ => current_token.push(b as char),
-        }
-    }
-    if !current_token.is_empty() {
-        tokens.push(current_token);
-    }
-    tokens
-}
+#[path = "extern_override_scan_helpers.rs"]
+mod helpers;
+use helpers::split_bracket_tokens;
 
 fn extract_call_target(line: &str) -> Option<String> {
     // Match both `call ... @name(...)` and `invoke ... @name(...)`.

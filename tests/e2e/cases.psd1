@@ -240,6 +240,16 @@
         # shows the pin still lets a genuine off-by-one bug surface.
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/mutex_sentinel';          File = 'guarded_add_verified.cpp';   Cry = 'guarded_add_spec.cry';   CryptolFn = 'guarded_add_spec';   Function = 'guarded_add';             Expected = 'VERIFIED'  }
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/mutex_sentinel';          File = 'guarded_add_disproved.cpp';  Cry = 'guarded_add_spec.cry';   CryptolFn = 'guarded_add_spec';   Function = 'guarded_add_disproved';   Expected = 'DISPROVED' }
+        # MSVC _Mutex_base::_Verify_ownership_levels no-op override (bd issue #65).
+        # This defined-in-module helper performs typed field reads on the mutex
+        # struct. Before the MsvcMutexHelper fix, extern_override_scan skipped
+        # it and SAW failed with "Error during memory load" when inlining its
+        # body against a symbolically-allocated struct. With the fix it is
+        # detected via the _Verify_ownership_levels substring pattern (fires on
+        # both MSVC and GCC/Clang mangled names) and overridden as a no-op
+        # returning {{ 1 : [1] }} (ownership always valid in sequential proofs).
+        @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/msvc_mutex_helper'; File = 'ownership_check_verified.cpp';  Cry = 'ownership_check_spec.cry'; CryptolFn = 'ownership_check_spec'; Function = 'ownership_check';           Expected = 'VERIFIED'  }
+        @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/msvc_mutex_helper'; File = 'ownership_check_disproved.cpp'; Cry = 'ownership_check_spec.cry'; CryptolFn = 'ownership_check_spec'; Function = 'ownership_check_disproved'; Expected = 'DISPROVED' }
 
         # ── C++/Rust equivalence tests (verify-equiv.ps1) ───────────────────
         @{ Tag = 'rust_equiv'; Runner = 'equiv'; Dir = 'tests/e2e/cases/04-cpp-rust-equivalence/compute_fee_reordered';         Cpp = 'compute_fee.cpp'; Rust = 'compute_fee_verified.rs';  Cry = 'compute_fee_spec.cry'; CryptolFn = 'compute_fee_spec'; Function = 'compute_fee'; Expected = 'EQUIVALENT'     }

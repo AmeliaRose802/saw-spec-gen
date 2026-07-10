@@ -4,7 +4,7 @@
 use super::*;
 use crate::transform::extern_override_scan::{BrokenReason, OverrideTarget};
 
-fn target(
+pub(super) fn target(
     symbol: &str,
     params: &[&str],
     ret: &str,
@@ -19,7 +19,7 @@ fn target(
 /// by `globals_get_adversarial_post_clobber` to assert that the
 /// emitter clobbers exactly the per-target written set rather than
 /// the module-wide mutable-global list.
-fn target_with_writes(
+pub(super) fn target_with_writes(
     symbol: &str,
     params: &[&str],
     ret: &str,
@@ -516,11 +516,5 @@ fn ordinary_int_return_is_not_pinned() {
     assert!(!out.snippet.contains("_Thrd_success"));
 }
 
-#[test]
-fn byte_array_return_emits_llvm_array_fresh_var() {
-    let t = target("f", &[], "[16 x i8]", false, BrokenReason::DeclareOnly);
-    let out = emit_overrides(&[t], &[], &[], &Default::default());
-    assert!(out
-        .snippet
-        .contains("llvm_fresh_var \"rv\" (llvm_array 16 (llvm_int 8))"));
-}
+#[path = "bitcode_overrides_tests_msvc.rs"]
+mod msvc_tests;
