@@ -3,8 +3,8 @@ DEMO: sret pre-state slice — struct return via hidden sret pointer.
 
 On x86_64 System V ABI (Linux) aggregates > 16 bytes are returned
 via a hidden `sret` output pointer.  The struct must exceed 16 bytes
-to force sret on Linux; 20 bytes (4 header + 16 body) clears the
-threshold on all supported ABIs.
+to force sret on Linux; 20 bytes total (header[4] + body[16] = 20,
+matching the struct layout below) clears the threshold on all supported ABIs.
 
 The Cryptol model takes a trailing [16][8] pre-state parameter
 representing the `body` field (at offset 4), while the full struct

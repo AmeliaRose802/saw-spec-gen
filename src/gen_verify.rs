@@ -330,7 +330,7 @@ pub fn run(
 
             // Skip symbols that the bitcode override scan handles with a
             // curated functional model (resize, size, operator[], etc.).
-            // The bitcode scan emits the correct points-to spec; a havoc
+            // The bitcode scan emits the correct functional model; a havoc
             // spec here would use wrong types and block that override via
             // `already_covered`.
             if let Some(mangled) = spec.mangled_name.as_deref() {

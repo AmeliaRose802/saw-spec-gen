@@ -117,7 +117,7 @@ pub(crate) fn emit_spec_only_result(
 ///
 /// STL functional symbols (`resize`, `size`, `operator[]`, …) are
 /// intentionally excluded: the experimental-spec loop above emits a
-/// generic havoc spec for them using wrong types (pointer-to-alias
+/// generic havoc spec for them using incorrect types (pointer parameter
 /// instead of the correct value parameter). Excluding them here lets
 /// the bitcode scan emit the correct curated functional model instead.
 pub(crate) fn build_already_covered(
