@@ -27,7 +27,7 @@
 
 .PARAMETER ReleaseTag
     Which release of llvm-exception-lower to download prebuilt binaries
-    from (default: latest-main). The asset name is derived from the host
+    from (default: v0.3.2). The asset name is derived from the host
     platform: exception-lower-{platform}-{arch}.{ext} where {ext} is
     .zip on Windows and .tar.gz elsewhere.
 
@@ -55,7 +55,7 @@
 [CmdletBinding()]
 param(
     [string]$InstallRoot,
-    [string]$ReleaseTag = 'latest-main',
+    [string]$ReleaseTag = 'v0.3.2',
     [string]$Ref = 'main',
     [string]$LlvmBin,
     [switch]$Quiet,
@@ -138,32 +138,41 @@ function _TryDownloadPrebuilt {
         _Log '  prebuilt download produced an empty file' 'DarkYellow'
         return $false
     }
-    # Extract directly into bin/. The release archive contains the
-    # single executable plus a couple of doc files at its root.
+    # Extract into a clean staging dir, then relocate the binary to
+    # $elBin. Extracting straight into bin/ is unsafe: archives that
+    # carry a top-level bin/ prefix would nest as bin/bin/exception-lower,
+    # and a stale binary already at $elBin would be left in place
+    # (shadowing the freshly downloaded one).
     New-Item -ItemType Directory -Path $elBinDir -Force | Out-Null
+    $stage = Join-Path ([System.IO.Path]::GetTempPath()) "el-stage-$([guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Path $stage -Force | Out-Null
     try {
         if ($ext -eq 'zip') {
-            Expand-Archive -LiteralPath $tmp -DestinationPath $elBinDir -Force
+            Expand-Archive -LiteralPath $tmp -DestinationPath $stage -Force
         } else {
             # tar.exe ships with Windows 10+ and is universally
             # available on Linux/macOS. -p preserves permissions so the
             # executable bit survives.
-            Push-Location $elBinDir
+            Push-Location $stage
             try { & tar -xpzf $tmp } finally { Pop-Location }
             if ($LASTEXITCODE -ne 0) { throw "tar exited $LASTEXITCODE" }
         }
     } catch {
         _Log "  extract failed: $($_.Exception.Message)" 'DarkYellow'
         Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+        Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
         return $false
     }
     Remove-Item $tmp -Force -ErrorAction SilentlyContinue
-    if (-not (Test-Path -LiteralPath $elBin)) {
-        # Some packagers put the binary under a top-level directory; do
-        # a shallow search for it.
-        $found = Get-ChildItem -LiteralPath $elBinDir -Recurse -Filter ('exception-lower' + $exeExt) -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($found) { Move-Item -LiteralPath $found.FullName -Destination $elBin -Force }
+    $found = Get-ChildItem -LiteralPath $stage -Recurse -Filter ('exception-lower' + $exeExt) -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $found) {
+        _Log "  archive did not contain exception-lower$exeExt" 'DarkYellow'
+        Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+        return $false
     }
+    # Overwrite any previously installed binary (e.g. an older LLVM build).
+    Move-Item -LiteralPath $found.FullName -Destination $elBin -Force
+    Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
     if (-not (Test-Path -LiteralPath $elBin)) {
         _Log "  archive did not contain exception-lower$exeExt" 'DarkYellow'
         return $false

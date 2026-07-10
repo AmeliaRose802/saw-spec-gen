@@ -18,7 +18,7 @@
 #
 # Environment overrides:
 #   INSTALL_ROOT          install root           (default: ~/.saw-spec-gen)
-#   EXCEPTION_LOWER_TAG   release tag to fetch   (default: v0.3.1)
+#   EXCEPTION_LOWER_TAG   release tag to fetch   (default: v0.3.2)
 #   EXCEPTION_LOWER_REF   git ref for fallback   (default: main)
 #   LLVM_BIN              llvm bin dir for cmake (default: empty)
 #   QUIET                 1 to suppress info     (default: 0)
@@ -28,7 +28,7 @@
 set -euo pipefail
 
 INSTALL_ROOT="${INSTALL_ROOT:-${HOME}/.saw-spec-gen}"
-EXCEPTION_LOWER_TAG="${EXCEPTION_LOWER_TAG:-latest-main}"
+EXCEPTION_LOWER_TAG="${EXCEPTION_LOWER_TAG:-v0.3.2}"
 EXCEPTION_LOWER_REF="${EXCEPTION_LOWER_REF:-main}"
 LLVM_BIN="${LLVM_BIN:-}"
 QUIET="${QUIET:-0}"
@@ -119,22 +119,30 @@ try_download_prebuilt() {
         return 1
     fi
     mkdir -p "$EL_BIN_DIR"
-    # tar is universal on Linux/macOS; -p preserves the +x bit.
-    if ! tar -xpzf "$tmp" -C "$EL_BIN_DIR"; then
+    # Extract into a clean staging dir, then relocate the binary to
+    # $EL_BIN. Extracting straight into $EL_BIN_DIR is unsafe: archives
+    # that carry a top-level bin/ prefix would nest as bin/bin/exception-
+    # lower, and a stale binary already at $EL_BIN would be left in place
+    # (shadowing the freshly downloaded one). tar -p preserves the +x bit.
+    local stage found
+    stage="$(mktemp -d -t el-stage.XXXXXX)"
+    if ! tar -xpzf "$tmp" -C "$stage"; then
         log '  tar extract failed'
+        rm -rf "$stage"
         rm -f "$tmp"
         return 1
     fi
     rm -f "$tmp"
-    if [[ ! -x "$EL_BIN" ]]; then
-        # Some packagers put the binary under a top-level directory.
-        found="$(find "$EL_BIN_DIR" -maxdepth 3 -type f -name 'exception-lower' | head -n 1 || true)"
-        [[ -n "$found" ]] && mv "$found" "$EL_BIN"
-    fi
-    if [[ ! -x "$EL_BIN" ]]; then
+    found="$(find "$stage" -type f -name 'exception-lower' | head -n 1 || true)"
+    if [[ -z "$found" ]]; then
         log '  archive did not contain exception-lower'
+        rm -rf "$stage"
         return 1
     fi
+    # Overwrite any previously installed binary (e.g. an older LLVM build).
+    rm -f "$EL_BIN"
+    mv -f "$found" "$EL_BIN"
+    rm -rf "$stage"
     chmod +x "$EL_BIN"
     return 0
 }

@@ -1,0 +1,3 @@
+// Total reference spec: add_one(x) = x + 1 on every 32-bit input.
+add_one_spec : [32] -> [32]
+add_one_spec x = x + 1

@@ -128,6 +128,18 @@ pub(super) fn maybe_lower_exceptions(
         eprintln!("warning: exception-lower failed; continuing with unlowered IR");
         return Ok(());
     }
+    // Only adopt the lowered module when the pass actually rewrote
+    // something. When there is no EH to lower the pass is a no-op, and
+    // round-tripping the bitcode back through the pipeline (copy +
+    // llvm-dis) is pure overhead — and historically a source of
+    // divergence — so we leave the original bc/ll untouched. This keeps
+    // exception lowering provably non-harmful for the common
+    // no-exception case while still running on every platform.
+    let original = std::fs::read(bc_file).ok();
+    let lowered = std::fs::read(&lowered_bc).ok();
+    if original.is_some() && original == lowered {
+        return Ok(());
+    }
     std::fs::copy(&lowered_bc, bc_file)?;
     if let (Some(ll_file), Some(llvm_dis)) = (ll_file, tools.llvm_dis.as_deref()) {
         run_command(

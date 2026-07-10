@@ -440,17 +440,10 @@ pub fn run(
         resolve_spec_types_quiet(spec, &ir_struct_sizes);
     }
 
-    // Bitcode-driven extern override scan. The AST pipeline above only
-    // sees declarations the path filter kept; anything filtered as a
-    // system header (e.g. `printf` in MSVC's `<cstdio>`) is invisible
-    // even when the TU actually calls it, and SAW then aborts on
-    // `internal: error: in printf`. A second pass on the LLVM IR text
-    // covers declare-only externs and variadic functions whose body
-    // uses `llvm.va_*` intrinsics Crucible-LLVM can't simulate.
-    // AST-derived overrides take precedence — we pass their symbols
-    // as `already_covered` so the bitcode scan doesn't double-emit.
-    // See `src/emit/saw_emit/bitcode_overrides.rs` for the contract.
-    let already_covered: Vec<String> = external_calls_owned
+    // Bitcode-driven extern override scan for declare-only externs and
+    // variadic functions. Virtual methods handled by vtable stubs should
+    // be excluded from this scan to avoid duplicate specs.
+    let mut already_covered: Vec<String> = external_calls_owned
         .iter()
         .filter_map(|s| {
             s.mangled_name
@@ -458,6 +451,12 @@ pub fn run(
                 .or_else(|| Some(s.function_name.clone()))
         })
         .collect();
+    already_covered.extend(
+        vmethods
+            .iter()
+            .filter_map(|m| m.method.mangled_name.clone()),
+    );
+
     let bitcode_overrides = saw_emit::scan_and_emit_bitcode_overrides(
         llvm_ir_path,
         &target_mangled,
