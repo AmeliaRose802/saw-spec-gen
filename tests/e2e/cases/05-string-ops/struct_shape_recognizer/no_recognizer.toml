@@ -1,0 +1,7 @@
+# Explicitly-named (non-auto-discovered) config for the recognizer-OFF
+# variant only. The sibling *_disproved.cpp case shares this directory
+# and the same Cryptol fn but must keep the struct-shape recognizer ON,
+# so this file is NOT named saw-spec-gen.toml and is referenced by the
+# case's `Config` field instead of being auto-discovered.
+[functions.sum_first_byte_spec]
+no_struct_shape_recognizer = true

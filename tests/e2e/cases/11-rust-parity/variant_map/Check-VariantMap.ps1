@@ -1,11 +1,12 @@
 <#
 .SYNOPSIS
-    Custom e2e test: verify that --variant-map emits the correct
+    Custom e2e test: verify that a config `variant_map` emits the correct
     membership precondition in the generated SAW script.
 
     The Rust fn is_success(u8) -> u8 works for any u8 input, but
-    we restrict verification to status ∈ {0, 1} via --variant-map.
-    The generated script must contain the membership precondition.
+    we restrict verification to status in {0, 1} via a variant map in
+    saw-spec-gen.toml. The generated script must contain the membership
+    precondition.
 #>
 param()
 $ErrorActionPreference = "Stop"
@@ -42,18 +43,17 @@ $bcFile = Join-Path $outDir 'is_success_verified.bc'
 $llFile = Join-Path $outDir 'is_success_verified.ll'
 & $llvmDis $bcFile -o $llFile 2>&1 | Write-Host
 
-# ── Call gen-verify-rust with --variant-map ────────────────────────────────────
+# ── Call gen-verify-rust; variant map comes from saw-spec-gen.toml ────────────
 & $specGen gen-verify-rust `
     --llvm-ir      $llFile `
     --bitcode      $bcFile `
     --cryptol-spec $cryFile `
     --cryptol-fn   is_success_spec `
     --function     is_success `
-    --output       $outDir `
-    --variant-map  'x0=Success:0,Failure:1' 2>&1 | Write-Host
+    --output       $outDir 2>&1 | Write-Host
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "gen-verify-rust with --variant-map failed"
+    Write-Error "gen-verify-rust with config variant map failed"
     Write-Host "RESULT: DISPROVED"
     exit 1
 }

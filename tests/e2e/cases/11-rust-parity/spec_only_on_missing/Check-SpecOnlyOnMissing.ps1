@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
-    Custom e2e test: verify that gen-verify-rust --spec-only-on-missing
-    soft-exits with a result.json status=not_attempted when the target
-    function has no matching symbol in the LLVM IR.
+    Custom e2e test: verify that a config `spec_only_on_missing = true`
+    makes gen-verify-rust soft-exit with a result.json status=not_attempted
+    when the target function has no matching symbol in the LLVM IR.
 #>
 param()
 $ErrorActionPreference = "Stop"
@@ -40,15 +40,14 @@ $bcFile = Join-Path $outDir 'dummy.bc'
 $llFile = Join-Path $outDir 'dummy.ll'
 & $llvmDis $bcFile -o $llFile 2>&1 | Write-Host
 
-# ── Call gen-verify-rust with --spec-only-on-missing ──────────────────────────
+# ── Call gen-verify-rust; spec_only_on_missing comes from config ──────────────
 & $specGen gen-verify-rust `
     --llvm-ir      $llFile `
     --bitcode      $bcFile `
     --cryptol-spec $cryFile `
     --cryptol-fn   nonexistent_fn `
     --function     nonexistent_fn `
-    --output       $outDir `
-    --spec-only-on-missing 2>&1 | Write-Host
+    --output       $outDir 2>&1 | Write-Host
 
 if ($LASTEXITCODE -ne 0) {
     Write-Error "gen-verify-rust failed unexpectedly"

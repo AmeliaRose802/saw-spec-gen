@@ -14,7 +14,7 @@ param(
     [Parameter(Mandatory)][string]$CryptolFn,
     [Parameter(Mandatory)][string]$Function,
     [string]$OutputDir,
-    [switch]$SpecOnlyOnMissing
+    [string]$Config
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,7 +34,7 @@ $nativeArgs = @(
     '--function', $Function
 )
 if ($OutputDir) { $nativeArgs += @('--output', $OutputDir) }
-if ($SpecOnlyOnMissing) { $nativeArgs += '--spec-only-on-missing' }
+if ($Config) { $nativeArgs += @('--config', $Config) }
 
 & $specGen @nativeArgs
 exit $LASTEXITCODE

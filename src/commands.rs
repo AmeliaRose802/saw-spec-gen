@@ -22,12 +22,6 @@ pub fn verify_cmd(
     cxx_standard: Option<String>,
     clang_flags: Vec<String>,
     config: Option<PathBuf>,
-    in_buffer_size: Vec<String>,
-    out_buffer_param: Vec<String>,
-    cryptol_fn_out: Vec<String>,
-    max_len_precond: Vec<String>,
-    no_struct_shape_recognizer: bool,
-    spec_only_on_missing: bool,
 ) -> Result<()> {
     let outcome = verify_cpp::run(verify_cpp::VerifyRequest {
         cpp_file,
@@ -39,12 +33,6 @@ pub fn verify_cmd(
         cxx_standard,
         clang_flags,
         config,
-        in_buffer_size,
-        out_buffer_param,
-        cryptol_fn_out,
-        max_len_precond,
-        no_struct_shape_recognizer,
-        spec_only_on_missing,
     })?;
     std::process::exit(outcome.exit_code);
 }
@@ -317,19 +305,6 @@ pub fn gen_verify_cmd(
     cryptol_fn: String,
     function: String,
     output: PathBuf,
-    alias_size: Vec<String>,
-    alias_enum: Vec<String>,
-    use_llvm_combine_modules: bool,
-    spec_only_on_missing: bool,
-    in_buffer_size: Vec<String>,
-    out_buffer_param: Vec<String>,
-    cryptol_fn_out: Vec<String>,
-    cryptol_fn_pre: Vec<String>,
-    max_len_precond: Vec<String>,
-    cryptol_arg_order: Vec<String>,
-    variant_map: Vec<String>,
-    no_struct_shape_recognizer: bool,
-    container_layouts: Option<PathBuf>,
     config: Option<PathBuf>,
 ) -> Result<()> {
     // Load project config: explicit path > spec-sibling > saw-spec-gen.toml.
@@ -340,23 +315,7 @@ pub fn gen_verify_cmd(
             crate::project_config::ProjectConfig::discover_for_spec(&cryptol_spec, &cwd)?
         }
     };
-    let merged = cfg.apply(
-        &cryptol_fn,
-        crate::project_config::CliFlags {
-            no_struct_shape_recognizer,
-            use_llvm_combine_modules,
-            spec_only_on_missing,
-            alias_size,
-            alias_enum,
-            in_buffer_size,
-            max_len_precond,
-            out_buffer_param,
-            cryptol_fn_out,
-            cryptol_fn_pre,
-            cryptol_arg_order,
-            variant_map,
-        },
-    );
+    let merged = cfg.apply(&cryptol_fn);
 
     // Auto-detect language: Rust when --llvm-ir is provided without --ast
     let effective_lang = match lang.as_deref() {
@@ -423,7 +382,6 @@ pub fn gen_verify_cmd(
         merged.spec_only_on_missing,
         &buffer_overrides,
         merged.no_struct_shape_recognizer,
-        container_layouts.as_deref(),
         &merged.uninterpreted,
     )
 }
@@ -440,7 +398,6 @@ pub fn gen_rust_trait_stubs(schema: PathBuf, output: PathBuf) -> Result<()> {
 
 /// Implementation of `gen-verify-rust`. See [`gen_verify_rust::run`]
 /// for the heavy lifting.
-#[allow(clippy::too_many_arguments)]
 pub fn gen_verify_rust_cmd(
     llvm_ir: PathBuf,
     bitcode: PathBuf,
@@ -448,24 +405,26 @@ pub fn gen_verify_rust_cmd(
     cryptol_fn: String,
     function: String,
     output: PathBuf,
-    spec_only_on_missing: bool,
-    in_buffer_size: Vec<String>,
-    out_buffer_param: Vec<String>,
-    cryptol_fn_out: Vec<String>,
-    cryptol_fn_pre: Vec<String>,
-    max_len_precond: Vec<String>,
-    cryptol_arg_order: Vec<String>,
-    variant_map: Vec<String>,
+    config: Option<PathBuf>,
 ) -> Result<()> {
+    // Load project config: explicit path > spec-sibling > saw-spec-gen.toml.
+    let cfg = match config {
+        Some(ref p) => crate::project_config::ProjectConfig::load(p)?,
+        None => {
+            let cwd = std::env::current_dir()?;
+            crate::project_config::ProjectConfig::discover_for_spec(&cryptol_spec, &cwd)?
+        }
+    };
+    let merged = cfg.apply(&cryptol_fn);
     let overrides = crate::buffer_overrides::BufferOverrides::from_cli(
-        &in_buffer_size,
-        &out_buffer_param,
-        &cryptol_fn_out,
-        &max_len_precond,
-        &cryptol_arg_order,
-        &cryptol_fn_pre,
+        &merged.in_buffer_size,
+        &merged.out_buffer_param,
+        &merged.cryptol_fn_out,
+        &merged.max_len_precond,
+        &merged.cryptol_arg_order,
+        &merged.cryptol_fn_pre,
     )?;
-    let vmap = crate::gen_verify_rust_emit::VariantMap::parse_all(&variant_map)?;
+    let vmap = crate::gen_verify_rust_emit::VariantMap::parse_all(&merged.variant_map)?;
     gen_verify_rust::run(
         &llvm_ir,
         &bitcode,
@@ -473,10 +432,10 @@ pub fn gen_verify_rust_cmd(
         &cryptol_fn,
         &function,
         &output,
-        spec_only_on_missing,
+        merged.spec_only_on_missing,
         &overrides,
         &vmap,
-        &[],
+        &merged.uninterpreted,
     )
 }
 
