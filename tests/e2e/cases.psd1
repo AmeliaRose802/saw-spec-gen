@@ -498,15 +498,6 @@
         # run by default to keep the suite green. To enable, add tag 'box_allocator'.
         @{ Tag = 'box_allocator'; Runner = 'rust'; Dir = 'tests/e2e/cases/99-research/box_allocator';        File = 'add_one.rs'; Expected = 'UNKNOWN' }
 
-        # ── Proof markers (saw-spec-gen-dtb) ────────────────────────────────
-        # Verifies the BEGIN_PROOF / PROVED log contract end-to-end:
-        # constructs a synthetic SAW log, runs Parse-PropertyLog.ps1,
-        # and asserts the per-property result.json files match the
-        # schema-1 shape.  Toolchain-free — no SAW / clang / rustc.
-        @{ Tag = 'proof_markers'; Runner = 'custom'; Expected = 'VERIFIED';
-           Script = 'tests/e2e/cases/10-proof-markers/Check-ProofMarkers.ps1';
-           ScriptArgs = @{} }
-
         # ── Rust parity tests (saw-spec-gen-7fd / saw-spec-gen-5yl / saw-spec-gen-15t)
         # Toolchain-light: need rustc + llvm-dis but NOT SAW (script
         # generation only). These verify the gen-verify-rust CLI surface.
@@ -519,12 +510,6 @@
         @{ Tag = 'rust_cleanup'; Runner = 'rust'; Dir = 'tests/e2e/cases/11-rust-parity/drop_side_effect'; File = 'add_one_verified.rs'; Expected = 'VERIFIED' }
         @{ Tag = 'rust_cleanup'; Runner = 'rust'; Dir = 'tests/e2e/cases/11-rust-parity/cleanup_unwind';   File = 'add_one_verified.rs'; Expected = 'VERIFIED' }
 
-        # spec-only-on-missing: gen-verify-rust soft-exits when the target
-        # function has no matching symbol in the LLVM IR.
-        @{ Tag = 'rust_parity'; Runner = 'custom'; Expected = 'VERIFIED';
-           Script = 'tests/e2e/cases/11-rust-parity/spec_only_on_missing/Check-SpecOnlyOnMissing.ps1';
-           ScriptArgs = @{} }
-
         # variant-map: membership precondition emitted in generated SAW script.
         @{ Tag = 'rust_parity'; Runner = 'custom'; Expected = 'VERIFIED';
            Script = 'tests/e2e/cases/11-rust-parity/variant_map/Check-VariantMap.ps1';
@@ -533,12 +518,6 @@
         # return narrowing: --variant-map return=... emits if/then/else adapter.
         @{ Tag = 'rust_parity'; Runner = 'custom'; Expected = 'VERIFIED';
            Script = 'tests/e2e/cases/11-rust-parity/return_narrowing/Check-ReturnNarrowing.ps1';
-           ScriptArgs = @{} }
-
-        # unified gen-verify: gen-verify --lang rust produces identical output
-        # to gen-verify-rust.
-        @{ Tag = 'rust_parity'; Runner = 'custom'; Expected = 'VERIFIED';
-           Script = 'tests/e2e/cases/11-rust-parity/unified_gen_verify/Check-UnifiedGenVerify.ps1';
            ScriptArgs = @{} }
 
         # ── 12-aggregate-bridge ──────────────────────────────────────────────

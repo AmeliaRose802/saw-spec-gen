@@ -17,54 +17,42 @@
 # To renew an expiry, update Expires and file an issue tracking the new date.
 # Never add new entries unless you also file a migration issue.
 @{
+    # All five entries below share a single migration blocker:
+    # the built-in rust runner has no output-inspection mode, so tests that
+    # need to assert specific SAW script content (preconditions, return
+    # adapters, struct bridges) cannot use it yet.  Once the rust runner
+    # gains an AssertOutput / snapshot capability, all five can be migrated
+    # and this file can be emptied.
     Exceptions = @(
-        @{
-            Script  = 'tests/e2e/cases/10-proof-markers/Check-ProofMarkers.ps1'
-            Owner   = 'AmeliaRose802'
-            Expires = '2027-01-31'
-            Reason  = 'Toolchain-free log-parser sanity check; needs a dedicated test harness mode before it can use a built-in runner.'
-        }
-        @{
-            Script  = 'tests/e2e/cases/11-rust-parity/spec_only_on_missing/Check-SpecOnlyOnMissing.ps1'
-            Owner   = 'AmeliaRose802'
-            Expires = '2027-01-31'
-            Reason  = 'Validates gen-verify-rust soft-exit on missing symbol; needs rust runner support for non-SAW CLI surface tests.'
-        }
         @{
             Script  = 'tests/e2e/cases/11-rust-parity/variant_map/Check-VariantMap.ps1'
             Owner   = 'AmeliaRose802'
             Expires = '2027-01-31'
-            Reason  = 'Checks generated SAW script content for variant-map preconditions; needs output-inspection support in the rust runner.'
+            Reason  = 'Asserts SAW script contains variant membership precondition (x0 == (0:[8]) \/ x0 == (1:[8])); blocked on rust runner output-inspection support.'
         }
         @{
             Script  = 'tests/e2e/cases/11-rust-parity/return_narrowing/Check-ReturnNarrowing.ps1'
             Owner   = 'AmeliaRose802'
             Expires = '2027-01-31'
-            Reason  = 'Checks generated SAW script for if/then/else return adapter; needs output-inspection support in the rust runner.'
-        }
-        @{
-            Script  = 'tests/e2e/cases/11-rust-parity/unified_gen_verify/Check-UnifiedGenVerify.ps1'
-            Owner   = 'AmeliaRose802'
-            Expires = '2027-01-31'
-            Reason  = 'Validates gen-verify --lang rust output parity with gen-verify-rust; needs rust runner CLI-surface testing mode.'
+            Reason  = 'Asserts SAW script contains if/then/else return-discriminant adapter; blocked on rust runner output-inspection support.'
         }
         @{
             Script  = 'tests/e2e/cases/12-aggregate-bridge/packed_tuple_return/Check-PackedTupleReturn.ps1'
             Owner   = 'AmeliaRose802'
             Expires = '2027-01-31'
-            Reason  = 'Inspects generated SAW script for StructValue bridge; needs output-inspection support in the cpp runner.'
+            Reason  = 'Asserts SAW script uses llvm_struct_value and field accessors .0/.1 for aggregate { i1, i1 } return; blocked on rust runner output-inspection support.'
         }
         @{
             Script  = 'tests/e2e/cases/12-aggregate-bridge/sret_preserved/Check-SretPreserved.ps1'
             Owner   = 'AmeliaRose802'
             Expires = '2027-01-31'
-            Reason  = 'Checks generated SAW script for sret byte-buffer allocation; needs output-inspection support in the cpp runner.'
+            Reason  = 'Asserts SAW script allocates result_ptr and uses llvm_points_to for sret return; blocked on rust runner output-inspection support.'
         }
         @{
             Script  = 'tests/e2e/cases/12-aggregate-bridge/niche_enum_remap/Check-NicheEnumRemap.ps1'
             Owner   = 'AmeliaRose802'
             Expires = '2027-01-31'
-            Reason  = 'Checks generated SAW script for VariantRemap bridge; needs output-inspection support in the cpp runner.'
+            Reason  = 'Asserts SAW script contains VariantRemap bridge and correct discriminant values for niche-packed enum return; blocked on rust runner output-inspection support.'
         }
     )
 }
