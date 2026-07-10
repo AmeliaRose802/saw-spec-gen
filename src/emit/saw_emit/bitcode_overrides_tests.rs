@@ -1,6 +1,3 @@
-//! Tests for [`super`] — extracted to keep the parent under the
-//! 500 NWS-line limit.
-
 use super::*;
 use crate::transform::extern_override_scan::{BrokenReason, OverrideTarget};
 
@@ -14,11 +11,7 @@ fn target(
     target_with_writes(symbol, params, ret, variadic, reason, &[])
 }
 
-/// Same as [`target`] but lets the test specify which mutable globals
-/// the scanner would have observed this target's body writing. Used
-/// by `globals_get_adversarial_post_clobber` to assert that the
-/// emitter clobbers exactly the per-target written set rather than
-/// the module-wide mutable-global list.
+/// Same as [`target`] but with explicit per-target written globals.
 fn target_with_writes(
     symbol: &str,
     params: &[&str],
@@ -61,7 +54,6 @@ fn variadic_printf_uses_only_fixed_args_in_execute_func() {
     assert!(out
         .snippet
         .contains("p0 <- llvm_fresh_pointer (llvm_int 8);"));
-    // Variadic-aware comment so a human reader knows why this exists.
     assert!(out.snippet.contains("[body uses llvm.va_*; variadic]"));
     assert_eq!(out.override_names, vec!["ov_printf".to_string()]);
 }
@@ -126,7 +118,6 @@ fn pointer_return_uses_fresh_pointer_not_fresh_var() {
 #[test]
 fn already_covered_symbols_are_skipped() {
     let t = target("printf", &["ptr"], "i32", true, BrokenReason::DeclareOnly);
-    // Caller already emits an AST-derived spec for printf.
     let out = emit_overrides(&[t], &["printf".to_string()], &[], &Default::default());
     assert!(out.is_empty(), "AST-derived spec takes precedence");
     assert!(!out.snippet.contains("ov_printf"));
@@ -419,13 +410,7 @@ fn declare_only_extern_clobbers_globals_in_written_set() {
 
 #[test]
 fn mutex_lock_pins_success_sentinel_return() {
-    // `_Mtx_lock` returns `_Thrd_result` (i32) whose success value
-    // `_Thrd_success` is 0. A lock-guarded body (`std::scoped_lock`)
-    // pulls it in on every path; a fresh symbolic return lets the
-    // solver pick a failure code and sends `_Mutex_base::lock` down its
-    // `_Throw_Cpp_error` → `unreachable` path, failing the subgoal. The
-    // override must instead pin the success sentinel. See doc item 5 in
-    // docs/03-stateful-method-specs.md.
+    // `_Mtx_lock` must pin `_Thrd_success` (0) instead of returning fresh symbolic i32.
     let t = target(
         "_Mtx_lock",
         &["ptr"],
