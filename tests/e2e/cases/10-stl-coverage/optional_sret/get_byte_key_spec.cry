@@ -1,0 +1,13 @@
+// Cryptol spec for the optional_sret VERIFIED E2E test.
+//
+// get_byte_key returns std::optional<proto::ByteKey> via sret (17 bytes).
+// proto::ByteKey is uint8_t data[16] (alignment 1), so the optional has
+// no trailing padding: 16 data bytes + 1 has_value byte = 17 bytes exactly.
+//
+// Output layout:
+//   byte  0    : id  (the uint8_t argument passed to get_byte_key)
+//   bytes 1-15 : 0   (remaining ByteKey data fields, zero-initialised)
+//   byte  16   : 0x01 (has_value = true)
+
+get_byte_key_spec : [8] -> [17][8]
+get_byte_key_spec id = [id] # (zero : [15][8]) # [0x01]
