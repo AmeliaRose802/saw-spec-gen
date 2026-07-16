@@ -190,6 +190,13 @@ pub(super) fn emit_external_overrides_step(
         if is_operator_new(spec) {
             continue;
         }
+        // `memcmp` is deferred to the bitcode extern-override scan,
+        // which emits a faithful fixed-length spec (or a correctly
+        // pointer-typed havoc) instead of this auto-spec's `llvm_int
+        // 64`-modeled pointer args, which fail SAW structural matching.
+        if spec.function_name == "memcmp" || spec.mangled_name.as_deref() == Some("memcmp") {
+            continue;
+        }
         let safe_name = spec_safe_id(spec);
         if !included.insert(safe_name.clone()) {
             continue;

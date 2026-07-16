@@ -446,6 +446,25 @@
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/uninterpreted'; File = 'use_prim_disproved.cpp'; Expected = 'DISPROVED';
            Cry = 'use_prim_spec.cry'; CryptolFn = 'use_prim_spec'; Function = 'use_prim' }
 
+        # ── Faithful fixed-length memcmp (08-overrides/memcmp_fixed) ─────────
+        # `memcmp` is a body-less libc extern. The extern_override_scan
+        # extracts the constant length (8) every call site passes and
+        # emits a FAITHFUL spec: the override returns 0 iff the two
+        # 8-byte buffers are equal — instead of the old havoc'd `rv`
+        # that let the solver pick 0 for unequal buffers (false
+        # DISPROVED) or nonzero for equal buffers (false VERIFIED).
+        # See src/emit/saw_emit/bitcode_overrides.rs (emit_faithful_memcmp)
+        # and src/transform/extern_override_scan.rs (memcmp_const_len_from_ir).
+        #
+        # verified  : returns `memcmp(a,b,8) == 0` == `a == b`.
+        # disproved : returns `memcmp(a,b,8) != 0`; contradicts the
+        #             `a == b` model (cex: two equal buffers) — proves the
+        #             faithful override is not vacuous.
+        @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/memcmp_fixed'; File = 'memcmp_fixed_verified.cpp';  Expected = 'VERIFIED';
+           Cry = 'memcmp_fixed_spec.cry'; CryptolFn = 'tags_equal_ret'; Function = 'tags_equal' }
+        @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/memcmp_fixed'; File = 'memcmp_fixed_disproved.cpp'; Expected = 'DISPROVED';
+           Cry = 'memcmp_fixed_spec.cry'; CryptolFn = 'tags_equal_ret'; Function = 'tags_equal' }
+
         # ── Stateful methods: whole-object post-state via the ordinary
         #    out-buffer machinery, including inferred mutable `this`
         #    receivers on non-static methods (see

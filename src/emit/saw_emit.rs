@@ -54,6 +54,7 @@ mod bitcode_overrides_functional_string;
 mod bitcode_overrides_functional_vector;
 pub mod cryptol_bridge;
 pub mod cryptol_sig_parse;
+mod memcmp_override;
 
 // Re-export the public surface that the rest of the crate depends on.
 // `allow(unused_imports)` is appropriate here because this is a binary

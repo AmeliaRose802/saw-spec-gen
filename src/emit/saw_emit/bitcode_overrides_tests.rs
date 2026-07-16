@@ -27,6 +27,7 @@ fn target_with_writes(
         is_variadic: variadic,
         reason,
         globals_written: globals_written.iter().map(|s| s.to_string()).collect(),
+        memcmp_const_len: None,
     }
 }
 
@@ -124,6 +125,7 @@ fn already_covered_symbols_are_skipped() {
 }
 
 #[test]
+
 fn empty_input_produces_empty_output() {
     let out = emit_overrides(&[], &[], &[], &Default::default());
     assert!(out.is_empty());

@@ -1,0 +1,4 @@
+# Spec-shaping config for the memcmp_fixed override case.
+# Declares the two readonly input buffers memcmp reads (8 bytes each).
+[functions.tags_equal_ret]
+in_buffer_size = ["a=8", "b=8"]

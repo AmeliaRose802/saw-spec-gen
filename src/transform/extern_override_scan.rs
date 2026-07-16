@@ -76,6 +76,17 @@ pub struct OverrideTarget {
     /// instead of conservatively clobbering every mutable global the
     /// IR declares.
     pub globals_written: Vec<String>,
+    /// For the `memcmp` target only: the compile-time-constant length
+    /// that every `memcmp` call site in the module passes, when they
+    /// all agree on a single literal `i64` argument. `Some(n)` lets the
+    /// emitter replace the adversarial `rv <- llvm_fresh_var` havoc
+    /// (which lets the solver pick `rv == 0` for unequal buffers — a
+    /// false DISPROVED — or nonzero for equal buffers — a false
+    /// VERIFIED) with a *faithful* fixed-length spec: `rv == 0` iff the
+    /// `n` bytes are equal. `None` (any non-literal or disagreeing
+    /// length) falls back to havoc. Always `None` for non-`memcmp`
+    /// targets.
+    pub memcmp_const_len: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -172,6 +183,11 @@ pub fn scan(ir: &str, target_symbol: &str) -> Vec<OverrideTarget> {
             continue;
         };
         let globals_written = collect_globals_written_from(&f.name, &by_name, &mg);
+        let memcmp_const_len = if f.name == "memcmp" {
+            super::memcmp_scan::memcmp_const_len_from_ir(ir)
+        } else {
+            None
+        };
         out.push(OverrideTarget {
             symbol: f.name.clone(),
             fixed_param_ir_types: f.fixed_params.clone(),
@@ -179,6 +195,7 @@ pub fn scan(ir: &str, target_symbol: &str) -> Vec<OverrideTarget> {
             is_variadic: f.is_variadic,
             reason,
             globals_written,
+            memcmp_const_len,
         });
     }
     out.sort_by(|a, b| a.symbol.cmp(&b.symbol));
