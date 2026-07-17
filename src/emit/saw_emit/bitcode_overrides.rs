@@ -187,7 +187,12 @@ pub fn emit_overrides(
 
     for t in targets {
         if already_covered.iter().any(|n| n == &t.symbol) {
-            continue;
+            // `memcmp` is always owned by this bitcode path (it emits a
+            // faithful fixed-length / correctly ptr-typed spec); the AST
+            // external-call auto-spec for it is suppressed upstream.
+            if t.symbol != "memcmp" {
+                continue;
+            }
         }
         let safe = sanitize_name(&t.symbol);
         let ov_name = format!("ov_{safe}");
@@ -225,6 +230,15 @@ fn emit_one(
     ov_name: &str,
     mutable_globals: &[GlobalVarInfo],
 ) {
+    // Faithful fixed-length `memcmp`: when every call site passes the
+    // same constant length, model the equality decision exactly
+    // (`rv == 0` iff the N bytes match) instead of havocing `rv`.
+    if t.symbol == "memcmp" {
+        if let Some(n) = t.memcmp_const_len {
+            super::memcmp_override::emit_faithful_memcmp(out, safe, ov_name, n);
+            return;
+        }
+    }
     // Filter the module-wide mutable-global list down to just the
     // globals in this target's `globals_written` set. For DeclareOnly
     // targets this is all externally-visible mutable globals (opaque

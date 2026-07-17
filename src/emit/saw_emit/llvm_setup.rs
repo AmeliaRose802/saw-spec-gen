@@ -1,5 +1,6 @@
 //! Per-parameter setup blocks shared by the LLVM spec emitter.
 
+use super::names::object_allocator;
 use super::names::sanitize_name;
 use crate::constraints::*;
 
@@ -10,8 +11,9 @@ pub fn emit_llvm_param_setup(out: &mut String, param: &ParamConstraint) {
     match param.alloc_type {
         AllocType::AllocReadonly => {
             out.push_str(&format!(
-                "    {name}_ptr <- llvm_alloc_readonly ({ty});\n",
+                "    {name}_ptr <- {alloc} ({ty});\n",
                 name = param.name,
+                alloc = object_allocator(false, &param.saw_type),
                 ty = param.saw_type,
             ));
             out.push_str(&format!(
@@ -26,8 +28,9 @@ pub fn emit_llvm_param_setup(out: &mut String, param: &ParamConstraint) {
         }
         AllocType::AllocMutable => {
             out.push_str(&format!(
-                "    {name}_ptr <- llvm_alloc ({ty});\n",
+                "    {name}_ptr <- {alloc} ({ty});\n",
                 name = param.name,
+                alloc = object_allocator(true, &param.saw_type),
                 ty = param.saw_type,
             ));
             out.push_str(&format!(

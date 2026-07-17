@@ -377,14 +377,27 @@ fn derive_return_constraint(ty: &TypeInfo) -> ReturnConstraint {
     }
 }
 
-/// Override the AST-derived sret classification using the LLVM IR
-/// signature.  On MSVC x64, small trivially-copyable aggregates
-/// (≤ 8 bytes) are returned in a register — the IR has a scalar
-/// return type (`iN`) and no `sret` parameter.  The AST heuristic
-/// (`TypeInfo::Struct → sret`) can't see the ABI lowering, so this
-/// function corrects it when IR data is available.
+/// Reconcile the AST-derived sret classification with the LLVM IR
+/// signature, which is authoritative about the MSVC x64 ABI.
+///
+/// Two corrections, in either direction:
+///
+/// * **Clear** sret when a small trivially-copyable aggregate (≤ 8
+///   bytes) is actually returned in a register — the IR has a scalar
+///   return type (`iN`) and no `sret` parameter, but the AST heuristic
+///   (`TypeInfo::Struct → sret`) can't see the ABI lowering.
+/// * **Recover** sret when the IR carries an `sret` parameter but the
+///   AST heuristic missed it. A forward-declared aggregate returned by
+///   value — e.g. a crypto digest `Hmac` declared in another
+///   translation unit — parses as an `Opaque { size_bytes: 0, name:
+///   "Hmac" }` with a plain (non-templated) name, so the heuristic
+///   leaves `is_sret = false`. For a `declare`-only sub-callee that a
+///   generated havoc override targets, that miss is fatal: the MSVC ABI
+///   still lowers the >8-byte return through a hidden output pointer, so
+///   the real function takes one *more* argument than the spec emits and
+///   SAW rejects the override with `Argument N unspecified`.
 pub fn correct_sret_from_ir(spec: &mut SpecConstraint, ir_funcs: &[FunctionInfo]) {
-    if !spec.return_constraint.is_sret || ir_funcs.is_empty() {
+    if ir_funcs.is_empty() {
         return;
     }
     let Some(mangled) = &spec.mangled_name else {
@@ -397,18 +410,36 @@ pub fn correct_sret_from_ir(spec: &mut SpecConstraint, ir_funcs: &[FunctionInfo]
         .find(|f| f.name.trim_matches('"') == mangled);
     let Some(ir_fn) = ir_fn else { return };
 
-    // After `extract_sret` in the IR parser, a genuine sret function
-    // has its return type promoted to the inner struct.  A register-
-    // return function keeps the original scalar type.  If the IR
-    // return is a scalar (not void / struct / large opaque), the
-    // aggregate fits in a register.
-    let is_register = matches!(
-        ir_fn.return_type,
-        TypeInfo::Bool | TypeInfo::SignedInt(_) | TypeInfo::UnsignedInt(_) | TypeInfo::Enum { .. }
-    );
-    if is_register {
-        spec.return_constraint.is_sret = false;
-        spec.return_constraint.saw_type = type_to_saw(&ir_fn.return_type);
+    if spec.return_constraint.is_sret {
+        // After `extract_sret`, a genuine sret function has its return
+        // type promoted to the inner struct; a register-return function
+        // keeps the original scalar type. A scalar IR return means the
+        // aggregate fits in a register.
+        let is_register = matches!(
+            ir_fn.return_type,
+            TypeInfo::Bool
+                | TypeInfo::SignedInt(_)
+                | TypeInfo::UnsignedInt(_)
+                | TypeInfo::Enum { .. }
+        );
+        if is_register {
+            spec.return_constraint.is_sret = false;
+            spec.return_constraint.saw_type = type_to_saw(&ir_fn.return_type);
+        }
+    } else {
+        // `extract_sret` moves the sret pointer to `params[0]` and keeps
+        // its `Custom("sret")` annotation, promoting the return type to
+        // the inner aggregate. Detect that marker rather than re-deriving
+        // the ABI ourselves.
+        let has_sret_param = ir_fn.params.iter().any(|p| {
+            p.annotations
+                .iter()
+                .any(|a| matches!(a, Annotation::Custom(s) if s == "sret"))
+        });
+        if has_sret_param {
+            spec.return_constraint.is_sret = true;
+            spec.return_constraint.saw_type = type_to_saw(&ir_fn.return_type);
+        }
     }
 }
 
@@ -458,6 +489,10 @@ fn any_shared_companion(
 #[cfg(test)]
 #[path = "derive_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "derive_sret_tests.rs"]
+mod sret_tests;
 
 #[cfg(test)]
 #[path = "derive_annotation_tests.rs"]

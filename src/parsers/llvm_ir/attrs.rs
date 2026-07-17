@@ -290,6 +290,7 @@ const PAREN_ATTR_PREFIXES: &[&str] = &[
     "captures(",
     "dereferenceable_or_null(",
     "inalloca(",
+    "initializes(",
     "memory(",
     "preallocated(",
     "range(",
@@ -358,6 +359,30 @@ mod tests {
         let a = parse("ptr range(i32 (0), (4)) %x");
         assert_eq!(a.type_str, "ptr");
         assert_eq!(a.name.as_deref(), Some("x"));
+    }
+
+    #[test]
+    fn initializes_attr_does_not_leak_into_sret_type() {
+        // Clang emits `initializes((0, N))` on sret slots (LLVM 20+).
+        // It must be skipped as a parenthesized attribute group; if it
+        // leaked into the type string it would corrupt the pointee
+        // struct name and defeat the sret byte-size fallback (see
+        // docs/20-optional-sret-e2e-post-pr74-regression.md).
+        let a = parse(
+            "ptr dead_on_unwind noalias nocapture writable writeonly \
+             sret(%\"class.std::optional\") align 1 initializes((0, 17)) %0",
+        );
+        assert!(a.sret);
+        assert_eq!(a.type_str, "%\"class.std::optional\"");
+        assert_eq!(a.name.as_deref(), Some("arg0"));
+    }
+
+    #[test]
+    fn initializes_attr_with_multiple_ranges_is_skipped() {
+        let a = parse("ptr sret(%struct.Foo) initializes((0, 4), (8, 12)) %r");
+        assert!(a.sret);
+        assert_eq!(a.type_str, "%struct.Foo");
+        assert_eq!(a.name.as_deref(), Some("r"));
     }
 
     #[test]

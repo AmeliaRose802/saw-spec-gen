@@ -209,7 +209,8 @@ pub fn run(
         llvm_ir_path.is_some(),
     );
 
-    // Correct sret misclassification: small trivially-copyable MSVC structs return in registers.
+    // Reconcile sret with the IR ABI: clear register-returned small structs,
+    // recover sret the AST missed (see `correct_sret_from_ir`).
     constraints::correct_sret_from_ir(&mut target_spec, &ir_funcs);
 
     // Detect sret pre-state threading from Cryptol arity.

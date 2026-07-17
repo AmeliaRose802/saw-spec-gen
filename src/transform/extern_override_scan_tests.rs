@@ -523,3 +523,20 @@ define i32 @helper() {
         "plain defined helper must not be overridden"
     );
 }
+
+#[test]
+fn memcmp_const_len_flows_onto_target() {
+    let ir = r#"
+define i32 @target(ptr %a, ptr %b) {
+  %1 = call i32 @memcmp(ptr noundef %a, ptr noundef %b, i64 noundef 16)
+  ret i32 %1
+}
+declare i32 @memcmp(ptr, ptr, i64)
+"#;
+    let targets = scan(ir, "target");
+    let m = targets
+        .iter()
+        .find(|t| t.symbol == "memcmp")
+        .expect("memcmp must be in override set");
+    assert_eq!(m.memcmp_const_len, Some(16));
+}

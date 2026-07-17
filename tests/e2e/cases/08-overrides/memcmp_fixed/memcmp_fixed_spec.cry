@@ -1,0 +1,14 @@
+// Cryptol model for the memcmp_fixed override case.
+//
+// tags_equal_ret : contents of the two 8-byte buffers → 1-bit result.
+// Returns 1 iff the buffers are byte-for-byte equal — the exact
+// equality decision the faithful fixed-length `memcmp` override
+// models (`memcmp(a, b, 8) == 0`).
+//
+// Buffer sizes are supplied via saw-spec-gen.toml:
+//   in_buffer_size = ["a=8", "b=8"]
+
+module memcmp_fixed_spec where
+
+tags_equal_ret : [8][8] -> [8][8] -> Bit
+tags_equal_ret a b = a == b

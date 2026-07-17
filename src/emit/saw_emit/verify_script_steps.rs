@@ -6,7 +6,7 @@
 //! buffer.
 
 use super::cryptol_bridge::cryptol_arg_for;
-use super::names::{sanitize_name, spec_safe_id};
+use super::names::{object_allocator, sanitize_name, spec_safe_id};
 use super::overrides::{container_layout_for, emit_container_this};
 use super::stubs::AssembledStubs;
 use super::verify_script_sret::SretPrestate;
@@ -190,6 +190,13 @@ pub(super) fn emit_external_overrides_step(
         if is_operator_new(spec) {
             continue;
         }
+        // `memcmp` is deferred to the bitcode extern-override scan,
+        // which emits a faithful fixed-length spec (or a correctly
+        // pointer-typed havoc) instead of this auto-spec's `llvm_int
+        // 64`-modeled pointer args, which fail SAW structural matching.
+        if spec.function_name == "memcmp" || spec.mangled_name.as_deref() == Some("memcmp") {
+            continue;
+        }
         let safe_name = spec_safe_id(spec);
         if !included.insert(safe_name.clone()) {
             continue;
@@ -283,11 +290,7 @@ pub(super) fn emit_equiv_spec_body(
             let saw_ty = buffer_overrides
                 .override_saw_type(&param.name)
                 .unwrap_or_else(|| param.saw_type.clone());
-            let alloc_fn = if is_out_buf {
-                "llvm_alloc"
-            } else {
-                "llvm_alloc_readonly"
-            };
+            let alloc_fn = object_allocator(is_out_buf, &saw_ty);
             let ptr_name = format!("{}_ptr", param.name);
             // For out-buffers, the value var captures the pre-call
             // contents — rename to `_pre` so its later use in the
@@ -326,11 +329,8 @@ pub(super) fn emit_equiv_spec_body(
                 execute_args.push(format!("llvm_term {}", param.name));
             }
             AllocType::AllocReadonly | AllocType::AllocMutable => {
-                let alloc_fn = if param.alloc_type == AllocType::AllocReadonly {
-                    "llvm_alloc_readonly"
-                } else {
-                    "llvm_alloc"
-                };
+                let alloc_fn =
+                    object_allocator(param.alloc_type == AllocType::AllocMutable, &param.saw_type);
                 let ptr_name = format!("{}_ptr", param.name);
                 // When the param has an auto-detected output postcondition,
                 // use `<name>_pre` for the pre-call value variable so the

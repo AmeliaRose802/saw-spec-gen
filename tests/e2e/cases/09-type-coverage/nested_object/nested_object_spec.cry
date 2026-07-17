@@ -1,0 +1,7 @@
+module nested_object_spec where
+
+// The `Outer` object is 8 bytes: Inner.a occupies bytes 0..3, Inner.b
+// occupies bytes 4..7 (little-endian). The modelled read returns Inner.b,
+// so the spec joins the high four bytes back into a 32-bit word.
+read_nested_spec : [8][8] -> [32]
+read_nested_spec o = join [ o @ 7, o @ 6, o @ 5, o @ 4 ]

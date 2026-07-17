@@ -1,0 +1,4 @@
+# The `const Outer*` parameter is an 8-byte nested aggregate. saw-spec-gen
+# models it as a flat byte buffer whose length must be given explicitly.
+[functions.read_nested_spec]
+in_buffer_size = ["o=8"]

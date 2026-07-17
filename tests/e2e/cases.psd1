@@ -390,6 +390,28 @@
         # emit take`{12}/drop`{4} slice, not the full buffer.
         @{ Tag = 'sret_slice'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-type-coverage/sret_slice'; File = 'stamp_header_verified.cpp'; Expected = 'VERIFIED'; Cry = 'stamp_header_spec.cry'; CryptolFn = 'stamp_header_spec'; Function = 'stamp_header' }
 
+        # ── Nested aggregate read (aligned byte-buffer allocation) ──────────
+        # Reads a natural-aligned sub-object field (`Outer::inner.b` at
+        # offset 4) through a `const Outer*` modelled as a flat byte
+        # buffer. SAW allocates byte-array buffers at 1-byte alignment by
+        # default, so the compiler's `load i32 ... align 4` aborts with a
+        # vacuous `Error during memory load`. The `object_allocator`
+        # helper (src/emit/saw_emit/names.rs) pins byte-array buffers to
+        # the platform fundamental alignment (8) via
+        # `llvm_alloc_readonly_aligned 8`, letting the aligned read reach a
+        # real verdict. This is the general fix for nested objects of any
+        # type (plain structs, std::optional, std::variant) — not an
+        # accessor-specific override.
+        #
+        # verified  : returns inner.b (offset 4) — matches the model.
+        # disproved : returns inner.a (offset 0) — still an aligned read,
+        #             but diverges from the model, proving non-vacuity.
+        @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-type-coverage/nested_object'; File = 'nested_object_verified.cpp';  Expected = 'VERIFIED';
+           Cry = 'nested_object_spec.cry'; CryptolFn = 'read_nested_spec'; Function = 'read_nested'; Config = 'nested_object.toml' }
+        @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-type-coverage/nested_object'; File = 'nested_object_disproved.cpp'; Expected = 'DISPROVED';
+           Cry = 'nested_object_spec.cry'; CryptolFn = 'read_nested_spec'; Function = 'read_nested'; Config = 'nested_object.toml' }
+
+
         # ── Buffer overrides (08-overrides) ─────────────────────────────────
         # Exercises the --out-buffer-param / --in-buffer-size /
         # --cryptol-fn-out / --max-len-precond CLI surface plus the
@@ -423,6 +445,25 @@
            Cry = 'use_prim_spec.cry'; CryptolFn = 'use_prim_spec'; Function = 'use_prim' }
         @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/uninterpreted'; File = 'use_prim_disproved.cpp'; Expected = 'DISPROVED';
            Cry = 'use_prim_spec.cry'; CryptolFn = 'use_prim_spec'; Function = 'use_prim' }
+
+        # ── Faithful fixed-length memcmp (08-overrides/memcmp_fixed) ─────────
+        # `memcmp` is a body-less libc extern. The extern_override_scan
+        # extracts the constant length (8) every call site passes and
+        # emits a FAITHFUL spec: the override returns 0 iff the two
+        # 8-byte buffers are equal — instead of the old havoc'd `rv`
+        # that let the solver pick 0 for unequal buffers (false
+        # DISPROVED) or nonzero for equal buffers (false VERIFIED).
+        # See src/emit/saw_emit/bitcode_overrides.rs (emit_faithful_memcmp)
+        # and src/transform/extern_override_scan.rs (memcmp_const_len_from_ir).
+        #
+        # verified  : returns `memcmp(a,b,8) == 0` == `a == b`.
+        # disproved : returns `memcmp(a,b,8) != 0`; contradicts the
+        #             `a == b` model (cex: two equal buffers) — proves the
+        #             faithful override is not vacuous.
+        @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/memcmp_fixed'; File = 'memcmp_fixed_verified.cpp';  Expected = 'VERIFIED';
+           Cry = 'memcmp_fixed_spec.cry'; CryptolFn = 'tags_equal_ret'; Function = 'tags_equal' }
+        @{ Tag = 'cpp_overrides'; Runner = 'cpp'; Dir = 'tests/e2e/cases/08-overrides/memcmp_fixed'; File = 'memcmp_fixed_disproved.cpp'; Expected = 'DISPROVED';
+           Cry = 'memcmp_fixed_spec.cry'; CryptolFn = 'tags_equal_ret'; Function = 'tags_equal' }
 
         # ── Stateful methods: whole-object post-state via the ordinary
         #    out-buffer machinery, including inferred mutable `this`
@@ -462,6 +503,18 @@
            Cry = 'key_store_spec.cry'; CryptolFn = 'key_store_activate_ret'; Function = 'key_store_activate' }
         @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/key_store'; File = 'key_store_disproved.cpp'; Expected = 'DISPROVED';
            Cry = 'key_store_spec.cry'; CryptolFn = 'key_store_activate_ret'; Function = 'key_store_activate' }
+        # by_value_aggregate : a >8-byte struct passed BY VALUE. The MSVC
+        #             ABI lowers it to a hidden indirect pointer the callee
+        #             owns and mutates (`r.d = 0`). saw-spec-gen must
+        #             allocate that backing buffer MUTABLE — a readonly
+        #             alloc turns the store into "didn't point to a MUTABLE
+        #             allocation" and the proof goes vacuous. Regression
+        #             for the by-value-aggregate mutability classification
+        #             (parsers/clang_ast/functions.rs).
+        @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/by_value_aggregate'; File = 'by_value_aggregate_verified.cpp';  Expected = 'VERIFIED';
+           Cry = 'by_value_aggregate_spec.cry'; CryptolFn = 'reset_d_ret'; Function = 'reset_d' }
+        @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/by_value_aggregate'; File = 'by_value_aggregate_disproved.cpp'; Expected = 'DISPROVED';
+           Cry = 'by_value_aggregate_spec.cry'; CryptolFn = 'reset_d_ret'; Function = 'reset_d' }
         @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/block'; File = 'block_verified.cpp';  Expected = 'VERIFIED';
            Cry = 'block_spec.cry'; CryptolFn = 'block_mask_ret'; Function = 'block_mask' }
         @{ Tag = 'cpp_stateful'; Runner = 'cpp'; Dir = 'tests/e2e/cases/09-stateful/block'; File = 'block_disproved.cpp'; Expected = 'DISPROVED';
@@ -545,5 +598,18 @@
            Cry = 'sret_sub_callee_spec.cry';
            CryptolFn = 'wrap_canonicalize_spec';
            Function = 'wrap_canonicalize' }
+
+        # sret sub-callee recovered from IR (hmac_sha256 arg-mismatch):
+        # the sub-callee returns std::array<uint8_t,32>, which the AST
+        # does NOT classify as sret. ensure_sret_from_ir recovers the
+        # hidden sret output pointer from the LLVM IR signature so the
+        # generated havoc override has the correct 3-argument call shape.
+        # Without the fix SAW rejects it with "Argument 2 unspecified".
+        @{ Tag = 'aggregate_bridge'; Runner = 'cpp';
+           Dir = 'tests/e2e/cases/12-aggregate-bridge/sret_sub_callee_bytearray';
+           File = 'sret_sub_callee_bytearray.cpp'; Expected = 'VERIFIED';
+           Cry = 'sret_sub_callee_bytearray_spec.cry';
+           CryptolFn = 'wrap_hmac_spec';
+           Function = 'wrap_hmac' }
     )
 }

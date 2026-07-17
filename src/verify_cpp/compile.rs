@@ -232,6 +232,102 @@ pub(super) fn is_spec_only_result(output_dir: &Path) -> Result<bool> {
     Ok(value.get("status").and_then(|v| v.as_str()) == Some("not_attempted"))
 }
 
+/// Inputs for the `optnone`-strip + `opt` promotion fallback
+/// ([`recompile_promoted`]).
+pub(super) struct PromoteRecompile<'a> {
+    pub tools: &'a ToolPaths,
+    pub llvm_as: &'a Path,
+    pub output_dir: &'a Path,
+    pub base_name: &'a str,
+    pub bc_file: &'a Path,
+    pub ll_file: &'a Path,
+    pub ast_file: &'a Path,
+    pub cryptol_spec: &'a Path,
+    pub cryptol_fn: &'a str,
+    pub function: &'a str,
+    pub config: Option<&'a Path>,
+}
+
+/// Promote the existing `-O0` IR *without inlining*: strip the `optnone`
+/// function attribute so `opt` will touch the STL bodies, then run
+/// `sroa,mem2reg,instsimplify`. This rewrites the uninitialized reads of
+/// stateless empty-tag / functor allocas (`std::equal_to` inside
+/// `std::equal`, `std::nullopt_t` / `std::in_place_t` inside the
+/// `std::optional` copy/move ctors) into `undef` register values —
+/// eliminating the vacuous `Error during memory load` — while keeping
+/// every function un-inlined so the mutex / `memcmp` overrides emitted in
+/// the generated spec still apply. (The `-O1` fallback, by contrast,
+/// inlines the MSVC mutex ownership-count check into an `unreachable`.)
+///
+/// Returns `Ok(false)` when `opt` is unavailable (the caller should fall
+/// through to the `-O1` recompile); `Ok(true)` when the promoted build
+/// and verify script were regenerated.
+pub(super) fn recompile_promoted(ctx: &PromoteRecompile) -> Result<bool> {
+    let Some(opt) = ctx.tools.opt.as_deref() else {
+        eprintln!("note: `opt` not found; cannot promote -O0 IR, falling back to -O1.");
+        return Ok(false);
+    };
+    let ll_text = std::fs::read_to_string(ctx.ll_file)?;
+    let stripped = strip_optnone(&ll_text);
+    let promoted_ll = ctx
+        .output_dir
+        .join(format!("{}_promoted.ll", ctx.base_name));
+    std::fs::write(&promoted_ll, stripped)?;
+    let noopt_bc = ctx.output_dir.join(format!("{}_noopt.bc", ctx.base_name));
+    run_command(
+        Command::new(ctx.llvm_as)
+            .arg(&promoted_ll)
+            .arg("-o")
+            .arg(&noopt_bc),
+        "llvm-as (optnone-stripped)",
+    )?;
+    let promoted_bc = ctx
+        .output_dir
+        .join(format!("{}_promoted.bc", ctx.base_name));
+    run_command(
+        Command::new(opt)
+            .arg("-passes=sroa,mem2reg,instsimplify")
+            .arg(&noopt_bc)
+            .arg("-o")
+            .arg(&promoted_bc),
+        "opt promote (sroa,mem2reg,instsimplify)",
+    )?;
+    std::fs::copy(&promoted_bc, ctx.bc_file)?;
+    // Reuse the original `-O0` `.ll` for `--llvm-ir`: stripping `optnone`
+    // and running sroa/mem2reg/instsimplify never changes a function's
+    // ABI signature, so the sret / param-attribute analysis is identical.
+    run_gen_verify(
+        ctx.output_dir,
+        ctx.bc_file,
+        Some(ctx.ll_file),
+        ctx.ast_file,
+        ctx.cryptol_spec,
+        ctx.cryptol_fn,
+        ctx.function,
+        ctx.config,
+    )?;
+    Ok(true)
+}
+
+/// Remove the `optnone` function attribute from every `attributes #N = {`
+/// group line of an LLVM IR module. `optnone` (emitted by clang at `-O0`)
+/// makes `opt` skip the function entirely, so stripping it is a
+/// prerequisite for the sroa/mem2reg promotion. Restricting the edit to
+/// `attributes` group lines avoids disturbing any identically named
+/// global or metadata elsewhere in the module.
+fn strip_optnone(ll: &str) -> String {
+    let mut out = String::with_capacity(ll.len());
+    for line in ll.lines() {
+        if line.trim_start().starts_with("attributes #") {
+            out.push_str(&line.replace(" optnone", ""));
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    out
+}
+
 /// Inputs for the one-shot `-O1` recompile fallback ([`recompile_at_o1`]).
 pub(super) struct O1Recompile<'a> {
     pub tools: &'a ToolPaths,
@@ -297,4 +393,32 @@ pub(super) fn recompile_at_o1(ctx: &O1Recompile) -> Result<()> {
         ctx.function,
         ctx.config,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_optnone;
+
+    #[test]
+    fn strips_optnone_only_from_attribute_groups() {
+        let ll = "define void @f() #0 {\n  ret void\n}\n\
+                  attributes #0 = { noinline optnone uwtable }\n";
+        let out = strip_optnone(ll);
+        // The attributes group loses `optnone`...
+        assert!(out.contains("attributes #0 = { noinline uwtable }"));
+        // ...but the function body and its `#0` reference are untouched.
+        assert!(out.contains("define void @f() #0 {"));
+        assert!(!out.contains("optnone"));
+    }
+
+    #[test]
+    fn leaves_non_attribute_lines_intact() {
+        // A stray "optnone" substring outside an attributes group (e.g.
+        // in a symbol or comment) must NOT be stripped.
+        let ll = "@optnone_global = global i8 0\n\
+                  attributes #1 = { optnone }\n";
+        let out = strip_optnone(ll);
+        assert!(out.contains("@optnone_global = global i8 0"));
+        assert!(out.contains("attributes #1 = { }"));
+    }
 }

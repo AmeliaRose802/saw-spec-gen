@@ -21,6 +21,7 @@ pub struct ToolPaths {
     pub llvm_as: Option<PathBuf>,
     pub llvm_dis: Option<PathBuf>,
     pub llvm_link: Option<PathBuf>,
+    pub opt: Option<PathBuf>,
     pub cxxfilt: Option<PathBuf>,
     pub saw: Option<PathBuf>,
     pub solver_dir: Option<PathBuf>,
@@ -56,6 +57,9 @@ impl ToolPaths {
         let llvm_link = llvm_bin
             .as_ref()
             .and_then(|dir| join_tool(dir, "llvm-link", exe_ext));
+        let opt = llvm_bin
+            .as_ref()
+            .and_then(|dir| join_tool(dir, "opt", exe_ext));
         let saw = saw_candidates(exe_ext, &overrides)
             .into_iter()
             .find(|p| p.exists());
@@ -75,6 +79,7 @@ impl ToolPaths {
             llvm_as,
             llvm_dis,
             llvm_link,
+            opt,
             cxxfilt,
             saw,
             solver_dir,

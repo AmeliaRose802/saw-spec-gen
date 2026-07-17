@@ -90,6 +90,47 @@ fn non_const_method_gets_mutable_this() {
 }
 
 #[test]
+fn by_value_aggregate_param_is_mutable() {
+    // MSVC lowers a by-value class param into a hidden indirect pointer
+    // that the callee OWNS and may mutate (e.g. reset a field before
+    // moving it into a member). Its SAW backing allocation must be
+    // MUTABLE, otherwise any such store drives the proof vacuous.
+    let ast = parse(json!({
+        "kind": "TranslationUnitDecl",
+        "inner": [{
+            "kind": "FunctionDecl",
+            "name": "provision",
+            "type": {"qualType": "void (EnrollmentKey)"},
+            "inner": [
+                {"kind": "ParmVarDecl", "name": "newKey",
+                 "type": {"qualType": "EnrollmentKey"}}
+            ]
+        }]
+    }));
+    let funcs = extract_functions(&ast, None).unwrap();
+    assert_eq!(funcs[0].params[0].mutability, Mutability::Mutable);
+}
+
+#[test]
+fn by_value_scalar_param_is_readonly() {
+    // A by-value scalar passes in a register and is lowered to a fresh
+    // symbolic value, so its mutability flag stays Readonly (inert).
+    let ast = parse(json!({
+        "kind": "TranslationUnitDecl",
+        "inner": [{
+            "kind": "FunctionDecl",
+            "name": "square",
+            "type": {"qualType": "int (int)"},
+            "inner": [
+                {"kind": "ParmVarDecl", "name": "n", "type": {"qualType": "int"}}
+            ]
+        }]
+    }));
+    let funcs = extract_functions(&ast, None).unwrap();
+    assert_eq!(funcs[0].params[0].mutability, Mutability::Readonly);
+}
+
+#[test]
 fn noexcept_in_qualtype_clears_can_throw() {
     let ast = parse(json!({
         "kind": "TranslationUnitDecl",

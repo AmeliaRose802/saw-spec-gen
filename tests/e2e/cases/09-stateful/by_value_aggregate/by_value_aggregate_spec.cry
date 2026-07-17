@@ -1,0 +1,8 @@
+// Model for the by_value_aggregate regression case.
+//
+// `reset_d` takes a `Rec { a, b, c, d : u32 }` by value, zeroes `d`,
+// and returns `a + d` (== a). The C++ struct is 16 bytes little-endian:
+// bytes 0..3 = a, 4..7 = b, 8..11 = c, 12..15 = d.
+
+reset_d_ret : [16][8] -> [32]
+reset_d_ret r = join [ r@3, r@2, r@1, r@0 ]

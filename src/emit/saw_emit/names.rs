@@ -51,6 +51,57 @@ pub fn stub_function_name(method: &InterfaceMethod) -> String {
     )
 }
 
+/// Fundamental object alignment (bytes) for pointer-target buffer
+/// allocations.
+///
+/// saw-spec-gen models a pointee as a flat `llvm_array N (llvm_int 8)`
+/// byte buffer, which SAW allocates with 1-byte alignment. Compiled
+/// code, however, reads sub-object fields at their *natural* alignment
+/// (`load ... align 4`, `align 8`, ...). Crucible-LLVM rejects an
+/// aligned load whose backing allocation is under-aligned, aborting the
+/// whole proof with `Error during memory load` — a vacuous failure that
+/// blocks verification of *any* nested aggregate (plain struct,
+/// `std::optional`, `std::variant`, ...), not just `char` blobs.
+///
+/// Aligning the backing buffer to the platform's maximum fundamental
+/// alignment (8 on x86-64 / `alignof(max_align_t)`) satisfies every such
+/// access for standard C++ objects. Over-alignment is sound: alignment
+/// requirements are lower bounds, so handing the callee a *more*-aligned
+/// pointer never changes correct program behavior.
+pub const OBJECT_BUFFER_ALIGN: u32 = 8;
+
+/// SAW allocator call head for a pointer-target object of `saw_type`,
+/// aligned to [`OBJECT_BUFFER_ALIGN`] **only** when it is a flat
+/// byte-array buffer. `mutable` selects the writable (`llvm_alloc`) vs
+/// read-only (`llvm_alloc_readonly`) variant. Callers append
+/// ` (<saw_type>)`.
+///
+/// Flat `llvm_array N (llvm_int 8)` buffers default to 1-byte alignment,
+/// which under-aligns natural sub-object loads and aborts the proof with
+/// `Error during memory load`; those are pinned to the fundamental
+/// alignment. Named struct / scalar SAW types already carry their
+/// correct ABI alignment, so forcing a fixed value could *reduce* it
+/// (e.g. a 16-aligned SSE struct) — they keep SAW's default allocator.
+pub fn object_allocator(mutable: bool, saw_type: &str) -> String {
+    let base = if mutable {
+        "llvm_alloc"
+    } else {
+        "llvm_alloc_readonly"
+    };
+    if is_byte_array_buffer(saw_type) {
+        format!("{base}_aligned {OBJECT_BUFFER_ALIGN}")
+    } else {
+        base.to_string()
+    }
+}
+
+/// True when `saw_type` is the flattened byte-buffer form
+/// `llvm_array <N> (llvm_int 8)` that SAW allocates 1-byte aligned.
+fn is_byte_array_buffer(saw_type: &str) -> bool {
+    let t = saw_type.trim();
+    t.starts_with("llvm_array ") && t.ends_with("(llvm_int 8)")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,5 +202,45 @@ mod tests {
         let foo = make_spec("compute", Some("_ZNK3Foo7computeEv"));
         let bar = make_spec("compute", Some("_ZNK3Bar7computeEv"));
         assert_ne!(spec_safe_id(&foo), spec_safe_id(&bar));
+    }
+
+    #[test]
+    fn object_allocator_aligns_byte_array_buffers() {
+        // Flat byte buffers default to 1-byte alignment in SAW, which
+        // breaks natural-aligned sub-object loads — force the fundamental
+        // alignment for both readonly and mutable variants.
+        assert_eq!(
+            object_allocator(false, "llvm_array 8 (llvm_int 8)"),
+            "llvm_alloc_readonly_aligned 8"
+        );
+        assert_eq!(
+            object_allocator(true, "llvm_array 152 (llvm_int 8)"),
+            "llvm_alloc_aligned 8"
+        );
+    }
+
+    #[test]
+    fn object_allocator_leaves_typed_allocs_to_saw_default() {
+        // Named struct / scalar SAW types already carry correct ABI
+        // alignment; forcing a fixed value could *reduce* it, so they use
+        // the plain allocator.
+        assert_eq!(
+            object_allocator(false, "llvm_int 64"),
+            "llvm_alloc_readonly"
+        );
+        assert_eq!(object_allocator(true, "llvm_int 32"), "llvm_alloc");
+        assert_eq!(
+            object_allocator(true, "llvm_alias \"class.sdep::KeyStore\""),
+            "llvm_alloc"
+        );
+        assert_eq!(
+            object_allocator(false, "llvm_struct \"struct.EnrollmentKey\""),
+            "llvm_alloc_readonly"
+        );
+        // A wider-element array is not the flat byte-buffer form.
+        assert_eq!(
+            object_allocator(true, "llvm_array 4 (llvm_int 64)"),
+            "llvm_alloc"
+        );
     }
 }
