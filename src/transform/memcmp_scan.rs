@@ -42,13 +42,30 @@ pub(crate) fn memcmp_const_len_from_ir(ir: &str) -> Option<u64> {
 }
 
 /// Parse the length (third) argument out of a `@memcmp(...)` argument
-/// list. `memcmp`'s arguments contain no nested parentheses, so the
-/// first `)` closes the call. Returns `None` when the last argument is
-/// not a plain integer literal (e.g. `i64 noundef %25`).
+/// list. Finds the call's matching close paren by balancing nested
+/// parens — argument attributes such as `dereferenceable(16)` /
+/// `align(1)` (emitted at `-O1`+) contain their own parens, so a naive
+/// "first `)`" search would stop inside the attribute. Top-level commas
+/// separate the arguments (attributes carry none), so the text after
+/// the last top-level comma is the length argument. Returns `None` when
+/// that argument is not a plain integer literal (e.g. `i64 noundef %25`).
 fn memcmp_len_arg(args: &str) -> Option<u64> {
-    let end = args.find(')')?;
-    let last = args[..end].rsplit(',').next()?.trim();
-    // last is like "i64 noundef 16" or "i64 16" or "i64 noundef %25".
+    let mut depth = 0usize;
+    let mut end = None;
+    for (i, c) in args.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' if depth == 0 => {
+                end = Some(i);
+                break;
+            }
+            ')' => depth -= 1,
+            _ => {}
+        }
+    }
+    let last = args[..end?].rsplit(',').next()?.trim();
+    // last is like "i64 noundef 16", "i64 noundef dereferenceable(16) 16",
+    // or "i64 noundef %25".
     last.split_whitespace().last()?.parse::<u64>().ok()
 }
 
@@ -101,5 +118,20 @@ declare i32 @memcmp(ptr, ptr, i64)
         // Only a declaration, no call — nothing to model faithfully.
         let ir = "declare i32 @memcmp(ptr, ptr, i64)\n";
         assert_eq!(memcmp_const_len_from_ir(ir), None);
+    }
+
+    #[test]
+    fn extracts_literal_past_attribute_parens() {
+        // The `-O1` form annotates the pointer args with
+        // `dereferenceable(16)` — nested parens that a naive first-`)`
+        // scan would stop inside, missing the real length literal.
+        let ir = r#"
+define i32 @target(ptr %a, ptr %b) {
+  %1 = tail call i32 @memcmp(ptr noundef nonnull align 1 dereferenceable(16) %a, ptr noundef nonnull align 1 dereferenceable(16) %b, i64 noundef 16)
+  ret i32 %1
+}
+declare i32 @memcmp(ptr, ptr, i64)
+"#;
+        assert_eq!(memcmp_const_len_from_ir(ir), Some(16));
     }
 }
