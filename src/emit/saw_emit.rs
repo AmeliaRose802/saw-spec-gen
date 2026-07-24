@@ -39,6 +39,7 @@ mod stubs;
 mod types;
 mod verify_script;
 mod verify_script_close;
+mod verify_script_precond;
 mod verify_script_sret;
 mod verify_script_steps;
 mod vtable_ir;
@@ -67,6 +68,8 @@ pub use bitcode_overrides::{
     emit_overrides as emit_bitcode_overrides, scan_and_emit as scan_and_emit_bitcode_overrides,
     EmittedBitcodeOverrides,
 };
+#[allow(unused_imports)]
+pub use bitcode_overrides_functional::is_stl_functional;
 #[allow(unused_imports)]
 pub use factory::emit_interface_factory_spec;
 #[allow(unused_imports)]

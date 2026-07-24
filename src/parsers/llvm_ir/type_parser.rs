@@ -26,9 +26,64 @@ pub fn parse_ir_type_resolved(
         "i128" => TypeInfo::SignedInt(128),
         "ptr" => TypeInfo::Pointer(Box::new(TypeInfo::UnsignedInt(8))),
         t if t.starts_with('[') => parse_array(t, struct_map),
+        t if t.starts_with('{') => parse_inline_struct(t, struct_map),
         t if t.starts_with('%') => parse_named_struct(t, struct_map),
         _ => opaque(t),
     }
+}
+
+fn parse_inline_struct(t: &str, struct_map: &HashMap<String, IrStructDef>) -> TypeInfo {
+    // Parse `{ type1, type2, ... }` inline anonymous struct literals.
+    // These appear in LLVM IR as return types on Linux/macOS for small
+    // aggregates that fit in registers, e.g. `{ i1, i1 }` for a
+    // `#[repr(C)] struct { bool, bool }` returned by a Rust function.
+    let inner = t
+        .trim()
+        .trim_start_matches('{')
+        .trim_end_matches('}')
+        .trim();
+    if inner.is_empty() {
+        return opaque(t);
+    }
+    // Split at commas that are not inside nested braces.
+    let fields: Vec<(String, TypeInfo)> = split_struct_field_types(inner)
+        .into_iter()
+        .enumerate()
+        .map(|(i, f)| {
+            (
+                format!("field{i}"),
+                parse_ir_type_resolved(f.trim(), struct_map),
+            )
+        })
+        .collect();
+    TypeInfo::Struct {
+        name: t.to_string(),
+        size_bytes: None,
+        fields,
+    }
+}
+
+/// Split a comma-separated list of LLVM IR type tokens, respecting
+/// nested `{...}` and `[...]` brackets.
+fn split_struct_field_types(inner: &str) -> Vec<&str> {
+    let mut fields = Vec::new();
+    let mut depth = 0i32;
+    let mut start = 0;
+    for (i, c) in inner.char_indices() {
+        match c {
+            '{' | '[' | '<' => depth += 1,
+            '}' | ']' | '>' => depth -= 1,
+            ',' if depth == 0 => {
+                fields.push(&inner[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    if start < inner.len() {
+        fields.push(&inner[start..]);
+    }
+    fields
 }
 
 fn parse_array(t: &str, struct_map: &HashMap<String, IrStructDef>) -> TypeInfo {

@@ -140,11 +140,15 @@ pub fn emit_string_override(
             out.push_str("    llvm_return d;\n");
         }
         // operator[](pos) and at(pos) return char& (i8* in LLVM IR).
-        // Content is symbolic; we return a fresh byte pointer.
+        // Content is symbolic; we return a fresh byte pointer initialized
+        // to a fresh symbolic byte so that caller loads don't hit
+        // uninitialized memory (which can cause Crucible mux-type errors).
         StlMethod::BasicStringByteViewIndexArg => {
             out.push_str("    idx <- llvm_fresh_var \"idx\" (llvm_int 64);\n");
             out.push_str("    llvm_execute_func [s, llvm_term idx];\n");
             out.push_str("    d <- llvm_fresh_pointer (llvm_int 8);\n");
+            out.push_str("    c <- llvm_fresh_var \"c\" (llvm_int 8);\n");
+            out.push_str("    llvm_points_to d (llvm_term c);\n");
             out.push_str("    llvm_return d;\n");
         }
         // basic_string(const char*): init size to symbolic `n`;
@@ -202,13 +206,18 @@ pub fn emit_string_override(
             out.push_str("    llvm_return s;\n");
         }
         // empty(): reads the size field and returns sz == 0 as i1.
+        // SAW requires an explicit [1] type for i1 returns rather than
+        // the Cryptol `Bit` type produced by `==`.  Use a conditional
+        // expression so the return has type [1] on both branches.
         StlMethod::BasicStringEmpty => {
             out.push_str("    sz <- llvm_fresh_var \"sz\" (llvm_int 64);\n");
             out.push_str(&format!(
                 "    llvm_points_to (llvm_elem s {idx}) (llvm_term sz);\n",
             ));
             out.push_str("    llvm_execute_func [s];\n");
-            out.push_str("    llvm_return (llvm_term {{ sz == 0 }});\n");
+            out.push_str(
+                "    llvm_return (llvm_term {{ if sz == 0 then (1:[1]) else (0:[1]) }});\n",
+            );
         }
         // Size-neutral scalar query family (e.g. capacity()).
         // We don't track capacity, so return a fresh i64.
@@ -426,7 +435,7 @@ mod tests {
         );
         assert!(out.contains("llvm_fresh_var \"sz\""));
         assert!(out.contains("llvm_points_to (llvm_elem s 1) (llvm_term sz)"));
-        assert!(out.contains("llvm_return (llvm_term {{ sz == 0 }})"));
+        assert!(out.contains("llvm_return (llvm_term {{ if sz == 0 then (1:[1]) else (0:[1]) }})"));
     }
 
     #[test]

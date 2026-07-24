@@ -329,6 +329,17 @@ pub fn run(
                 continue;
             }
 
+            // Skip symbols that the bitcode override scan handles with a
+            // curated functional model (resize, size, operator[], etc.).
+            // The bitcode scan emits the correct functional model; a havoc
+            // spec here would use wrong types and block that override via
+            // `already_covered`.
+            if let Some(mangled) = spec.mangled_name.as_deref() {
+                if saw_emit::is_stl_functional(mangled) {
+                    continue;
+                }
+            }
+
             let fn_info = all_functions
                 .iter()
                 .find(|f| f.name == spec.function_name && f.mangled_name == spec.mangled_name);
@@ -441,24 +452,10 @@ pub fn run(
         resolve_spec_types_quiet(spec, &ir_struct_sizes);
     }
 
-    // Bitcode-driven extern override scan. The AST pipeline above only
-    // sees declarations the path filter kept; anything filtered as a
-    // system header (e.g. `printf` in MSVC's `<cstdio>`) is invisible
-    // even when the TU actually calls it, and SAW then aborts on
-    // `internal: error: in printf`. A second pass on the LLVM IR text
-    // covers declare-only externs and variadic functions whose body
-    // uses `llvm.va_*` intrinsics Crucible-LLVM can't simulate.
-    // AST-derived overrides take precedence — we pass their symbols
-    // as `already_covered` so the bitcode scan doesn't double-emit.
-    // See `src/emit/saw_emit/bitcode_overrides.rs` for the contract.
-    let already_covered: Vec<String> = external_calls_owned
-        .iter()
-        .filter_map(|s| {
-            s.mangled_name
-                .clone()
-                .or_else(|| Some(s.function_name.clone()))
-        })
-        .collect();
+    // Bitcode-driven extern override scan — covers system headers filtered
+    // by the AST path and variadic functions using llvm.va_* intrinsics.
+    // See `build_already_covered` and `bitcode_overrides.rs` for details.
+    let already_covered = build_already_covered(&external_calls_owned);
     let bitcode_overrides = saw_emit::scan_and_emit_bitcode_overrides(
         llvm_ir_path,
         &target_mangled,
@@ -536,5 +533,5 @@ pub fn run(
 }
 
 use crate::gen_verify_helpers::{
-    assemble_and_link_stubs, emit_spec_only_result, warn_missing_interfaces,
+    assemble_and_link_stubs, build_already_covered, emit_spec_only_result, warn_missing_interfaces,
 };

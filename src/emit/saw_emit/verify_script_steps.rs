@@ -9,6 +9,7 @@ use super::cryptol_bridge::cryptol_arg_for;
 use super::names::{object_allocator, sanitize_name, spec_safe_id};
 use super::overrides::{container_layout_for, emit_container_this};
 use super::stubs::AssembledStubs;
+use super::verify_script_precond::{emit_param_preconditions, emit_param_preconditions_filtered};
 use super::verify_script_sret::SretPrestate;
 use crate::buffer_overrides::BufferOverrides;
 use crate::constraints::*;
@@ -16,65 +17,6 @@ use std::collections::HashSet;
 
 pub(super) fn is_operator_new(spec: &SpecConstraint) -> bool {
     spec.function_name == "operator new" || spec.mangled_name.as_deref() == Some("??2@YAPEAX_K@Z")
-}
-
-/// Emit the per-parameter `llvm_precond` clauses derived in
-/// [`crate::constraints::derive`]. Lines that look like comments are
-/// passed through verbatim; everything else gets a trailing `;`.
-fn emit_param_preconditions(out: &mut String, preconditions: &[String]) {
-    for pre in preconditions {
-        let trimmed = pre.trim_start();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if trimmed.starts_with("//") {
-            out.push_str(&format!("    {pre}\n"));
-        } else {
-            out.push_str(&format!("    {pre};\n"));
-        }
-    }
-}
-
-/// Like [`emit_param_preconditions`] but drops the auto-emitted
-/// "unsized pointer" TODO block (the multi-line warning starting
-/// with `// TODO[saw-spec-gen]: pointer parameter \`<name>\` has no
-/// length annotation.`). Used in the buffer-override branch where
-/// the CLI flag has already supplied the missing size and the
-/// warning would only be noise.
-///
-/// The block layout is owned by
-/// [`crate::constraints::length_companion::LengthCompanionGuess::todo_lines`];
-/// every continuation line is indented under `//   `, so we drop
-/// every consecutive `//   ` line after the marker rather than
-/// hard-coding a continuation count.
-fn emit_param_preconditions_filtered(out: &mut String, preconditions: &[String], param_name: &str) {
-    let todo_marker = format!(
-        "// TODO[saw-spec-gen]: pointer parameter `{param_name}` has no length annotation.",
-    );
-    let mut iter = preconditions.iter().peekable();
-    while let Some(pre) = iter.next() {
-        if pre.trim_start() == todo_marker {
-            // Skip every consecutive continuation comment line that
-            // belongs to this TODO block (they all start with `//   `).
-            while let Some(next) = iter.peek() {
-                if next.trim_start().starts_with("//   ") {
-                    iter.next();
-                } else {
-                    break;
-                }
-            }
-            continue;
-        }
-        let trimmed = pre.trim_start();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if trimmed.starts_with("//") {
-            out.push_str(&format!("    {pre}\n"));
-        } else {
-            out.push_str(&format!("    {pre};\n"));
-        }
-    }
 }
 
 pub(super) fn emit_load_bitcode_step(
@@ -256,6 +198,11 @@ pub(super) fn emit_equiv_spec_body(
 
     let mut cryptol_args = Vec::new();
     let mut execute_args = Vec::new();
+    // Cross-parameter preconditions (e.g. `llvm_precond {{ (len : [64]) <= N }}` emitted
+    // for `InReadsParam`-annotated buffer parameters) reference sibling length variables
+    // that are declared later in the parameter loop.  Collect them here and emit after all
+    // parameter declarations so every referenced variable is in scope.
+    let mut deferred_preconditions: Vec<(Vec<String>, Option<String>)> = Vec::new();
     for (i, param) in target_spec.params.iter().enumerate() {
         let iface = target_fn.params.get(i).and_then(|p| interface_of(&p.ty));
         if let Some(iface_name) = iface {
@@ -304,6 +251,9 @@ pub(super) fn emit_equiv_spec_body(
                 "    llvm_points_to {ptr_name} (llvm_term {val_name});\n",
             ));
             emit_param_preconditions_filtered(out, &param.preconditions, &param.name);
+
+            deferred_preconditions.push((param.preconditions.clone(), Some(param.name.clone())));
+
             // Push the raw value name as the default Cryptol arg.
             // `--cryptol-arg-order` (consumed in
             // `emit_postcondition_and_close`) overrides this
@@ -319,7 +269,7 @@ pub(super) fn emit_equiv_spec_body(
                     "    {} <- llvm_fresh_var \"{}\" ({});\n",
                     param.name, param.name, param.saw_type,
                 ));
-                emit_param_preconditions(out, &param.preconditions);
+                deferred_preconditions.push((param.preconditions.clone(), None));
                 let arg_ty = target_fn
                     .params
                     .get(i)
@@ -351,7 +301,7 @@ pub(super) fn emit_equiv_spec_body(
                 out.push_str(&format!(
                     "    llvm_points_to {ptr_name} (llvm_term {val_name});\n",
                 ));
-                emit_param_preconditions(out, &param.preconditions);
+                deferred_preconditions.push((param.preconditions.clone(), None));
                 let arg_ty = target_fn
                     .params
                     .get(i)
@@ -360,6 +310,18 @@ pub(super) fn emit_equiv_spec_body(
                 cryptol_args.push(cryptol_arg_for(&val_name, arg_ty));
                 execute_args.push(ptr_name);
             }
+        }
+    }
+
+    // Emit all parameter preconditions after the full parameter declaration
+    // block so that cross-parameter references (e.g. `llvm_precond
+    // {{ (len : [64]) <= N }}` emitted for a buffer's `InReadsParam`
+    // annotation) are always in scope when evaluated by SAW.
+    for (preconditions, filter_name) in &deferred_preconditions {
+        if let Some(name) = filter_name {
+            emit_param_preconditions_filtered(out, preconditions, name);
+        } else {
+            emit_param_preconditions(out, preconditions);
         }
     }
 

@@ -33,14 +33,21 @@
 /// success would silently erase.
 pub fn success_sentinel(symbol: &str) -> Option<i64> {
     const SUCCESS_SENTINEL_PRIMITIVES: &[&str] = &[
+        // MSVC/UCRT mutex family
         "_Mtx_lock",
         "_Mtx_unlock",
         "_Mtx_init",
         "_Mtx_destroy",
+        // POSIX pthread/gthread mutex family (Linux/macOS). In a sequential
+        // proof the mutex is always uncontended, so these always succeed
+        // (return 0). `pthread_mutex_trylock` is intentionally excluded —
+        // it can return EBUSY in a well-formed program.
         "__gthread_mutex_lock",
         "__gthread_mutex_unlock",
         "pthread_mutex_lock",
         "pthread_mutex_unlock",
+        "pthread_mutex_init",
+        "pthread_mutex_destroy",
     ];
     SUCCESS_SENTINEL_PRIMITIVES.contains(&symbol).then_some(0)
 }
@@ -104,6 +111,8 @@ mod tests {
             "__gthread_mutex_unlock",
             "pthread_mutex_lock",
             "pthread_mutex_unlock",
+            "pthread_mutex_init",
+            "pthread_mutex_destroy",
         ] {
             assert_eq!(success_sentinel(sym), Some(0), "{sym} should pin 0");
         }
