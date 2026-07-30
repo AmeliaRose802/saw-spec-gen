@@ -50,7 +50,18 @@ pub(super) fn emit_postcondition_and_close(
     for (out_name, fn_name) in &buffer_overrides.cryptol_fn_out {
         let args = buffer_overrides
             .cryptol_call_args(fn_name)
-            .unwrap_or_else(|| cryptol_args.to_vec());
+            .unwrap_or_else(|| {
+                // The sret-return buffer's pre-state (`preBytes` /
+                // `result_pre`, or a `take/drop` slice of it) belongs ONLY
+                // to the sret-return model, not to an object out-buffer
+                // post-state model like `keyStoreProvisionPost`. Excluding
+                // it keeps that model's arity equal to the C-param list.
+                cryptol_args
+                    .iter()
+                    .filter(|a| !a.contains("preBytes") && !a.contains("result_pre"))
+                    .cloned()
+                    .collect()
+            });
         let call = if args.is_empty() {
             fn_name.clone()
         } else {
