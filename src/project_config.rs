@@ -91,6 +91,17 @@ pub struct FunctionConfig {
     /// Per-function `--variant-map PARAM=V1:D1,V2:D2,...`.
     #[serde(default)]
     pub variant_map: Vec<String>,
+
+    /// Per-function extra `llvm_precond` clauses. Each string is a raw
+    /// Cryptol predicate emitted verbatim as `llvm_precond {{ <expr> }}`
+    /// after the fresh symbolic inputs are bound and before
+    /// `llvm_execute_func`. Use it to constrain object/buffer bytes the
+    /// generator models as an opaque byte array — e.g. pinning a
+    /// `bool`/`std::optional` engaged flag to a canonical value
+    /// (`(this_pre @ 128) <= 1`) so the C++ `trunc i8 to i1` read agrees
+    /// with a Cryptol model that tests `== 1`.
+    #[serde(default)]
+    pub preconditions: Vec<String>,
 }
 
 /// Deserialised contents of a `saw-spec-gen.toml` file.
@@ -141,6 +152,11 @@ pub struct ProjectConfig {
     /// Equivalent to repeated `--variant-map PARAM=V1:D1,...`.
     #[serde(default)]
     pub variant_map: Vec<String>,
+
+    /// Global extra `llvm_precond` clauses (raw Cryptol predicates).
+    /// See [`FunctionConfig::preconditions`].
+    #[serde(default)]
+    pub preconditions: Vec<String>,
 
     /// `[functions.<cryptol_fn>]` tables: per-function spec-shaping
     /// overrides. Keyed by the `--cryptol-fn` name. See
@@ -237,6 +253,7 @@ impl ProjectConfig {
         let pf_fn_pre = f.map_or(&[][..], |c| &c.cryptol_fn_pre);
         let pf_arg_order = f.map_or(&[][..], |c| &c.cryptol_arg_order);
         let pf_variant_map = f.map_or(&[][..], |c| &c.variant_map);
+        let pf_preconditions = f.map_or(&[][..], |c| &c.preconditions);
 
         let pf_bool =
             |sel: fn(&FunctionConfig) -> Option<bool>| -> bool { f.and_then(sel).unwrap_or(false) };
@@ -257,6 +274,7 @@ impl ProjectConfig {
             cryptol_fn_pre: merged_vec(pf_fn_pre, &self.cryptol_fn_pre),
             cryptol_arg_order: merged_vec(pf_arg_order, &self.cryptol_arg_order),
             variant_map: merged_vec(pf_variant_map, &self.variant_map),
+            preconditions: merged_vec(pf_preconditions, &self.preconditions),
             uninterpreted: self.uninterpreted.clone(),
         }
     }
@@ -286,6 +304,8 @@ pub struct MergedConfig {
     pub cryptol_fn_pre: Vec<String>,
     pub cryptol_arg_order: Vec<String>,
     pub variant_map: Vec<String>,
+    /// Extra raw `llvm_precond` clauses (config-only; no CLI equivalent).
+    pub preconditions: Vec<String>,
     /// `[[uninterpreted]]` entries (config-only; no CLI equivalent).
     pub uninterpreted: Vec<UninterpretedEntry>,
 }
@@ -352,6 +372,30 @@ mod tests {
         };
         let merged = cfg.apply("no_such_fn");
         assert_eq!(merged.out_buffer_param, v(&["g=1"]));
+    }
+
+    #[test]
+    fn preconditions_parse_and_merge_per_function_then_global() {
+        let cfg: ProjectConfig = toml::from_str(
+            r#"
+            preconditions = ["global_pred"]
+
+            [functions.activate_ret]
+            preconditions = ["(this_pre @ 128) <= 1", "(this_pre @ 144) <= 1"]
+            "#,
+        )
+        .expect("config parses");
+        let merged = cfg.apply("activate_ret");
+        assert_eq!(
+            merged.preconditions,
+            v(&[
+                "(this_pre @ 128) <= 1",
+                "(this_pre @ 144) <= 1",
+                "global_pred"
+            ]),
+        );
+        // A function with no table still inherits the global precondition.
+        assert_eq!(cfg.apply("other").preconditions, v(&["global_pred"]));
     }
 
     #[test]

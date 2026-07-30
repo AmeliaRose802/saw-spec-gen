@@ -340,6 +340,7 @@ pub fn gen_verify_cmd(
             &merged.max_len_precond,
             &merged.cryptol_arg_order,
             &merged.cryptol_fn_pre,
+            &merged.preconditions,
         )?;
         let vmap = crate::gen_verify_rust_emit::VariantMap::parse_all(&merged.variant_map)?;
         return gen_verify_rust::run(
@@ -367,6 +368,7 @@ pub fn gen_verify_cmd(
         &merged.max_len_precond,
         &merged.cryptol_arg_order,
         &merged.cryptol_fn_pre,
+        &merged.preconditions,
     )?;
     gen_verify::run(
         &ast,
@@ -423,6 +425,7 @@ pub fn gen_verify_rust_cmd(
         &merged.max_len_precond,
         &merged.cryptol_arg_order,
         &merged.cryptol_fn_pre,
+        &merged.preconditions,
     )?;
     let vmap = crate::gen_verify_rust_emit::VariantMap::parse_all(&merged.variant_map)?;
     gen_verify_rust::run(

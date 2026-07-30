@@ -89,6 +89,46 @@ pub fn msvc_mutex_noop_return(symbol: &str) -> Option<i64> {
     }
 }
 
+/// Whether `symbol` is a C++ runtime throw helper that is `[[noreturn]]`
+/// by contract — it always throws (or re-throws / aborts) and never
+/// returns to its caller.
+///
+/// The compiler emits an `unreachable` immediately after every call to
+/// such a helper. A default override that "returns" lets SAW fall into
+/// that `unreachable`, failing the proof spuriously (e.g. the MSVC
+/// `std::scoped_lock` path calls `_Throw_Cpp_error` on a — sequentially
+/// impossible — lock failure). Emitting a `False` post-condition on the
+/// assumed override instead models the noreturn contract: the caller
+/// assumes the call never returns, so the following `unreachable` is
+/// provably dead. Sound because every listed symbol is genuinely
+/// `[[noreturn]]`.
+///
+/// Matched by substring so both MSVC (`?_Xlength_error@std@@...`) and
+/// Itanium (`_ZSt20__throw_length_errorPKc`) manglings are covered.
+pub fn is_noreturn_throw(symbol: &str) -> bool {
+    const NORETURN_THROW_PATTERNS: &[&str] = &[
+        // MSVC: low-level throw + the `std::_X*` throw-helper family.
+        "_Throw_Cpp_error",
+        "_CxxThrowException",
+        "_Xlength_error",
+        "_Xout_of_range",
+        "_Xbad_alloc",
+        "_Xinvalid_argument",
+        "_Xruntime_error",
+        "_Xoverflow_error",
+        "_Xbad_function_call",
+        "_Xbad_optional_access",
+        // Itanium / libstdc++: `__cxa_throw`, `__cxa_rethrow`, and the
+        // whole `std::__throw_*` family all contain `__throw` / `__cxa`.
+        "__cxa_throw",
+        "__cxa_rethrow",
+        "__throw_",
+    ];
+    NORETURN_THROW_PATTERNS
+        .iter()
+        .any(|pat| symbol.contains(pat))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,5 +194,28 @@ mod tests {
         );
         assert_eq!(msvc_mutex_noop_return("_Mtx_lock"), None);
         assert_eq!(msvc_mutex_noop_return("compute_checksum"), None);
+    }
+
+    #[test]
+    fn recognizes_noreturn_throw_helpers() {
+        for sym in [
+            "?_Throw_Cpp_error@std@@YAXH@Z",
+            "?_Xlength_error@std@@YAXPEBD@Z",
+            "?_Xout_of_range@std@@YAXPEBD@Z",
+            "_CxxThrowException",
+            "__cxa_throw",
+            "__cxa_rethrow",
+            "_ZSt20__throw_length_errorPKc",
+            "_ZSt24__throw_bad_optional_accessv",
+        ] {
+            assert!(is_noreturn_throw(sym), "{sym} should be noreturn-throw");
+        }
+    }
+
+    #[test]
+    fn non_throw_symbols_are_not_noreturn() {
+        assert!(!is_noreturn_throw("_Mtx_lock"));
+        assert!(!is_noreturn_throw("memcmp"));
+        assert!(!is_noreturn_throw("compute_checksum"));
     }
 }

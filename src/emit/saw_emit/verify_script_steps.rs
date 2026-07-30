@@ -442,15 +442,18 @@ pub(super) fn emit_equiv_spec_body(
 
     out.push('\n');
 
-    // --max-len-precond bounds: constrain symbolic length params to
-    // the declared buffer sizes so SAW can reason about bounded
-    // write loops without exhausting the symbolic execution budget.
-    // Placed after globals (so all symbolic vars are in scope) and
-    // before `llvm_execute_func` (emitted in `emit_postcondition_and_close`).
+    // --max-len-precond bounds: constrain symbolic length params to the
+    // declared buffer sizes (after globals so all vars are in scope,
+    // before `llvm_execute_func`). Then user-supplied `preconditions =
+    // [...]`: raw Cryptol predicates over the fresh inputs (e.g. pin a
+    // bool/optional flag byte to canonical: `(this_pre @ 128) <= 1`).
     for (name, val) in &buffer_overrides.max_len_preconds {
         out.push_str(&format!("    llvm_precond {{{{ `{val} >= {name} }}}};\n",));
     }
-    if !buffer_overrides.max_len_preconds.is_empty() {
+    for pred in &buffer_overrides.raw_preconds {
+        out.push_str(&format!("    llvm_precond {{{{ {pred} }}}};\n"));
+    }
+    if !buffer_overrides.max_len_preconds.is_empty() || !buffer_overrides.raw_preconds.is_empty() {
         out.push('\n');
     }
 

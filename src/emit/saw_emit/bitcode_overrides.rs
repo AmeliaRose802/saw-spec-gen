@@ -370,6 +370,27 @@ fn emit_one(
         ));
     }
 
+    // Noreturn throw helpers (`_Throw_Cpp_error`, `std::_X*`,
+    // `__cxa_throw`, libstdc++ `__throw_*`, ...) never return to their
+    // caller — the compiler emits an `unreachable` right after the call.
+    // A `False` post-condition on the assumed override models that
+    // contract so the following `unreachable` is provably dead, instead
+    // of SAW falling through it and failing the proof. Sound: every
+    // matched symbol is genuinely `[[noreturn]]`. No `llvm_return`.
+    if super::status_primitives::is_noreturn_throw(&t.symbol) {
+        out.push_str(
+            "    // noreturn throw helper: assume the call never returns\n\
+             \x20   // so the trailing `unreachable` is dead.\n",
+        );
+        out.push_str("    llvm_postcond {{ False }};\n");
+        out.push_str("};\n");
+        out.push_str(&format!(
+            "{ov_name} <- llvm_unsafe_assume_spec m \"{sym}\" {safe}_spec;\n",
+            sym = t.symbol,
+        ));
+        return;
+    }
+
     // Return slot.
     match ir_return_setup(&t.return_ir_type) {
         ReturnSetup::Void => {
