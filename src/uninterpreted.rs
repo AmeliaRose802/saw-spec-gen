@@ -337,7 +337,18 @@ fn param_lines(i: usize, ty: &CryType) -> Option<(String, String, String)> {
 /// llvm_return-line, None)` for scalars.
 fn return_lines(ret: &CryType, call: &str) -> Option<(String, String, Option<String>)> {
     match ret {
-        CryType::Bit | CryType::Bitvector(_) => Some((
+        // A Cryptol `Bit` cannot be handed to `llvm_return` directly —
+        // SAW has no `Bit -> i1` translation ("SAW doesn't yet support
+        // translating Cryptol's bit type(s)"). Bridge it to a 1-bit word
+        // `[call] : [1]`, exactly as the C++ bool-return path does
+        // (`cryptol_bridge::cryptol_return_for`). This lets an equality
+        // primitive be modelled naturally as `... -> Bit`.
+        CryType::Bit => Some((
+            String::new(),
+            format!("    llvm_return (llvm_term {{{{ [{call}] : [1] }}}});\n"),
+            None,
+        )),
+        CryType::Bitvector(_) => Some((
             String::new(),
             format!("    llvm_return (llvm_term {{{{ {call} }}}});\n"),
             None,

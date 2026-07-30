@@ -325,7 +325,18 @@ fn emit_one(
     // discover the pointee width from the opaque-ptr IR signature. One
     // byte of havoc is sufficient to invalidate any caller that relies
     // on a specific pointee value, and it is always alignment-safe.
-    if !ptr_param_vars.is_empty() {
+    //
+    // EXCEPTION: sequential-no-op mutex overrides (`_Mtx_lock`/`unlock`
+    // and the `std::_Mutex_base` helpers) must PRESERVE their pointer
+    // arg. The mutex object is passed by pointer, but in a sequential
+    // proof lock/unlock leave it functionally unchanged; clobbering a
+    // byte here corrupts the enclosing object's whole-object post-state
+    // assertion (e.g. a `std::mutex` member of the `this` object being
+    // verified). Sound because we have already decided the mutex is
+    // uncontended and abstract these calls as no-ops.
+    let preserve_ptr_args = super::status_primitives::is_msvc_mutex_helper(&t.symbol)
+        || super::status_primitives::success_sentinel(&t.symbol).is_some();
+    if !preserve_ptr_args {
         for var in &ptr_param_vars {
             out.push_str(&format!(
                 "    {var}_after <- llvm_fresh_var \"{var}_after\" (llvm_int 8);\n",

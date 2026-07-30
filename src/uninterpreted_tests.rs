@@ -131,6 +131,31 @@ fn emit_scalar_in_scalar_out() {
 }
 
 #[test]
+fn emit_bit_return_is_bridged_to_one_bit_word() {
+    // A `Bit`-returning equality primitive (e.g. a defaulted C++
+    // `operator==` bound to a byte-equality contract) must bridge the
+    // Cryptol `Bit` to `[1]` — SAW cannot translate a bare `Bit` to i1.
+    let dir = std::env::temp_dir().join(format!("uninterp_eq_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let cry = dir.join("spec.cry");
+    std::fs::write(&cry, "uuidEq : [16][8] -> [16][8] -> Bit\n").unwrap();
+
+    let entries = vec![UninterpretedEntry {
+        cryptol_fn: "uuidEq".to_string(),
+        symbol: Some("op_eq_impl".to_string()),
+    }];
+    let block = emit_uninterpreted_block(&entries, &cry);
+    let s = &block.snippet;
+    assert!(s.contains("a0_ptr <- llvm_alloc_readonly (llvm_array 16 (llvm_int 8));"));
+    // Bit return wrapped as a 1-bit word, not emitted bare.
+    assert!(
+        s.contains("llvm_return (llvm_term {{ [uuidEq a0 a1] : [1] }});"),
+        "Bit return must bridge to [1], got:\n{s}"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn emit_byte_buffers_and_sret_return() {
     let dir = std::env::temp_dir().join(format!("uninterp_hmac_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
