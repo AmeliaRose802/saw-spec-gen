@@ -1,0 +1,4 @@
+# Assert only the first 4 bytes of the 16-byte Rec16 sret return; the
+# trailing 12 bytes are uninitialized and must not be read.
+[functions.make_rec_ret]
+sret_assert_bytes = 4

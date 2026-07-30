@@ -82,6 +82,16 @@ pub struct BufferOverrides {
     /// Extra raw Cryptol predicates, each emitted verbatim as
     /// `llvm_precond {{ <expr> }}`. Config-only (`preconditions = [...]`).
     pub raw_preconds: Vec<String>,
+
+    /// Assert only the first `N` bytes of an sret aggregate return
+    /// (config-only `sret_assert_bytes = N`). When set, the sret
+    /// postcondition is emitted as `llvm_points_to_at_type result_ptr
+    /// (llvm_array N (llvm_int 8)) (llvm_term …)` so trailing bytes the
+    /// callee leaves undefined — e.g. a `std::optional`'s padding that a
+    /// `memcpy` fills from an uninitialized source — are never read and
+    /// so never crash the proof with "Error during memory load". The
+    /// model must return `[N][8]`.
+    pub sret_assert_bytes: Option<usize>,
 }
 
 impl BufferOverrides {

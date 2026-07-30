@@ -370,6 +370,10 @@ pub fn gen_verify_cmd(
         &merged.cryptol_fn_pre,
         &merged.preconditions,
     )?;
+    let buffer_overrides = crate::buffer_overrides::BufferOverrides {
+        sret_assert_bytes: merged.sret_assert_bytes,
+        ..buffer_overrides
+    };
     gen_verify::run(
         &ast,
         &bitcode,

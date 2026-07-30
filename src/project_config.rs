@@ -102,6 +102,12 @@ pub struct FunctionConfig {
     /// with a Cryptol model that tests `== 1`.
     #[serde(default)]
     pub preconditions: Vec<String>,
+
+    /// Per-function `sret_assert_bytes = N`: assert only the first `N`
+    /// bytes of the sret aggregate return, leaving trailing undefined
+    /// bytes (e.g. `std::optional` padding) unconstrained.
+    #[serde(default)]
+    pub sret_assert_bytes: Option<usize>,
 }
 
 /// Deserialised contents of a `saw-spec-gen.toml` file.
@@ -157,6 +163,11 @@ pub struct ProjectConfig {
     /// See [`FunctionConfig::preconditions`].
     #[serde(default)]
     pub preconditions: Vec<String>,
+
+    /// Global `sret_assert_bytes = N`. See
+    /// [`FunctionConfig::sret_assert_bytes`].
+    #[serde(default)]
+    pub sret_assert_bytes: Option<usize>,
 
     /// `[functions.<cryptol_fn>]` tables: per-function spec-shaping
     /// overrides. Keyed by the `--cryptol-fn` name. See
@@ -275,6 +286,9 @@ impl ProjectConfig {
             cryptol_arg_order: merged_vec(pf_arg_order, &self.cryptol_arg_order),
             variant_map: merged_vec(pf_variant_map, &self.variant_map),
             preconditions: merged_vec(pf_preconditions, &self.preconditions),
+            sret_assert_bytes: f
+                .and_then(|c| c.sret_assert_bytes)
+                .or(self.sret_assert_bytes),
             uninterpreted: self.uninterpreted.clone(),
         }
     }
@@ -306,6 +320,8 @@ pub struct MergedConfig {
     pub variant_map: Vec<String>,
     /// Extra raw `llvm_precond` clauses (config-only; no CLI equivalent).
     pub preconditions: Vec<String>,
+    /// Assert only the first N bytes of an sret return (config-only).
+    pub sret_assert_bytes: Option<usize>,
     /// `[[uninterpreted]]` entries (config-only; no CLI equivalent).
     pub uninterpreted: Vec<UninterpretedEntry>,
 }
@@ -372,6 +388,23 @@ mod tests {
         };
         let merged = cfg.apply("no_such_fn");
         assert_eq!(merged.out_buffer_param, v(&["g=1"]));
+    }
+
+    #[test]
+    fn sret_assert_bytes_parses_and_per_function_wins() {
+        let cfg: ProjectConfig = toml::from_str(
+            r#"
+            sret_assert_bytes = 8
+
+            [functions.provision_ret]
+            sret_assert_bytes = 65
+            "#,
+        )
+        .expect("config parses");
+        // Per-function value wins over the global default.
+        assert_eq!(cfg.apply("provision_ret").sret_assert_bytes, Some(65));
+        // A function with no table falls back to the global value.
+        assert_eq!(cfg.apply("other").sret_assert_bytes, Some(8));
     }
 
     #[test]

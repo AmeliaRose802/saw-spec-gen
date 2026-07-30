@@ -373,17 +373,17 @@ pub(super) fn emit_equiv_spec_body(
     // `SAW_SPEC_GEN_BUG_REPORT_sret_not_detected.md`.
     if target_spec.return_constraint.is_sret {
         out.push_str("\n    // sret: aggregate return passed via hidden output pointer.\n");
+        // 8-byte aligned so aligned callee stores/memcpy aren't rejected.
         out.push_str(&format!(
-            "    result_ptr <- llvm_alloc ({});\n",
+            "    result_ptr <- llvm_alloc_aligned 8 ({});\n",
             target_spec.return_constraint.saw_type,
         ));
         if sret_prestate.is_none() {
             // Define the whole sret buffer with a fresh symbolic value
-            // before the call. A callee that only partially writes it —
-            // e.g. a disengaged `std::optional` that leaves its payload
-            // uninitialized — would else leave undefined bytes and crash
-            // the postcondition read ("Error during memory load"). Fed to
-            // the Cryptol args only when the model consumes the pre-state.
+            // before the call so a partial-write callee (e.g. a disengaged
+            // `std::optional` leaving its payload uninitialized) can't
+            // leave undefined bytes. Fed to the Cryptol args only when the
+            // model consumes the pre-state.
             out.push_str(&format!(
                 "    result_pre <- llvm_fresh_var \"result_pre\" ({});\n",
                 target_spec.return_constraint.saw_type,
