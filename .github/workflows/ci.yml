@@ -118,11 +118,24 @@ jobs:
     - name: Build saw-spec-gen
       run: cargo build --release
 
-    # The Docker image may have an older exception-lower baked in.
-    # Force-reinstall from the latest-main release so the C++ throw/catch
-    # tests use the current build of the pass.
+    # The Docker image bakes an older exception-lower onto PATH at
+    # /root/.saw-spec-gen/exception-lower/bin. The installer defaults to
+    # $HOME/.saw-spec-gen, but in a GitHub Actions container $HOME is
+    # /github/home — a directory that is NOT on PATH — so a plain install
+    # lands somewhere discover-tools never looks and the stale, wrong-LLVM
+    # binary keeps winning (Find-OnPath outranks the $HOME candidate).
+    # Install *over* the on-PATH binary so the fresh, LLVM-matched v0.3.2
+    # build is the one discover-tools resolves.
     - name: Update exception-lower pass
-      run: FORCE=1 bash scripts/install-exception-lower.sh
+      run: |
+        el="$(command -v exception-lower || true)"
+        root="/root/.saw-spec-gen"
+        if [ -n "$el" ]; then
+          root="$(dirname "$(dirname "$(dirname "$el")")")"
+        fi
+        echo "installing exception-lower into $root"
+        FORCE=1 INSTALL_ROOT="$root" bash scripts/install-exception-lower.sh
+        exception-lower --version || true
 
     - name: Run end-to-end test suite
       # discover-tools.ps1 auto-detects /root/.saw-spec-gen/{saw,llvm}/bin

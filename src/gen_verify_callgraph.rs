@@ -227,6 +227,7 @@ fn filter_external_specs<'s, 'f>(
             if !is_treated_external {
                 return false;
             }
+            // Skip virtual methods; they're handled by vtable stub system.
             if s.is_virtual {
                 return false;
             }

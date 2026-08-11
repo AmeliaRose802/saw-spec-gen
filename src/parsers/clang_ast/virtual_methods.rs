@@ -66,6 +66,9 @@ impl<'a> Visitor for VDtorVisitor<'a> {
                         .to_string()
                 })
                 .collect();
+            if base_names.iter().any(|b| b == "std::exception") {
+                self.out.insert(name.to_string());
+            }
             if !base_names.is_empty() {
                 self.bases.insert(name.to_string(), base_names);
             }

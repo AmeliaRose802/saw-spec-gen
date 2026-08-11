@@ -66,6 +66,18 @@ pub fn generate_llvm_ir_stubs(
     out.push('\n');
     out.push_str(&format!("target triple = \"{}\"\n\n", abi.triple()));
 
+    // Every symbol a vtable global references must also be *defined* in
+    // this same module, or the `.ll` won't assemble to `.bc` and SAW's
+    // `llvm_load_module` aborts. Overrides normally reuse the
+    // originating (base) class's stub, which is emitted when we visit
+    // that base class. But an override whose originating class is absent
+    // from `by_class` (an external / unresolved base — the parser's
+    // `"Unknown"` fallback) resolves via `stub_name_for` back to the
+    // derived class's own name, so no base stub ever gets emitted.
+    // Track the stub symbols we've defined and emit one for every
+    // referenced slot exactly once, so the vtable never dangles.
+    let mut emitted_stubs: HashSet<String> = HashSet::new();
+
     for (class_name, class_methods) in by_class {
         let safe_class = sanitize_name(class_name).to_lowercase();
         let has_vdtor = classes_with_vdtor.contains(class_name.as_str());
@@ -96,10 +108,17 @@ pub fn generate_llvm_ir_stubs(
         }
 
         for method in class_methods {
-            if method.is_override {
-                continue;
+            // Emit each stub exactly once, keyed by its *resolved* name.
+            // A non-override defines its own stub; an override reuses the
+            // originating base's stub (defined when we visit that base).
+            // The one case that would otherwise dangle is an override
+            // whose base is absent from `by_class`: `stub_name_for`
+            // resolves it to the derived class name, so define a concrete
+            // (trivial) stub here to keep the vtable global well-formed.
+            let stub_name = stub_name_for(method);
+            if emitted_stubs.insert(stub_name.clone()) {
+                emit_stub_for_method(&mut out, class_name, &stub_name, method);
             }
-            emit_stub_for_method(&mut out, class_name, &stub_name_for(method), method);
         }
 
         // MSVC-style flat vtable. Kept on every target — the
@@ -390,6 +409,47 @@ mod tests {
             !ll.contains("_ZTV"),
             "MSVC mode should not emit Itanium `_ZTV` symbols:\n{ll}"
         );
+    }
+
+    #[test]
+    fn test_override_with_absent_base_defines_every_referenced_stub() {
+        // Regression for docs/07: a class whose virtual methods are all
+        // `override`s of a base that is NOT present in `by_class` (an
+        // external/unresolved base — the parser's `"Unknown"` fallback).
+        // `stub_name_for` resolves each override back to the derived
+        // class's own name, so no base stub gets emitted. Before the fix
+        // the vtable global referenced `@unknown__*_stub` symbols that
+        // were never defined and the `.ll` failed to assemble.
+        let mut destroy = make_iface_method("Unknown", "_destroy", TypeInfo::Void, 100);
+        destroy.is_override = true;
+        let mut delete_this = make_iface_method("Unknown", "_delete_this", TypeInfo::Void, 200);
+        delete_this.is_override = true;
+        let methods = [destroy, delete_this];
+        let mut by_class = BTreeMap::new();
+        by_class.insert("Unknown".to_string(), methods.iter().collect::<Vec<_>>());
+        let ll = generate_llvm_ir_stubs(&by_class, &HashSet::new(), None);
+
+        // Every `ptr @sym` slot inside the vtable global must have a
+        // matching `define ... @sym(` in the same module.
+        let tail = ll
+            .split("_vtable = global")
+            .nth(1)
+            .expect("vtable global missing");
+        let body = &tail[..tail.find("\n]\n").unwrap_or(tail.len())];
+        let mut slots = 0;
+        for slot in body.split("ptr @").skip(1) {
+            let sym: String = slot
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            assert!(!sym.is_empty(), "empty vtable slot symbol in:\n{ll}");
+            assert!(
+                ll.contains(&format!("@{sym}(")),
+                "vtable references @{sym} but no definition was emitted:\n{ll}",
+            );
+            slots += 1;
+        }
+        assert_eq!(slots, 2, "expected two vtable slots, got:\n{ll}");
     }
 
     #[test]

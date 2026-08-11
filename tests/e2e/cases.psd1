@@ -70,6 +70,19 @@
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/multi_method_ordering';      File = 'call_prepare_disproved.cpp';             Expected = 'DISPROVED' }
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/multi_method_ordering';      File = 'call_report_verified.cpp';               Expected = 'VERIFIED' }
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/multi_method_ordering';      File = 'call_extra_disproved.cpp';               Expected = 'DISPROVED' }
+        # `orphan_override_vtable` overrides std::exception::what() — a
+        # virtual declared in a *system* header, so the parser never records
+        # the originating (non-override) method. Before the fix the orphan
+        # override's vtable slot referenced an *undefined* stub symbol,
+        # vtable_stubs.ll failed to assemble, and SAW aborted at load. The
+        # fix reclassifies orphan overrides as originating methods (own
+        # stub + havoc + assume binding). Also exercises the pointer-return
+        # havoc path (what() returns const char*). The verified case ignores
+        # what()'s result; the disproved case dereferences it, proving the
+        # pointer-return havoc is sound (arbitrary pointee byte) rather than
+        # vacuously returning zeroed memory.
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/orphan_override_vtable';     File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
+        @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/orphan_override_vtable';     File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
         # C++ exception lowering: total Cryptol spec, partial impl.
         @{ Tag = 'cpp_throws'; Runner = 'cpp'; Dir = 'tests/e2e/cases/06-throws-exception';           File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
         @{ Tag = 'cpp_throws'; Runner = 'cpp'; Dir = 'tests/e2e/cases/06-throws-exception';           File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }

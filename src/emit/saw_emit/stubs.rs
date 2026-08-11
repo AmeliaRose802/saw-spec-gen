@@ -63,6 +63,35 @@ pub fn emit_interface_stubs(
     fs::create_dir_all(output_dir)
         .with_context(|| format!("Failed to create {}", output_dir.display()))?;
 
+    // Reclassify *orphan* overrides as originating methods. A method
+    // marked `override` normally reuses its base class's stub + havoc
+    // spec, so we skip emitting anything for it. But when the
+    // originating base never appears among the parsed classes — an
+    // external / unresolved base such as the parser's `"Unknown"`
+    // fallback — there is no in-module base stub to reuse. Left as an
+    // override it would (a) be dropped from havoc/binding emission,
+    // yet (b) still occupy a vtable slot pointing at an undefined stub
+    // symbol, so `vtable_stubs.ll` fails to assemble. Treating it as
+    // originating gives it its own stub, havoc spec, and
+    // `llvm_unsafe_assume_spec` binding — exactly how every other
+    // external virtual call is modelled.
+    let originating_names: HashSet<&str> = methods
+        .iter()
+        .filter(|m| !m.is_override)
+        .map(|m| m.method.name.as_str())
+        .collect();
+    let owned_methods: Vec<InterfaceMethod> = methods
+        .iter()
+        .map(|m| {
+            let mut m = m.clone();
+            if m.is_override && !originating_names.contains(m.method.name.as_str()) {
+                m.is_override = false;
+            }
+            m
+        })
+        .collect();
+    let methods = owned_methods.as_slice();
+
     // Group methods by class. Each class's method list MUST be sorted by
     // source-location offset so vtable slots match MSVC's declaration-order
     // slot assignment.
@@ -403,5 +432,42 @@ mod tests {
         let this_pos = stub_line.find("%arg0").expect("this missing");
         let sret_pos = stub_line.find("%retptr").expect("sret missing");
         assert!(this_pos < sret_pos);
+    }
+
+    #[test]
+    fn test_orphan_override_gets_full_havoc_treatment() {
+        // Regression for docs/07: a class whose virtual methods are all
+        // `override`s of a base absent from the parsed set (the parser's
+        // `"Unknown"` fallback). They must be modelled like any other
+        // external virtual call — own stub + havoc spec + binding — not
+        // left as dangling vtable slots or silent no-op stubs.
+        let mut destroy = make_iface_method("Unknown", "Destroy", TypeInfo::Void, 100);
+        destroy.is_override = true;
+        let mut del = make_iface_method("Unknown", "DeleteThis", TypeInfo::Void, 200);
+        del.is_override = true;
+        let methods = vec![destroy, del];
+        let dir = std::env::temp_dir().join("saw_spec_gen_orphan_override");
+        let _ = fs::remove_dir_all(&dir);
+        emit_interface_stubs(&methods, &[], &[], &HashSet::new(), &dir, None, None).unwrap();
+
+        // Both stubs are defined (vtable never dangles).
+        let ll = fs::read_to_string(dir.join("vtable_stubs.ll")).unwrap();
+        assert!(ll.contains("@unknown_destroy_stub("), "stub missing:\n{ll}");
+        assert!(
+            ll.contains("@unknown_deletethis_stub("),
+            "stub missing:\n{ll}"
+        );
+
+        // A havoc spec file exists for each, and the override index
+        // binds them (non-empty override list) — same as any external
+        // virtual call, not a bare no-op.
+        assert!(dir.join("Unknown_Destroy_havoc_spec.saw").exists());
+        assert!(dir.join("Unknown_DeleteThis_havoc_spec.saw").exists());
+        let idx = fs::read_to_string(dir.join("interface_overrides.saw")).unwrap();
+        assert!(
+            idx.contains("llvm_unsafe_assume_spec m \"unknown_destroy_stub\""),
+            "expected havoc binding for orphan override:\n{idx}",
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 }

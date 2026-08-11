@@ -182,17 +182,22 @@ pub(super) fn emit_verify_step(
 
     let mut overrides = override_names;
     if iface.has_interfaces {
-        let ctor_classes: HashSet<&str> = iface
+        let originating_names: HashSet<&str> = iface
+            .vmethods
+            .iter()
+            .filter(|m| !m.is_override)
+            .map(|m| m.method.name.as_str())
+            .collect();
+        let ctor_classes: HashSet<String> = iface
             .constructors
             .iter()
-            .map(|c| c.class_name.as_str())
+            .map(|c| sanitize_name(&c.class_name).to_lowercase())
             .collect();
-        for class in &ctor_classes {
-            let safe_class = sanitize_name(class).to_lowercase();
+        for safe_class in &ctor_classes {
             overrides.push(format!("ov_{safe_class}_ctor"));
         }
         for method in iface.vmethods {
-            if method.is_override {
+            if method.is_override && originating_names.contains(method.method.name.as_str()) {
                 continue;
             }
             let stub_name = stub_function_name(method);
