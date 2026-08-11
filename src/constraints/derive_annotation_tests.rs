@@ -148,6 +148,25 @@ fn test_derive_paramref_in_reads_emits_precondition() {
         "expected llvm_precond bounding `n`; got {:?}",
         src_param.preconditions,
     );
+    // The length var must be annotated with its *actual* parameter
+    // width (`uint8_t n` -> `[8]`), not a hardcoded `[64]`, or SAW's
+    // type checker rejects it with "Expected 64, Inferred 8".
+    assert!(
+        src_param
+            .preconditions
+            .iter()
+            .any(|p| p.contains("(n : [8]) <=")),
+        "expected width-8 annotation on length var; got {:?}",
+        src_param.preconditions,
+    );
+    assert!(
+        !src_param
+            .preconditions
+            .iter()
+            .any(|p| p.contains("(n : [64])")),
+        "length var must not be hardcoded to [64]; got {:?}",
+        src_param.preconditions,
+    );
     assert!(
         src_param
             .preconditions
