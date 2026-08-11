@@ -95,13 +95,16 @@ pub fn is_ct_compare_symbol(symbol: &str) -> bool {
 }
 
 /// Merge the `@uninterpreted` annotations parsed from `cryptol_spec`
-/// with the `[[uninterpreted]]` entries from project config.
+/// with the `[[uninterpreted]]` entries from project config, then scope
+/// the result to symbols actually present in `ir_text` (see
+/// [`filter_by_symbol_presence`]).
 ///
 /// Config entries win when both declare the same `cryptol_fn`: an
 /// explicit `symbol =` in the TOML overrides the annotation's symbol.
 pub fn gather(
     cryptol_spec: &Path,
     config_entries: &[UninterpretedEntry],
+    ir_text: &str,
 ) -> Vec<UninterpretedEntry> {
     let text = std::fs::read_to_string(cryptol_spec).unwrap_or_default();
     let mut merged = parse_annotations(&text);
@@ -114,7 +117,41 @@ pub fn gather(
             merged.push(cfg.clone());
         }
     }
-    merged
+    filter_by_symbol_presence(merged, ir_text)
+}
+
+/// Drop entries whose implementation symbol is absent from the target
+/// module's LLVM IR.
+///
+/// `[[uninterpreted]]` config lives at the project level, so an entry
+/// added for one function (e.g. `uuidEq` bound to `Uuid::operator==`,
+/// needed by `activate`/`provision`) is otherwise emitted into *every*
+/// function's `verify.saw` — including modules that never call it. SAW
+/// then aborts with `Could not find definition for <symbol>` (e.g.
+/// `??8sdep@@YA_NAEBUUuid@0@0@Z` in `canonicalize_lp`). Guarding on
+/// symbol presence scopes each binding to the modules that actually
+/// reference the primitive.
+///
+/// Only entries with an *explicit* `symbol =` are filtered: their
+/// mangled name is a concrete string we can look for in the IR. Entries
+/// resolved by `cryptol_fn` name alone (no mangling known) are kept as
+/// before, since we can't prove their absence. When `ir_text` is empty
+/// (no bitcode supplied) nothing is filtered — we fall back to the
+/// prior emit-everything behavior.
+pub fn filter_by_symbol_presence(
+    entries: Vec<UninterpretedEntry>,
+    ir_text: &str,
+) -> Vec<UninterpretedEntry> {
+    if ir_text.is_empty() {
+        return entries;
+    }
+    entries
+        .into_iter()
+        .filter(|e| match &e.symbol {
+            Some(sym) => ir_text.contains(sym.as_str()),
+            None => true,
+        })
+        .collect()
 }
 
 /// Parse `@uninterpreted` doc-comment markers from Cryptol source text.

@@ -74,7 +74,7 @@ fn gather_config_overrides_annotation_symbol() {
         cryptol_fn: "hmacSha256".to_string(),
         symbol: Some("explicit_sym".to_string()),
     }];
-    let merged = gather(&cry, &cfg);
+    let merged = gather(&cry, &cfg, "");
     assert_eq!(merged.len(), 1);
     assert_eq!(merged[0].symbol.as_deref(), Some("explicit_sym"));
     std::fs::remove_dir_all(&dir).ok();
@@ -91,7 +91,7 @@ fn gather_appends_config_only_entry() {
         cryptol_fn: "aead".to_string(),
         symbol: None,
     }];
-    let merged = gather(&cry, &cfg);
+    let merged = gather(&cry, &cfg, "");
     assert_eq!(merged.len(), 1);
     assert_eq!(merged[0].cryptol_fn, "aead");
     std::fs::remove_dir_all(&dir).ok();
@@ -103,6 +103,47 @@ fn ct_compare_recognition() {
     assert!(is_ct_compare_symbol("CRYPTO_memcmp"));
     assert!(is_ct_compare_symbol("foo_ConstantTimeEq_bar"));
     assert!(!is_ct_compare_symbol("hmacSha256"));
+}
+
+#[test]
+fn filter_drops_entry_with_symbol_absent_from_ir() {
+    let entries = vec![UninterpretedEntry {
+        cryptol_fn: "uuidEq".to_string(),
+        symbol: Some("??8sdep@@YA_NAEBUUuid@0@0@Z".to_string()),
+    }];
+    let ir = "define i32 @canonicalize_lp() { ret i32 0 }\n";
+    let got = filter_by_symbol_presence(entries, ir);
+    assert!(got.is_empty(), "absent symbol should be filtered out");
+}
+
+#[test]
+fn filter_keeps_entry_with_symbol_present_in_ir() {
+    let entries = vec![UninterpretedEntry {
+        cryptol_fn: "uuidEq".to_string(),
+        symbol: Some("??8sdep@@YA_NAEBUUuid@0@0@Z".to_string()),
+    }];
+    let ir = "declare i1 @\"??8sdep@@YA_NAEBUUuid@0@0@Z\"(ptr, ptr)\n";
+    let got = filter_by_symbol_presence(entries, ir);
+    assert_eq!(got.len(), 1);
+}
+
+#[test]
+fn filter_keeps_symbol_less_entries_and_when_no_ir() {
+    let by_name = vec![UninterpretedEntry {
+        cryptol_fn: "hmacSha256".to_string(),
+        symbol: None,
+    }];
+    // No explicit symbol: can't prove absence, keep it.
+    assert_eq!(
+        filter_by_symbol_presence(by_name.clone(), "unrelated ir").len(),
+        1
+    );
+    // Empty IR: fall back to emit-everything.
+    let with_symbol = vec![UninterpretedEntry {
+        cryptol_fn: "uuidEq".to_string(),
+        symbol: Some("??8sdep@@YA_NAEBUUuid@0@0@Z".to_string()),
+    }];
+    assert_eq!(filter_by_symbol_presence(with_symbol, "").len(), 1);
 }
 
 #[test]
