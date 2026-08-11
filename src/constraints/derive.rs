@@ -39,6 +39,23 @@ fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
     // (e.g. `buf` + `buf_len`, or `n` + any pointer).
     let all_param_names: Vec<String> = func.params.iter().map(|p| p.name.clone()).collect();
 
+    // Map each integer-typed parameter name to its bit width, so a
+    // sibling-length precondition (`_In_reads_(nm)`) can annotate the
+    // length variable with the parameter's *actual* Cryptol width
+    // (`(nm : [8]) <= 16` for a `uint8_t nm`) instead of a hardcoded
+    // `[64]`, which SAW's type checker rejects with "Type mismatch:
+    // Expected 64, Inferred 8".
+    let param_int_widths: HashMap<String, u32> = func
+        .params
+        .iter()
+        .filter_map(|p| match &p.ty {
+            TypeInfo::SignedInt(bits) | TypeInfo::UnsignedInt(bits) => {
+                Some((p.name.clone(), *bits))
+            }
+            _ => None,
+        })
+        .collect();
+
     // Pre-compute the inbound-pointer count for every parameter name:
     // how many *pointer* parameters in this function would name-match
     // it as a length companion? When the count is > 1 we have a copy-
@@ -249,8 +266,13 @@ fn derive_function_constraints(func: &FunctionInfo) -> Result<SpecConstraint> {
                     preconditions.push(format!(
                         "//   {DEFAULT_PARAMREF_MAX_LEN}; raise/lower by hand if needed.",
                     ));
+                    // Annotate the length variable with its actual
+                    // parameter width so the Cryptol type checker
+                    // accepts the bound. `uint8_t nm` -> `[8]`, not a
+                    // hardcoded `[64]`.
+                    let width = param_int_widths.get(pname).copied().unwrap_or(64);
                     preconditions.push(format!(
-                        "llvm_precond {{{{ ({pname} : [64]) <= {DEFAULT_PARAMREF_MAX_LEN} }}}}",
+                        "llvm_precond {{{{ ({pname} : [{width}]) <= {DEFAULT_PARAMREF_MAX_LEN} }}}}",
                     ));
                 }
                 Annotation::Dereferenceable(n) => {
