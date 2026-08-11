@@ -470,7 +470,7 @@ pub fn run(
     // Uninterpreted-primitive contracts: `@uninterpreted` annotations in
     // the Cryptol spec plus `[[uninterpreted]]` config entries become
     // `llvm_unsafe_assume_spec` bindings spliced into the verify script.
-    let uninterp_entries = crate::uninterpreted::gather(cryptol_spec, uninterpreted_cfg);
+    let uninterp_entries = crate::uninterpreted::gather(cryptol_spec, uninterpreted_cfg, &ir_text);
     let uninterpreted =
         crate::uninterpreted::emit_uninterpreted_block(&uninterp_entries, cryptol_spec);
 

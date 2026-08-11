@@ -76,7 +76,7 @@ pub fn run(
         .into_owned();
 
     let saw_path = output.join("verify_rust.saw");
-    let uninterp_entries = crate::uninterpreted::gather(cryptol_spec, uninterpreted_cfg);
+    let uninterp_entries = crate::uninterpreted::gather(cryptol_spec, uninterpreted_cfg, &ir);
     let uninterpreted =
         crate::uninterpreted::emit_uninterpreted_block(&uninterp_entries, cryptol_spec);
     let saw_text = gen_verify_rust_emit::emit_saw_script(
