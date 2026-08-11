@@ -373,24 +373,25 @@ pub(super) fn emit_equiv_spec_body(
     // `SAW_SPEC_GEN_BUG_REPORT_sret_not_detected.md`.
     if target_spec.return_constraint.is_sret {
         out.push_str("\n    // sret: aggregate return passed via hidden output pointer.\n");
+        // 8-byte aligned so aligned callee stores/memcpy aren't rejected.
         out.push_str(&format!(
-            "    result_ptr <- llvm_alloc ({});\n",
+            "    result_ptr <- llvm_alloc_aligned 8 ({});\n",
             target_spec.return_constraint.saw_type,
         ));
-        if target_spec.return_constraint.sret_prestate && sret_prestate.is_none() {
-            // The Cryptol model takes the sret buffer's pre-call contents
-            // as a trailing parameter. Allocate a fresh symbolic value,
-            // bind it to the buffer before llvm_execute_func, and append
-            // it to the Cryptol argument list.
-            //
-            // Skipped when the caller supplies a SretPrestate struct —
-            // that path (below) supersedes this one with take/drop slicing.
+        if sret_prestate.is_none() {
+            // Define the whole sret buffer with a fresh symbolic value
+            // before the call so a partial-write callee (e.g. a disengaged
+            // `std::optional` leaving its payload uninitialized) can't
+            // leave undefined bytes. Fed to the Cryptol args only when the
+            // model consumes the pre-state.
             out.push_str(&format!(
                 "    result_pre <- llvm_fresh_var \"result_pre\" ({});\n",
                 target_spec.return_constraint.saw_type,
             ));
             out.push_str("    llvm_points_to result_ptr (llvm_term result_pre);\n");
-            cryptol_args.push("result_pre".to_string());
+            if target_spec.return_constraint.sret_prestate {
+                cryptol_args.push("result_pre".to_string());
+            }
         }
         let has_this = target_fn
             .params
@@ -442,15 +443,18 @@ pub(super) fn emit_equiv_spec_body(
 
     out.push('\n');
 
-    // --max-len-precond bounds: constrain symbolic length params to
-    // the declared buffer sizes so SAW can reason about bounded
-    // write loops without exhausting the symbolic execution budget.
-    // Placed after globals (so all symbolic vars are in scope) and
-    // before `llvm_execute_func` (emitted in `emit_postcondition_and_close`).
+    // --max-len-precond bounds: constrain symbolic length params to the
+    // declared buffer sizes (after globals so all vars are in scope,
+    // before `llvm_execute_func`). Then user-supplied `preconditions =
+    // [...]`: raw Cryptol predicates over the fresh inputs (e.g. pin a
+    // bool/optional flag byte to canonical: `(this_pre @ 128) <= 1`).
     for (name, val) in &buffer_overrides.max_len_preconds {
         out.push_str(&format!("    llvm_precond {{{{ `{val} >= {name} }}}};\n",));
     }
-    if !buffer_overrides.max_len_preconds.is_empty() {
+    for pred in &buffer_overrides.raw_preconds {
+        out.push_str(&format!("    llvm_precond {{{{ {pred} }}}};\n"));
+    }
+    if !buffer_overrides.max_len_preconds.is_empty() || !buffer_overrides.raw_preconds.is_empty() {
         out.push('\n');
     }
 

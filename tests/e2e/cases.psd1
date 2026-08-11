@@ -599,6 +599,25 @@
            CryptolFn = 'wrap_canonicalize_spec';
            Function = 'wrap_canonicalize' }
 
+        # partial sret (sret_assert_bytes): a 16-byte struct is returned
+        # via the hidden sret pointer but the model asserts only the first
+        # 4 bytes. `sret_assert_bytes = 4` makes gen-verify emit
+        # `llvm_points_to_at_type result_ptr (llvm_array 4 (llvm_int 8)) …`
+        # so trailing bytes a callee may leave undefined are never read
+        # (fixes "Error during memory load" on std::optional-style padding).
+        # Also exercises the 8-byte-aligned sret allocation (aligned i32
+        # store rejected over an align-1 alloc otherwise). verified: prefix
+        # a=x+1 matches; disproved: a=x+2 mismatches (partial assert is not
+        # vacuous).
+        @{ Tag = 'aggregate_bridge'; Runner = 'cpp';
+           Dir = 'tests/e2e/cases/12-aggregate-bridge/partial_sret';
+           File = 'partial_sret_verified.cpp'; Expected = 'VERIFIED';
+           Cry = 'partial_sret_spec.cry'; CryptolFn = 'make_rec_ret'; Function = 'make_rec' }
+        @{ Tag = 'aggregate_bridge'; Runner = 'cpp';
+           Dir = 'tests/e2e/cases/12-aggregate-bridge/partial_sret';
+           File = 'partial_sret_disproved.cpp'; Expected = 'DISPROVED';
+           Cry = 'partial_sret_spec.cry'; CryptolFn = 'make_rec_ret'; Function = 'make_rec' }
+
         # sret sub-callee recovered from IR (hmac_sha256 arg-mismatch):
         # the sub-callee returns std::array<uint8_t,32>, which the AST
         # does NOT classify as sret. ensure_sret_from_ir recovers the

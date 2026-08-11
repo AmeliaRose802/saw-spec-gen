@@ -325,7 +325,18 @@ fn emit_one(
     // discover the pointee width from the opaque-ptr IR signature. One
     // byte of havoc is sufficient to invalidate any caller that relies
     // on a specific pointee value, and it is always alignment-safe.
-    if !ptr_param_vars.is_empty() {
+    //
+    // EXCEPTION: sequential-no-op mutex overrides (`_Mtx_lock`/`unlock`
+    // and the `std::_Mutex_base` helpers) must PRESERVE their pointer
+    // arg. The mutex object is passed by pointer, but in a sequential
+    // proof lock/unlock leave it functionally unchanged; clobbering a
+    // byte here corrupts the enclosing object's whole-object post-state
+    // assertion (e.g. a `std::mutex` member of the `this` object being
+    // verified). Sound because we have already decided the mutex is
+    // uncontended and abstract these calls as no-ops.
+    let preserve_ptr_args = super::status_primitives::is_msvc_mutex_helper(&t.symbol)
+        || super::status_primitives::success_sentinel(&t.symbol).is_some();
+    if !preserve_ptr_args {
         for var in &ptr_param_vars {
             out.push_str(&format!(
                 "    {var}_after <- llvm_fresh_var \"{var}_after\" (llvm_int 8);\n",
@@ -368,6 +379,27 @@ fn emit_one(
             "    llvm_points_to (llvm_global \"{}\") (llvm_term {post});\n",
             g.mangled_name,
         ));
+    }
+
+    // Noreturn throw helpers (`_Throw_Cpp_error`, `std::_X*`,
+    // `__cxa_throw`, libstdc++ `__throw_*`, ...) never return to their
+    // caller — the compiler emits an `unreachable` right after the call.
+    // A `False` post-condition on the assumed override models that
+    // contract so the following `unreachable` is provably dead, instead
+    // of SAW falling through it and failing the proof. Sound: every
+    // matched symbol is genuinely `[[noreturn]]`. No `llvm_return`.
+    if super::status_primitives::is_noreturn_throw(&t.symbol) {
+        out.push_str(
+            "    // noreturn throw helper: assume the call never returns\n\
+             \x20   // so the trailing `unreachable` is dead.\n",
+        );
+        out.push_str("    llvm_postcond {{ False }};\n");
+        out.push_str("};\n");
+        out.push_str(&format!(
+            "{ov_name} <- llvm_unsafe_assume_spec m \"{sym}\" {safe}_spec;\n",
+            sym = t.symbol,
+        ));
+        return;
     }
 
     // Return slot.

@@ -50,7 +50,18 @@ pub(super) fn emit_postcondition_and_close(
     for (out_name, fn_name) in &buffer_overrides.cryptol_fn_out {
         let args = buffer_overrides
             .cryptol_call_args(fn_name)
-            .unwrap_or_else(|| cryptol_args.to_vec());
+            .unwrap_or_else(|| {
+                // The sret-return buffer's pre-state (`preBytes` /
+                // `result_pre`, or a `take/drop` slice of it) belongs ONLY
+                // to the sret-return model, not to an object out-buffer
+                // post-state model like `keyStoreProvisionPost`. Excluding
+                // it keeps that model's arity equal to the C-param list.
+                cryptol_args
+                    .iter()
+                    .filter(|a| !a.contains("preBytes") && !a.contains("result_pre"))
+                    .cloned()
+                    .collect()
+            });
         let call = if args.is_empty() {
             fn_name.clone()
         } else {
@@ -121,10 +132,21 @@ pub(super) fn emit_postcondition_and_close(
             out.push_str("    // this assertion. The auto-derived call uses only the target's\n");
             out.push_str("    // own parameters and is almost certainly incomplete.\n");
         }
-        out.push_str(&format!(
-            "    llvm_points_to result_ptr (llvm_term {{{{ {} }}}});\n",
-            cryptol_return,
-        ));
+        // Partial-sret postcondition: when `sret_assert_bytes = N` is
+        // configured, read only the first N bytes (the model returns
+        // `[N][8]`) so trailing bytes the callee leaves undefined — e.g.
+        // a `std::optional`'s padding filled by a `memcpy` from an
+        // uninitialized source — are never read (no "Error during memory
+        // load"). Otherwise assert the whole aggregate.
+        match buffer_overrides.sret_assert_bytes {
+            Some(n) => out.push_str(&format!(
+                "    llvm_points_to_at_type result_ptr (llvm_array {n} (llvm_int 8)) \
+                 (llvm_term {{{{ {cryptol_return} }}}});\n",
+            )),
+            None => out.push_str(&format!(
+                "    llvm_points_to result_ptr (llvm_term {{{{ {cryptol_return} }}}});\n",
+            )),
+        }
     } else if is_void_return {
         out.push_str("    // Void return — no llvm_return to emit.\n");
         out.push_str(&format!(

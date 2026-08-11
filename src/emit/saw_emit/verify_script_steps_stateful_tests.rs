@@ -60,6 +60,7 @@ fn emit_equiv_spec_body_supports_auto_out_buffer_for_this() {
         &[],
         &[],
         &[],
+        &[],
     )
     .unwrap();
 
@@ -153,6 +154,7 @@ fn emit_equiv_spec_body_emits_cryptol_precondition_call() {
         &[],
         &["activate_pre=x".into()],
         &["activate_pre".into()],
+        &[],
     )
     .unwrap();
 
@@ -233,6 +235,7 @@ fn emit_equiv_spec_body_supports_named_struct_out_buffer() {
         &[],
         &["k=struct:EnrollmentKey".into()],
         &["k=enroll_key_post".into()],
+        &[],
         &[],
         &[],
         &[],

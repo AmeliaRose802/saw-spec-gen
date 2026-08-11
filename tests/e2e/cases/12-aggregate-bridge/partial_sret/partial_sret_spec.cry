@@ -1,0 +1,11 @@
+// Cryptol model for the partial_sret case. make_rec returns a 16-byte
+// Rec16 by sret but only its first 4 bytes (`a = x + 1`) are meaningful;
+// the trailing 12 bytes are uninitialized. The model returns just those
+// 4 bytes (little-endian, matching the LLVM store), and
+// `sret_assert_bytes = 4` (in saw-spec-gen.toml) makes the tool assert
+// only that prefix via `llvm_points_to_at_type`.
+
+module partial_sret_spec where
+
+make_rec_ret : [32] -> [4][8]
+make_rec_ret x = reverse (split (x + 1))

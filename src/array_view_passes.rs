@@ -362,7 +362,7 @@ mod tests {
     fn infers_mutable_receiver_as_auto_out_buffer() {
         let (target_fn, mut target_spec) = receiver_target(crate::constraints::Mutability::Mutable);
         let mut overrides =
-            BufferOverrides::from_cli(&[], &[], &["this=activate_post".into()], &[], &[], &[])
+            BufferOverrides::from_cli(&[], &[], &["this=activate_post".into()], &[], &[], &[], &[])
                 .unwrap();
 
         apply_receiver_state_inference(&mut target_spec, &target_fn, &mut overrides).unwrap();
@@ -390,7 +390,7 @@ mod tests {
         let (target_fn, mut target_spec) =
             receiver_target(crate::constraints::Mutability::Readonly);
         let mut overrides =
-            BufferOverrides::from_cli(&[], &[], &["this=activate_post".into()], &[], &[], &[])
+            BufferOverrides::from_cli(&[], &[], &["this=activate_post".into()], &[], &[], &[], &[])
                 .unwrap();
 
         let err = apply_receiver_state_inference(&mut target_spec, &target_fn, &mut overrides)
@@ -447,7 +447,7 @@ mod tests {
             referenced_globals: vec![],
         };
         let mut overrides =
-            BufferOverrides::from_cli(&[], &[], &["this=activate_post".into()], &[], &[], &[])
+            BufferOverrides::from_cli(&[], &[], &["this=activate_post".into()], &[], &[], &[], &[])
                 .unwrap();
 
         let err = apply_receiver_state_inference(&mut target_spec, &target_fn, &mut overrides)
