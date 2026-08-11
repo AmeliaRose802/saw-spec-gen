@@ -16,11 +16,18 @@
 
 .PARAMETER Tag
     One or more tag values to filter the manifest by (case-insensitive).
-    Defaults to the suite's standard tag set (everything except
-    `box_allocator`, which is known UNKNOWN).
+    When omitted, all stable cases run (every tag except the research
+    tags listed in `$researchTags`, currently just `box_allocator`).
 
 .PARAMETER All
-    Run every case in the manifest, regardless of tag.
+    Run every case in the manifest including research/known-UNKNOWN tags.
+    Combine with -Exclude to skip specific tags.
+
+.PARAMETER Exclude
+    One or more tag values to exclude from the run (case-insensitive).
+    Has no effect when -Tag is supplied. When combined with -All, the
+    named tags are excluded even though -All would otherwise include them.
+    Example: -All -Exclude box_allocator
 
 .PARAMETER List
     Print the cases that would run, then exit 0.
@@ -41,6 +48,7 @@
 param(
     [string[]]$Tag,
     [switch]$All,
+    [string[]]$Exclude,
     [switch]$List,
     [string]$ManifestPath
 )
@@ -77,35 +85,32 @@ if (-not $cases -or $cases.Count -eq 0) {
     Write-Error "No cases found in $ManifestPath"
 }
 
-# Default tag set: everything except known-UNKNOWN research cases.
-$defaultTags = @(
-    'cpp_havoc'
-    'cpp_overrides'
-    'cpp_throws'
-    'rust_havoc'
-    'bounded_loop'
-    'csep590b_c04'
-    'rust_equiv'
-    'rust_adversarial'
-    'string_ops'
-    'strings'
-    'cryptol_len_bind'
-    'int_ops'
-        'string_content'
-    'aggregate_bridge'
-)
-if ($All) {
-    $selected = $cases
-} else {
-    $tagFilter = if ($Tag) { $Tag } else { $defaultTags }
-    $tagSet    = New-Object System.Collections.Generic.HashSet[string] (
-        ,[string[]]($tagFilter | ForEach-Object { $_.ToLowerInvariant() })
+# Research / known-UNKNOWN tags excluded from the default (no-arg) run.
+$researchTags = @('box_allocator')
+
+if ($Tag) {
+    # Explicit tag filter: run exactly those tags, no exclusions applied.
+    $tagSet   = New-Object System.Collections.Generic.HashSet[string] (
+        ,[string[]]($Tag | ForEach-Object { $_.ToLowerInvariant() })
     )
-    $selected  = @($cases | Where-Object { $tagSet.Contains($_.Tag.ToLowerInvariant()) })
+    $selected = @($cases | Where-Object { $tagSet.Contains($_.Tag.ToLowerInvariant()) })
+} else {
+    # No explicit tag filter: run all cases minus excluded tags.
+    # Without -All, research tags are excluded automatically; -Exclude adds more.
+    $builtinExclude = if ($All) { @() } else { $researchTags }
+    $allExcludes    = if ($Exclude) { @($builtinExclude) + $Exclude } else { $builtinExclude }
+    $excludeSet     = New-Object System.Collections.Generic.HashSet[string] (
+        ,[string[]]($allExcludes | ForEach-Object { $_.ToLowerInvariant() })
+    )
+    $selected = @($cases | Where-Object { -not $excludeSet.Contains($_.Tag.ToLowerInvariant()) })
 }
 
 if ($selected.Count -eq 0) {
-    Write-Error "No cases match the requested tags: $($Tag -join ',')"
+    if ($Tag) {
+        Write-Error "No cases match the requested tags: $($Tag -join ',')"
+    } else {
+        Write-Error "No cases found after applying exclusions."
+    }
 }
 
 # ── Helpers ────────────────────────────────────────────────────────────────

@@ -2,6 +2,7 @@
 //! 500-non-whitespace-line limit.
 
 use crate::clang_ast;
+use crate::constraints;
 use crate::saw_emit;
 use anyhow::Result;
 use std::path::Path;
@@ -109,4 +110,30 @@ pub(crate) fn emit_spec_only_result(
         output.join("result.json").display(),
     );
     Ok(())
+}
+
+/// Build the list of mangled symbol names that the AST-derived override
+/// pipeline already covers, so the bitcode scan doesn't double-emit them.
+///
+/// STL functional symbols (`resize`, `size`, `operator[]`, …) are
+/// intentionally excluded: the experimental-spec loop above emits a
+/// generic havoc spec for them using incorrect types (pointer parameter
+/// instead of the correct value parameter). Excluding them here lets
+/// the bitcode scan emit the correct curated functional model instead.
+pub(crate) fn build_already_covered(
+    external_calls_owned: &[constraints::SpecConstraint],
+) -> Vec<String> {
+    external_calls_owned
+        .iter()
+        .filter_map(|s| {
+            let name = s
+                .mangled_name
+                .clone()
+                .or_else(|| Some(s.function_name.clone()))?;
+            if saw_emit::is_stl_functional(&name) {
+                return None;
+            }
+            Some(name)
+        })
+        .collect()
 }

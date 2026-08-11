@@ -25,8 +25,12 @@ Three pipeline fixes land together to make this reachable by SAW:
     component so the two names match.
 
 The Cryptol spec deliberately returns all-zero bytes, which is wrong:
-get_key always writes has_value=1 when id != 0. SAW executes the
-function symbolically and finds the counterexample.
+get_key always writes non-zero data (id, flags, has_value=1), so SAW
+executes the function symbolically and finds a counterexample.
+
+The implementation always returns a value (no nullopt branch) to keep
+the -O0 IR straightforward: a single constructor call chain, no
+invoke/unwind paths in the target function body.
 
 Expected: DISPROVED.
 */
@@ -45,9 +49,8 @@ namespace proto {
 }  // namespace proto
 
 // Returns std::optional<proto::Key> via sret.
+// Always constructs a value (no nullopt path) so the -O0 IR stays
+// simple: one constructor call, no invoke/unwind in the function body.
 std::optional<proto::Key> get_key(uint32_t id) {
-    if (id == 0) {
-        return std::nullopt;
-    }
     return proto::Key{id, 1u, 0u, 0u};
 }

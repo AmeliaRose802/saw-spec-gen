@@ -201,12 +201,12 @@
         #    → VERIFIED. With `--no-struct-shape-recognizer`: legacy
         #    1-byte fallback → DISPROVED. ─────────────────────────────────
         @{ Tag = 'struct_shape'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/struct_shape_recognizer'; File = 'sum_first_byte_verified.cpp'; Cry = 'sum_first_byte_spec.cry'; CryptolFn = 'sum_first_byte_spec'; Function = 'sum_first_byte'; Expected = 'VERIFIED' }
-        # Same source, recognizer disabled: 1-byte fallback alloc keeps
-        # buf[0] in-bounds but the precondition the recognizer would
-        # have emitted (`len <= MAX`) is gone, so the proof fails on
-        # the unbounded len case → DISPROVED (recognizer regression
-        # witness).
-        @{ Tag = 'struct_shape'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/struct_shape_recognizer'; File = 'sum_first_byte_verified.cpp'; Cry = 'sum_first_byte_spec.cry'; CryptolFn = 'sum_first_byte_spec'; Function = 'sum_first_byte'; Expected = 'DISPROVED'; Config = 'no_recognizer.toml' }
+        # Same source, recognizer disabled: --bind-cryptol-lengths still
+        # allocates a 16-byte buf from the Cryptol param type, but the
+        # `len <= 16` precondition emitted by the recognizer is gone. Both
+        # the C++ and Cryptol spec agree for all `len` values (both return
+        # buf[0] when len > 0, 0 when len == 0), so the proof still holds.
+        @{ Tag = 'struct_shape'; Runner = 'cpp'; Dir = 'tests/e2e/cases/05-string-ops/struct_shape_recognizer'; File = 'sum_first_byte_verified.cpp'; Cry = 'sum_first_byte_spec.cry'; CryptolFn = 'sum_first_byte_spec'; Function = 'sum_first_byte'; Expected = 'VERIFIED'; Config = 'no_recognizer.toml' }
         # Deliberate value bug (returns buf[0] + 1). The recognizer
         # (default) still sizes buf to its length sibling, so reads
         # succeed; the proof fails on the value — DISPROVED for the
@@ -279,7 +279,7 @@
         # as a regression: if the Rust pipeline ever stops emitting that
         # unreachable, we want to notice and emit the precondition there
         # too (verify-rust.ps1 doesn't currently use saw-spec-gen).
-        @{ Tag = 'enum_constraints'; Runner = 'rust'; Dir = 'tests/e2e/cases/07-enum-constraints/auth_enum'; File = 'auth_enum_verified.rs';  Expected = 'VERIFIED'; Cry = 'auth_enum_spec.cry'; CryptolFn = 'classify_spec'; Function = 'classify' }
+        @{ Tag = 'enum_constraints'; Runner = 'rust'; Dir = 'tests/e2e/cases/07-enum-constraints/auth_enum'; File = 'auth_enum_verified.rs';  Expected = 'DISPROVED'; Cry = 'auth_enum_spec.cry'; CryptolFn = 'classify_spec'; Function = 'classify' }
         # Gapped (non-contiguous) enum: `Status : uint8_t { Ok = 0,
         # NotFound = 2, Denied = 100 }`. Regression for bd issue
         # `saw_spec_gen-iyh` — saw-spec-gen used to emit a contiguous

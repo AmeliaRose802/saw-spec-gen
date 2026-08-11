@@ -348,6 +348,7 @@ fn derive_return_constraint(ty: &TypeInfo) -> ReturnConstraint {
     //   inserts a `result_ptr` arg rather than silently dropping it.
     let is_sret = match ty {
         TypeInfo::Struct { .. } => true,
+        TypeInfo::ByteArray(_) => true,
         TypeInfo::Opaque { size_bytes, .. } if *size_bytes > 8 => true,
         TypeInfo::Opaque {
             size_bytes: 0,

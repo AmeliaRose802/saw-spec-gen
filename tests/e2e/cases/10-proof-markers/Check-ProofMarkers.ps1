@@ -21,7 +21,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..' '..')).Path
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..' '..' '..')).Path
 $parser   = Join-Path $repoRoot 'scripts' 'Parse-PropertyLog.ps1'
 
 if (-not (Test-Path -LiteralPath $parser)) {
