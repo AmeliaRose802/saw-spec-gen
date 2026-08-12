@@ -632,18 +632,19 @@
            Function = 'wrap_hmac' }
 
         # ── 13-compositional ─────────────────────────────────────────────────
-        # Compositional contract overrides (assume-guarantee). `double_it` is a
-        # cross-TU callee present only as a `declare`. WITH the compose config
-        # its proven Cryptol contract is assumed via llvm_unsafe_assume_spec →
-        # `double_plus_one` VERIFIES. WITHOUT it, `double_it` is modeled as an
-        # unspecified havoc extern → the same function is DISPROVED. The pair
-        # pins that B's correctness is recoverable only by composing A's proven
-        # contract. See docs/25-compositional-contract-overrides.md.
+        # AUTOMATIC compositional contract overrides (assume-guarantee), no
+        # config. `double_it` is a cross-TU callee present only as a `declare`;
+        # saw-spec-gen discovers its Cryptol contract (`double_it_spec`) by the
+        # `<name>_spec` convention and assumes it via llvm_unsafe_assume_spec.
+        # verified: caller (double_it(x)+1) proves ONLY because the contract is
+        # composed (with the default havoc model it would fail). disproved:
+        # caller adds +2 instead of +1 → DISPROVED even with the contract
+        # applied (non-vacuous). See docs/25-compositional-contract-overrides.md.
         @{ Tag = 'compositional'; Runner = 'cpp';
            Dir = 'tests/e2e/cases/13-compositional/double_plus_one';
            File = 'double_plus_one_verified.cpp'; Expected = 'VERIFIED';
            Cry = 'double_plus_one_spec.cry'; CryptolFn = 'double_plus_one_spec';
-           Function = 'double_plus_one'; Config = 'double_plus_one.toml' }
+           Function = 'double_plus_one' }
         @{ Tag = 'compositional'; Runner = 'cpp';
            Dir = 'tests/e2e/cases/13-compositional/double_plus_one';
            File = 'double_plus_one_disproved.cpp'; Expected = 'DISPROVED';

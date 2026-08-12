@@ -1,19 +1,26 @@
 # Proposal: Compositional contract overrides for cross-TU callees
 
-**Status:** Implemented (per-function `[functions.<caller>].compose` config)
+**Status:** Implemented — **automatic**, no config required
 **Audience:** saw-spec-gen + pretty-specs maintainers
 **Author:** demo_protocol verification
 **Date:** 2026-08-12
 
-> **Implemented.** A cross-TU callee that appears only as a `declare` and
-> has a proven Cryptol contract can be assumed via
+> **Implemented and automatic.** saw-spec-gen discovers cross-TU callees
+> that appear only as a `declare` and, when the Cryptol spec defines a
+> matching contract (by the existing `<name>` / `<name>_spec` naming
+> convention, e.g. callee `double_it` ↔ `double_it_spec`), installs that
+> contract via `llvm_unsafe_assume_spec` instead of the default
+> fresh-return/havoc extern model. **No TOML is needed** — the linkage is
+> inferred from the callgraph and the Cryptol spec.
+>
+> An optional explicit override remains for non-conventional names:
 > `[functions.<caller>].compose = [{ cryptol_fn = "...", symbol = "..." }]`
-> (optionally `function = "..."` for `extern "C"` callees, and
-> `combine_scope = "callgraph"|"explicit"`). The contract is emitted as an
-> `llvm_unsafe_assume_spec` reusing the uninterpreted-primitive machinery.
-> Self-composition (the simplest compose cycle) is rejected. E2E coverage:
-> `tests/e2e/cases/13-compositional/double_plus_one/` (VERIFIED with the
-> contract, DISPROVED with the default havoc extern model).
+> (plus `function = "..."` for `extern "C"` callees and
+> `combine_scope = "callgraph"|"explicit"`). Self-composition (the simplest
+> compose cycle) is rejected. E2E coverage:
+> `tests/e2e/cases/13-compositional/double_plus_one/` — VERIFIED purely by
+> automatic discovery (the caller proves *only* because the contract is
+> composed), DISPROVED when the caller logic is wrong.
 
 ---
 

@@ -74,7 +74,7 @@ fn gather_config_overrides_annotation_symbol() {
         cryptol_fn: "hmacSha256".to_string(),
         symbol: Some("explicit_sym".to_string()),
     }];
-    let merged = gather(&cry, &cfg, "");
+    let merged = gather(&cry, &cfg, "", "", &[]);
     assert_eq!(merged.len(), 1);
     assert_eq!(merged[0].symbol.as_deref(), Some("explicit_sym"));
     std::fs::remove_dir_all(&dir).ok();
@@ -91,7 +91,7 @@ fn gather_appends_config_only_entry() {
         cryptol_fn: "aead".to_string(),
         symbol: None,
     }];
-    let merged = gather(&cry, &cfg, "");
+    let merged = gather(&cry, &cfg, "", "", &[]);
     assert_eq!(merged.len(), 1);
     assert_eq!(merged[0].cryptol_fn, "aead");
     std::fs::remove_dir_all(&dir).ok();

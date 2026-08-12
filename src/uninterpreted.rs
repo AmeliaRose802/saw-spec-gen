@@ -153,6 +153,8 @@ pub fn gather(
     cryptol_spec: &Path,
     config_entries: &[UninterpretedEntry],
     ir_text: &str,
+    target_symbol: &str,
+    all_functions: &[crate::constraints::FunctionInfo],
 ) -> Vec<UninterpretedEntry> {
     let text = std::fs::read_to_string(cryptol_spec).unwrap_or_default();
     let mut merged = parse_annotations(&text);
@@ -165,7 +167,27 @@ pub fn gather(
             merged.push(cfg.clone());
         }
     }
-    filter_by_symbol_presence(merged, ir_text)
+    let mut merged = filter_by_symbol_presence(merged, ir_text);
+    // Automatic compositional-contract discovery: bind any declare-only
+    // cross-TU callee that has a matching Cryptol contract, with no
+    // config. Skip symbols already covered by an explicit annotation or
+    // `[[uninterpreted]]`/`compose` entry.
+    let symbol_to_source: std::collections::HashMap<String, String> = all_functions
+        .iter()
+        .filter_map(|f| f.mangled_name.clone().map(|m| (m, f.name.clone())))
+        .collect();
+    for e in crate::compose_auto::auto_compose_entries(
+        cryptol_spec,
+        ir_text,
+        target_symbol,
+        &symbol_to_source,
+    ) {
+        let sym = e.resolved_symbol().to_string();
+        if !merged.iter().any(|m| m.resolved_symbol() == sym) {
+            merged.push(e);
+        }
+    }
+    merged
 }
 
 /// Drop entries whose implementation symbol is absent from the target

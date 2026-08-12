@@ -6,6 +6,28 @@ use crate::saw_emit;
 use anyhow::Result;
 use std::path::Path;
 
+/// Gather uninterpreted-primitive contracts (`@uninterpreted` annotations
+/// and `[[uninterpreted]]` config) together with auto-discovered
+/// compositional contracts for declare-only cross-TU callees, then emit
+/// the combined `llvm_unsafe_assume_spec` block. Extracted from
+/// [`super::gen_verify::run`] to keep that file under the line limit.
+pub(crate) fn gather_and_emit_uninterpreted(
+    cryptol_spec: &Path,
+    uninterpreted_cfg: &[crate::uninterpreted::UninterpretedEntry],
+    ir_text: &str,
+    target_symbol: &str,
+    all_functions: &[crate::constraints::FunctionInfo],
+) -> crate::uninterpreted::UninterpretedBlock {
+    let entries = crate::uninterpreted::gather(
+        cryptol_spec,
+        uninterpreted_cfg,
+        ir_text,
+        target_symbol,
+        all_functions,
+    );
+    crate::uninterpreted::emit_uninterpreted_block(&entries, cryptol_spec)
+}
+
 /// Warn (on stderr) about interfaces referenced by class fields but
 /// missing from the merged clang AST. A missing interface makes
 /// `extract_virtual_methods` skip its vtable stubs, so the generated

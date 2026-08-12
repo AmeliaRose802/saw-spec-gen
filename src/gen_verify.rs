@@ -441,16 +441,11 @@ pub fn run(
         resolve_spec_types_quiet(spec, &ir_struct_sizes);
     }
 
-    // Bitcode-driven extern override scan. The AST pipeline above only
-    // sees declarations the path filter kept; anything filtered as a
-    // system header (e.g. `printf` in MSVC's `<cstdio>`) is invisible
-    // even when the TU actually calls it, and SAW then aborts on
-    // `internal: error: in printf`. A second pass on the LLVM IR text
-    // covers declare-only externs and variadic functions whose body
-    // uses `llvm.va_*` intrinsics Crucible-LLVM can't simulate.
-    // AST-derived overrides take precedence — we pass their symbols
-    // as `already_covered` so the bitcode scan doesn't double-emit.
-    // See `src/emit/saw_emit/bitcode_overrides.rs` for the contract.
+    // Bitcode-driven extern override scan. The AST pipeline only sees
+    // declarations the path filter kept; system-header callees (e.g.
+    // `printf`) and variadic bodies using `llvm.va_*` are covered by a
+    // second pass on the LLVM IR text. AST-derived overrides take
+    // precedence via `already_covered`. See bitcode_overrides.rs.
     let already_covered: Vec<String> = external_calls_owned
         .iter()
         .filter_map(|s| {
@@ -467,12 +462,14 @@ pub fn run(
         &container_catalog,
     );
 
-    // Uninterpreted-primitive contracts: `@uninterpreted` annotations in
-    // the Cryptol spec plus `[[uninterpreted]]` config entries become
-    // `llvm_unsafe_assume_spec` bindings spliced into the verify script.
-    let uninterp_entries = crate::uninterpreted::gather(cryptol_spec, uninterpreted_cfg, &ir_text);
-    let uninterpreted =
-        crate::uninterpreted::emit_uninterpreted_block(&uninterp_entries, cryptol_spec);
+    // Uninterpreted + auto-composed cross-TU contracts (assume-guarantee).
+    let uninterpreted = gather_and_emit_uninterpreted(
+        cryptol_spec,
+        uninterpreted_cfg,
+        &ir_text,
+        &target_mangled,
+        &all_functions,
+    );
 
     saw_emit::emit_verification_script(
         bitcode,
@@ -536,5 +533,6 @@ pub fn run(
 }
 
 use crate::gen_verify_helpers::{
-    assemble_and_link_stubs, emit_spec_only_result, warn_missing_interfaces,
+    assemble_and_link_stubs, emit_spec_only_result, gather_and_emit_uninterpreted,
+    warn_missing_interfaces,
 };
