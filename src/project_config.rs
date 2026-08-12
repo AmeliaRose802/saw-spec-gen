@@ -29,7 +29,7 @@
 //! max_len_precond  = ["nm=4", "nb=4"]
 //! ```
 
-use crate::uninterpreted::UninterpretedEntry;
+use crate::uninterpreted::{ComposeEntry, UninterpretedEntry};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -108,6 +108,22 @@ pub struct FunctionConfig {
     /// bytes (e.g. `std::optional` padding) unconstrained.
     #[serde(default)]
     pub sret_assert_bytes: Option<usize>,
+
+    /// `[[functions.<caller>.compose]]` blocks: cross-TU callees to
+    /// override with their proven Cryptol contracts (assume-guarantee)
+    /// instead of the default fresh-return/havoc extern model. See
+    /// [`crate::uninterpreted::ComposeEntry`] and
+    /// `docs/25-compositional-contract-overrides.md`.
+    #[serde(default)]
+    pub compose: Vec<ComposeEntry>,
+
+    /// Per-function `combine_scope = "callgraph"|"explicit"`: how to make
+    /// composed callee symbols available. `callgraph` (default) relies on
+    /// the caller module already carrying the callee as a `declare`, which
+    /// is sufficient for `llvm_unsafe_assume_spec`. Reserved for future
+    /// callgraph-scoped module linking.
+    #[serde(default)]
+    pub combine_scope: Option<String>,
 }
 
 /// Deserialised contents of a `saw-spec-gen.toml` file.
@@ -290,6 +306,8 @@ impl ProjectConfig {
                 .and_then(|c| c.sret_assert_bytes)
                 .or(self.sret_assert_bytes),
             uninterpreted: self.uninterpreted.clone(),
+            compose: f.map(|c| c.compose.clone()).unwrap_or_default(),
+            combine_scope: f.and_then(|c| c.combine_scope.clone()),
         }
     }
 }
@@ -324,6 +342,11 @@ pub struct MergedConfig {
     pub sret_assert_bytes: Option<usize>,
     /// `[[uninterpreted]]` entries (config-only; no CLI equivalent).
     pub uninterpreted: Vec<UninterpretedEntry>,
+    /// Per-function `compose` entries: cross-TU callee contracts
+    /// (assume-guarantee). Config-only; no CLI equivalent.
+    pub compose: Vec<ComposeEntry>,
+    /// Per-function `combine_scope`. Config-only; no CLI equivalent.
+    pub combine_scope: Option<String>,
 }
 
 #[cfg(test)]
@@ -429,6 +452,41 @@ mod tests {
         );
         // A function with no table still inherits the global precondition.
         assert_eq!(cfg.apply("other").preconditions, v(&["global_pred"]));
+    }
+
+    #[test]
+    fn compose_parses_and_lowers_to_uninterpreted() {
+        let cfg: ProjectConfig = toml::from_str(
+            r#"
+            [functions.double_plus_one_spec]
+            compose = [{ cryptol_fn = "double_it_spec", symbol = "double_it" }]
+            combine_scope = "callgraph"
+            "#,
+        )
+        .expect("config parses");
+        let merged = cfg.apply("double_plus_one_spec");
+        assert_eq!(merged.combine_scope.as_deref(), Some("callgraph"));
+        assert_eq!(merged.compose.len(), 1);
+        let ov = merged.compose[0].to_uninterpreted();
+        assert_eq!(ov.cryptol_fn, "double_it_spec");
+        assert_eq!(ov.resolved_symbol(), "double_it");
+        // A function with no table gets no compose entries.
+        assert!(cfg.apply("other").compose.is_empty());
+    }
+
+    #[test]
+    fn compose_symbol_defaults_to_function_then_cryptol_fn() {
+        let by_function = ComposeEntry {
+            cryptol_fn: "f_spec".into(),
+            function: Some("f".into()),
+            ..Default::default()
+        };
+        assert_eq!(by_function.resolved_symbol(), "f");
+        let by_name = ComposeEntry {
+            cryptol_fn: "g_spec".into(),
+            ..Default::default()
+        };
+        assert_eq!(by_name.resolved_symbol(), "g_spec");
     }
 
     #[test]
