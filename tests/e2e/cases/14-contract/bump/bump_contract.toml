@@ -1,0 +1,11 @@
+# Single-contract multi-effect binding for `bump` (docs/27).
+#
+# `bump` is a record-returning contract `{ ret, outPost }`. Bind the
+# return value to the `ret` field and the `out` out-buffer post-state to
+# the `outPost` field, both projected from the one contract call
+# `(bump out_pre)`.
+
+[functions.bump]
+out_buffer_param = ["out=i32"]
+contract_return  = "ret"
+contract_ensures = ["out=outPost"]

@@ -364,7 +364,7 @@ pub fn gen_verify_cmd(
     let buffer_overrides = crate::buffer_overrides::BufferOverrides::from_cli(
         &merged.in_buffer_size,
         &merged.out_buffer_param,
-        &merged.cryptol_fn_out,
+        &merged.cryptol_fn_out_with_contract(&cryptol_fn)?,
         &merged.max_len_precond,
         &merged.cryptol_arg_order,
         &merged.cryptol_fn_pre,
@@ -372,6 +372,7 @@ pub fn gen_verify_cmd(
     )?;
     let buffer_overrides = crate::buffer_overrides::BufferOverrides {
         sret_assert_bytes: merged.sret_assert_bytes,
+        return_projection: merged.contract_return.clone(),
         ..buffer_overrides
     };
     // Compositional contract overrides (assume-guarantee): lower each

@@ -124,6 +124,20 @@ pub struct FunctionConfig {
     /// callgraph-scoped module linking.
     #[serde(default)]
     pub combine_scope: Option<String>,
+
+    /// Single-contract model (see docs/27): when set, the return value is
+    /// sourced from a *field* of the record returned by the Cryptol
+    /// contract function (whose name is the `--cryptol-fn`), i.e.
+    /// `llvm_return ((<cryptol_fn> args).<contract_return>)`. Lets one
+    /// record-returning contract carry every effect of a function.
+    #[serde(default)]
+    pub contract_return: Option<String>,
+
+    /// Single-contract post-state bindings: each `REGION=FIELD` binds the
+    /// out-buffer `REGION`'s post-state to `(<cryptol_fn> args).FIELD`.
+    /// `REGION` must also be declared via `out_buffer_param`. See docs/27.
+    #[serde(default)]
+    pub contract_ensures: Vec<String>,
 }
 
 /// Deserialised contents of a `saw-spec-gen.toml` file.
@@ -198,6 +212,16 @@ pub struct ProjectConfig {
     /// `@uninterpreted` annotations are the only declaration surfaces.
     #[serde(default)]
     pub uninterpreted: Vec<UninterpretedEntry>,
+
+    /// Global single-contract return-field binding. See
+    /// [`FunctionConfig::contract_return`].
+    #[serde(default)]
+    pub contract_return: Option<String>,
+
+    /// Global single-contract post-state bindings. See
+    /// [`FunctionConfig::contract_ensures`].
+    #[serde(default)]
+    pub contract_ensures: Vec<String>,
 }
 
 impl ProjectConfig {
@@ -308,6 +332,13 @@ impl ProjectConfig {
             uninterpreted: self.uninterpreted.clone(),
             compose: f.map(|c| c.compose.clone()).unwrap_or_default(),
             combine_scope: f.and_then(|c| c.combine_scope.clone()),
+            contract_return: f
+                .and_then(|c| c.contract_return.clone())
+                .or_else(|| self.contract_return.clone()),
+            contract_ensures: merged_vec(
+                f.map_or(&[][..], |c| &c.contract_ensures),
+                &self.contract_ensures,
+            ),
         }
     }
 }
@@ -347,168 +378,29 @@ pub struct MergedConfig {
     pub compose: Vec<ComposeEntry>,
     /// Per-function `combine_scope`. Config-only; no CLI equivalent.
     pub combine_scope: Option<String>,
+    /// Single-contract return-field binding (docs/27). Config-only.
+    pub contract_return: Option<String>,
+    /// Single-contract post-state bindings `REGION=FIELD` (docs/27).
+    pub contract_ensures: Vec<String>,
+}
+
+impl MergedConfig {
+    /// Full `--cryptol-fn-out` list, appending entries desugared from
+    /// `contract_ensures`: each `REGION=FIELD` becomes
+    /// `REGION=<cryptol_fn>.FIELD`, so one record-returning contract
+    /// supplies every out-region post-state via field projection.
+    pub fn cryptol_fn_out_with_contract(&self, cryptol_fn: &str) -> Result<Vec<String>> {
+        let mut v = self.cryptol_fn_out.clone();
+        for e in &self.contract_ensures {
+            let (region, field) = e.split_once('=').ok_or_else(|| {
+                anyhow::anyhow!("contract_ensures entry must be REGION=FIELD, got {e:?}")
+            })?;
+            v.push(format!("{}={}.{}", region.trim(), cryptol_fn, field.trim()));
+        }
+        Ok(v)
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn v(items: &[&str]) -> Vec<String> {
-        items.iter().map(|s| s.to_string()).collect()
-    }
-
-    #[test]
-    fn per_function_table_parses_from_toml() {
-        let cfg: ProjectConfig = toml::from_str(
-            r#"
-            in_buffer_size = ["g=1"]
-
-            [functions.canonicalize_lp]
-            in_buffer_size   = ["m=4", "b=4"]
-            out_buffer_param = ["out=10"]
-            cryptol_fn_out   = ["out=canonicalize_lp_post"]
-            max_len_precond  = ["nm=4", "nb=4"]
-            "#,
-        )
-        .expect("config parses");
-
-        let f = cfg.functions.get("canonicalize_lp").expect("table present");
-        assert_eq!(f.in_buffer_size, v(&["m=4", "b=4"]));
-        assert_eq!(f.out_buffer_param, v(&["out=10"]));
-        assert_eq!(f.cryptol_fn_out, v(&["out=canonicalize_lp_post"]));
-        assert_eq!(f.max_len_precond, v(&["nm=4", "nb=4"]));
-    }
-
-    #[test]
-    fn apply_concatenates_per_function_then_global() {
-        let mut cfg = ProjectConfig {
-            in_buffer_size: v(&["global=2"]),
-            ..Default::default()
-        };
-        cfg.functions.insert(
-            "canonicalize_lp".to_string(),
-            FunctionConfig {
-                in_buffer_size: v(&["m=4", "b=4"]),
-                out_buffer_param: v(&["out=10"]),
-                cryptol_fn_out: v(&["out=canonicalize_lp_post"]),
-                ..Default::default()
-            },
-        );
-
-        let merged = cfg.apply("canonicalize_lp");
-
-        // per-function, then global.
-        assert_eq!(merged.in_buffer_size, v(&["m=4", "b=4", "global=2"]));
-        assert_eq!(merged.out_buffer_param, v(&["out=10"]));
-        assert_eq!(merged.cryptol_fn_out, v(&["out=canonicalize_lp_post"]));
-    }
-
-    #[test]
-    fn apply_falls_back_to_global_when_function_absent() {
-        let cfg = ProjectConfig {
-            out_buffer_param: v(&["g=1"]),
-            ..Default::default()
-        };
-        let merged = cfg.apply("no_such_fn");
-        assert_eq!(merged.out_buffer_param, v(&["g=1"]));
-    }
-
-    #[test]
-    fn sret_assert_bytes_parses_and_per_function_wins() {
-        let cfg: ProjectConfig = toml::from_str(
-            r#"
-            sret_assert_bytes = 8
-
-            [functions.provision_ret]
-            sret_assert_bytes = 65
-            "#,
-        )
-        .expect("config parses");
-        // Per-function value wins over the global default.
-        assert_eq!(cfg.apply("provision_ret").sret_assert_bytes, Some(65));
-        // A function with no table falls back to the global value.
-        assert_eq!(cfg.apply("other").sret_assert_bytes, Some(8));
-    }
-
-    #[test]
-    fn preconditions_parse_and_merge_per_function_then_global() {
-        let cfg: ProjectConfig = toml::from_str(
-            r#"
-            preconditions = ["global_pred"]
-
-            [functions.activate_ret]
-            preconditions = ["(this_pre @ 128) <= 1", "(this_pre @ 144) <= 1"]
-            "#,
-        )
-        .expect("config parses");
-        let merged = cfg.apply("activate_ret");
-        assert_eq!(
-            merged.preconditions,
-            v(&[
-                "(this_pre @ 128) <= 1",
-                "(this_pre @ 144) <= 1",
-                "global_pred"
-            ]),
-        );
-        // A function with no table still inherits the global precondition.
-        assert_eq!(cfg.apply("other").preconditions, v(&["global_pred"]));
-    }
-
-    #[test]
-    fn compose_parses_and_lowers_to_uninterpreted() {
-        let cfg: ProjectConfig = toml::from_str(
-            r#"
-            [functions.double_plus_one_spec]
-            compose = [{ cryptol_fn = "double_it_spec", symbol = "double_it" }]
-            combine_scope = "callgraph"
-            "#,
-        )
-        .expect("config parses");
-        let merged = cfg.apply("double_plus_one_spec");
-        assert_eq!(merged.combine_scope.as_deref(), Some("callgraph"));
-        assert_eq!(merged.compose.len(), 1);
-        let ov = merged.compose[0].to_uninterpreted();
-        assert_eq!(ov.cryptol_fn, "double_it_spec");
-        assert_eq!(ov.resolved_symbol(), "double_it");
-        // A function with no table gets no compose entries.
-        assert!(cfg.apply("other").compose.is_empty());
-    }
-
-    #[test]
-    fn compose_symbol_defaults_to_function_then_cryptol_fn() {
-        let by_function = ComposeEntry {
-            cryptol_fn: "f_spec".into(),
-            function: Some("f".into()),
-            ..Default::default()
-        };
-        assert_eq!(by_function.resolved_symbol(), "f");
-        let by_name = ComposeEntry {
-            cryptol_fn: "g_spec".into(),
-            ..Default::default()
-        };
-        assert_eq!(by_name.resolved_symbol(), "g_spec");
-    }
-
-    #[test]
-    fn boolean_true_from_any_layer_wins() {
-        let mut cfg = ProjectConfig::default();
-        cfg.functions.insert(
-            "f".to_string(),
-            FunctionConfig {
-                spec_only_on_missing: Some(true),
-                ..Default::default()
-            },
-        );
-        // per-function true, no global.
-        let merged = cfg.apply("f");
-        assert!(merged.spec_only_on_missing);
-
-        // global true reaches an unrelated function.
-        let cfg2 = ProjectConfig {
-            use_llvm_combine_modules: Some(true),
-            ..Default::default()
-        };
-        let merged2 = cfg2.apply("other");
-        assert!(merged2.use_llvm_combine_modules);
-    }
-}
+#[path = "project_config_tests.rs"]
+mod tests;

@@ -92,6 +92,14 @@ pub struct BufferOverrides {
     /// so never crash the proof with "Error during memory load". The
     /// model must return `[N][8]`.
     pub sret_assert_bytes: Option<usize>,
+
+    /// Single-contract return projection (docs/27). When `Some(field)`,
+    /// the return assertion is sourced from a field of the record the
+    /// Cryptol contract returns: `llvm_return ((<cryptol_fn> args).field)`
+    /// instead of `llvm_return (<cryptol_fn> args)`. Lets one
+    /// record-returning contract carry the return clause alongside the
+    /// out-region post-state clauses.
+    pub return_projection: Option<String>,
 }
 
 impl BufferOverrides {
