@@ -364,7 +364,7 @@ pub fn gen_verify_cmd(
     let buffer_overrides = crate::buffer_overrides::BufferOverrides::from_cli(
         &merged.in_buffer_size,
         &merged.out_buffer_param,
-        &merged.cryptol_fn_out,
+        &merged.cryptol_fn_out_with_contract(&cryptol_fn)?,
         &merged.max_len_precond,
         &merged.cryptol_arg_order,
         &merged.cryptol_fn_pre,
@@ -372,8 +372,31 @@ pub fn gen_verify_cmd(
     )?;
     let buffer_overrides = crate::buffer_overrides::BufferOverrides {
         sret_assert_bytes: merged.sret_assert_bytes,
+        return_projection: merged.contract_return.clone(),
         ..buffer_overrides
     };
+    // Compositional contract overrides (assume-guarantee): lower each
+    // `[functions.<fn>].compose` entry to an assumed `llvm_unsafe_assume_spec`
+    // contract, reusing the uninterpreted-primitive emission machinery.
+    // Reject self-composition (the simplest compose cycle) — a function
+    // may not assume its own contract while proving itself.
+    if let Some(scope) = merged.combine_scope.as_deref() {
+        if scope != "callgraph" && scope != "explicit" {
+            anyhow::bail!("combine_scope must be \"callgraph\" or \"explicit\", got {scope:?}");
+        }
+    }
+    let mut uninterpreted = merged.uninterpreted.clone();
+    for c in &merged.compose {
+        if c.resolved_symbol() == function || c.cryptol_fn == cryptol_fn {
+            anyhow::bail!(
+                "compose cycle: `{function}` cannot assume its own contract \
+                 (compose entry cryptol_fn={:?} symbol={:?})",
+                c.cryptol_fn,
+                c.resolved_symbol(),
+            );
+        }
+        uninterpreted.push(c.to_uninterpreted());
+    }
     gen_verify::run(
         &ast,
         &bitcode,
@@ -388,7 +411,7 @@ pub fn gen_verify_cmd(
         merged.spec_only_on_missing,
         &buffer_overrides,
         merged.no_struct_shape_recognizer,
-        &merged.uninterpreted,
+        &uninterpreted,
     )
 }
 

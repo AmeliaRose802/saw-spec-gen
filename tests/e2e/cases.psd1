@@ -630,5 +630,45 @@
            Cry = 'sret_sub_callee_bytearray_spec.cry';
            CryptolFn = 'wrap_hmac_spec';
            Function = 'wrap_hmac' }
+
+        # ── 13-compositional ─────────────────────────────────────────────────
+        # AUTOMATIC compositional contract overrides (assume-guarantee), no
+        # config. `double_it` is a cross-TU callee present only as a `declare`;
+        # saw-spec-gen discovers its Cryptol contract (`double_it_spec`) by the
+        # `<name>_spec` convention and assumes it via llvm_unsafe_assume_spec.
+        # verified: caller (double_it(x)+1) proves ONLY because the contract is
+        # composed (with the default havoc model it would fail). disproved:
+        # caller adds +2 instead of +1 → DISPROVED even with the contract
+        # applied (non-vacuous). See docs/25-compositional-contract-overrides.md.
+        @{ Tag = 'compositional'; Runner = 'cpp';
+           Dir = 'tests/e2e/cases/13-compositional/double_plus_one';
+           File = 'double_plus_one_verified.cpp'; Expected = 'VERIFIED';
+           Cry = 'double_plus_one_spec.cry'; CryptolFn = 'double_plus_one_spec';
+           Function = 'double_plus_one' }
+        @{ Tag = 'compositional'; Runner = 'cpp';
+           Dir = 'tests/e2e/cases/13-compositional/double_plus_one';
+           File = 'double_plus_one_disproved.cpp'; Expected = 'DISPROVED';
+           Cry = 'double_plus_one_spec.cry'; CryptolFn = 'double_plus_one_spec';
+           Function = 'double_plus_one' }
+
+        # ── 14-contract ──────────────────────────────────────────────────────
+        # Single-contract multi-effect model (docs/27). `bump` mutates `*out`
+        # AND returns the old value; ONE record-returning Cryptol contract
+        # `bump : [32] -> { ret, outPost }` supplies both clauses via field
+        # projection (return <- .ret, *out post <- .outPost). The model name
+        # matches the C++ symbol so linking/discovery need no name map.
+        # verified: both clauses hold. disproved: caller writes +2 while the
+        # contract's outPost says +1 → the `ensures out` clause is checked and
+        # fails. See docs/27-contract-oriented-multi-effect-model.md.
+        @{ Tag = 'contract'; Runner = 'cpp';
+           Dir = 'tests/e2e/cases/14-contract/bump';
+           File = 'bump_contract_verified.cpp'; Expected = 'VERIFIED';
+           Cry = 'bump_contract_spec.cry'; CryptolFn = 'bump'; Function = 'bump';
+           Config = 'bump_contract.toml' }
+        @{ Tag = 'contract'; Runner = 'cpp';
+           Dir = 'tests/e2e/cases/14-contract/bump';
+           File = 'bump_contract_disproved.cpp'; Expected = 'DISPROVED';
+           Cry = 'bump_contract_spec.cry'; CryptolFn = 'bump'; Function = 'bump';
+           Config = 'bump_contract.toml' }
     )
 }

@@ -25,6 +25,27 @@ pub(super) struct PostconditionCtx<'a> {
     pub auto_out_postconds: &'a [(String, String)],
 }
 
+/// Build a Cryptol call from a function spec plus positional args,
+/// supporting a record-field *projection* suffix (single-contract
+/// model, docs/27): `"base"` → `base a b`, while `"base.field"` →
+/// `(base a b).field`. A plain Cryptol function name never contains a
+/// `.` (field access is the only `.` use), so the split is unambiguous.
+fn build_cryptol_call(fn_spec: &str, args: &[String]) -> String {
+    let (base, proj) = match fn_spec.split_once('.') {
+        Some((b, f)) => (b, Some(f)),
+        None => (fn_spec, None),
+    };
+    let inner = if args.is_empty() {
+        base.to_string()
+    } else {
+        format!("{} {}", base, args.join(" "))
+    };
+    match proj {
+        Some(field) => format!("({inner}).{field}"),
+        None => inner,
+    }
+}
+
 pub(super) fn emit_postcondition_and_close(
     out: &mut String,
     cryptol_fn: &str,
@@ -62,11 +83,7 @@ pub(super) fn emit_postcondition_and_close(
                     .cloned()
                     .collect()
             });
-        let call = if args.is_empty() {
-            fn_name.clone()
-        } else {
-            format!("{} {}", fn_name, args.join(" "))
-        };
+        let call = build_cryptol_call(fn_name, &args);
         out.push_str(&format!(
             "    // Postcondition: *{out_name}_ptr == Cryptol {fn_name}\n",
         ));
@@ -74,7 +91,6 @@ pub(super) fn emit_postcondition_and_close(
             "    llvm_points_to {out_name}_ptr (llvm_term {{{{ {call} }}}});\n",
         ));
     }
-
     // Auto-detected output-buffer postconditions from _Out_writes_ + <param>_post convention.
     for (out_name, fn_name) in ctx.auto_out_postconds {
         let pre_name = format!("{out_name}_pre");
@@ -106,11 +122,15 @@ pub(super) fn emit_postcondition_and_close(
     let cryptol_args_owned: Vec<String> = buffer_overrides
         .cryptol_call_args(cryptol_fn)
         .unwrap_or_else(|| cryptol_args.to_vec());
-    let cryptol_call = if cryptol_args_owned.is_empty() {
-        cryptol_fn.to_string()
-    } else {
-        format!("{} {}", cryptol_fn, cryptol_args_owned.join(" "))
+    // Single-contract model (docs/27): when `return_projection` is set,
+    // source the return value from a field of the record the contract
+    // returns — `(<cryptol_fn> args).<field>` — so one function carries
+    // both the return clause and the out-region post-state clauses.
+    let return_fn_spec = match &buffer_overrides.return_projection {
+        Some(field) => format!("{cryptol_fn}.{field}"),
+        None => cryptol_fn.to_string(),
     };
+    let cryptol_call = build_cryptol_call(&return_fn_spec, &cryptol_args_owned);
     let cryptol_return = cryptol_return_for(&cryptol_call, ctx.return_type);
     let is_void_return = matches!(ctx.return_type, TypeInfo::Void);
 

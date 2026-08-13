@@ -1,0 +1,10 @@
+// Single-contract multi-effect model (docs/27).
+//
+// One record-returning contract for `bump` carries BOTH effects as named
+// fields: the return value (`ret`) and the post-state of `*out`
+// (`outPost`). gen-verify binds `ret` to `llvm_return` and `outPost` to
+// the out-buffer post-state via field projection — no separate
+// `bumpRet` / `bumpPost` functions.
+
+bump : [32] -> { ret : [32], outPost : [32] }
+bump pre = { ret = pre, outPost = pre + 1 }

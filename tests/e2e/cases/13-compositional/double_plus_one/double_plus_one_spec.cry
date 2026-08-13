@@ -1,0 +1,12 @@
+// Cryptol specs for the compositional-contract-override end-to-end case.
+//
+// `double_it_spec` is the proven contract for the cross-TU callee
+// `double_it`; `double_plus_one_spec` is the contract for the caller.
+// The `[functions.double_plus_one_spec].compose` config entry assumes the
+// former while proving the latter (non-circular assume-guarantee).
+
+double_it_spec : [32] -> [32]
+double_it_spec x = x * 2
+
+double_plus_one_spec : [32] -> [32]
+double_plus_one_spec x = x * 2 + 1

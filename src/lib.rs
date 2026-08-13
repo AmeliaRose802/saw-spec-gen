@@ -9,6 +9,7 @@ pub mod array_view_passes;
 pub mod buffer_overrides;
 pub mod collect_results;
 pub mod commands;
+pub mod compose_auto;
 pub mod constraints;
 pub mod dump_types;
 pub mod gen_verify;

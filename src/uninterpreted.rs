@@ -63,6 +63,54 @@ impl UninterpretedEntry {
     }
 }
 
+/// One compositional-contract override (assume-guarantee). A callee `A`
+/// defined in another translation unit appears in the caller's bitcode
+/// only as a `declare`; by default it is modeled as an unspecified
+/// extern (fresh return + havoc frame). When `A` already has a *proven*
+/// Cryptol contract, this entry replaces that maximally-imprecise model
+/// with the contract via `llvm_unsafe_assume_spec` — standard
+/// non-circular assume-guarantee reasoning (`A` is discharged
+/// separately; the caller merely *assumes* its spec).
+///
+/// Declared per-function under `[functions.<caller>].compose`. See
+/// `docs/25-compositional-contract-overrides.md`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ComposeEntry {
+    /// Proven Cryptol contract used as the assumed spec for the callee.
+    pub cryptol_fn: String,
+    /// Explicit implementation symbol (mangled name) of the callee.
+    /// Preferred for C++ callees whose mangled name is known.
+    #[serde(default)]
+    pub symbol: Option<String>,
+    /// Source function name of the callee. Used as the bound symbol when
+    /// no explicit `symbol` is given (correct for `extern "C"` callees
+    /// whose symbol equals the source name).
+    #[serde(default)]
+    pub function: Option<String>,
+}
+
+impl ComposeEntry {
+    /// The implementation symbol to bind, preferring an explicit
+    /// `symbol`, then `function`, then the Cryptol function name.
+    pub fn resolved_symbol(&self) -> &str {
+        self.symbol
+            .as_deref()
+            .or(self.function.as_deref())
+            .unwrap_or(&self.cryptol_fn)
+    }
+
+    /// Lower this compose entry to an [`UninterpretedEntry`]: both emit
+    /// the same `llvm_unsafe_assume_spec` contract, differing only in
+    /// declaration surface (opaque primitive vs. proven cross-TU callee).
+    pub fn to_uninterpreted(&self) -> UninterpretedEntry {
+        UninterpretedEntry {
+            cryptol_fn: self.cryptol_fn.clone(),
+            symbol: Some(self.resolved_symbol().to_string()),
+        }
+    }
+}
+
 /// A SAWScript snippet plus the override handles it defines, ready to be
 /// spliced into a verify script and appended to the `llvm_verify`
 /// override list.
@@ -105,6 +153,8 @@ pub fn gather(
     cryptol_spec: &Path,
     config_entries: &[UninterpretedEntry],
     ir_text: &str,
+    target_symbol: &str,
+    all_functions: &[crate::constraints::FunctionInfo],
 ) -> Vec<UninterpretedEntry> {
     let text = std::fs::read_to_string(cryptol_spec).unwrap_or_default();
     let mut merged = parse_annotations(&text);
@@ -117,7 +167,27 @@ pub fn gather(
             merged.push(cfg.clone());
         }
     }
-    filter_by_symbol_presence(merged, ir_text)
+    let mut merged = filter_by_symbol_presence(merged, ir_text);
+    // Automatic compositional-contract discovery: bind any declare-only
+    // cross-TU callee that has a matching Cryptol contract, with no
+    // config. Skip symbols already covered by an explicit annotation or
+    // `[[uninterpreted]]`/`compose` entry.
+    let symbol_to_source: std::collections::HashMap<String, String> = all_functions
+        .iter()
+        .filter_map(|f| f.mangled_name.clone().map(|m| (m, f.name.clone())))
+        .collect();
+    for e in crate::compose_auto::auto_compose_entries(
+        cryptol_spec,
+        ir_text,
+        target_symbol,
+        &symbol_to_source,
+    ) {
+        let sym = e.resolved_symbol().to_string();
+        if !merged.iter().any(|m| m.resolved_symbol() == sym) {
+            merged.push(e);
+        }
+    }
+    merged
 }
 
 /// Drop entries whose implementation symbol is absent from the target
