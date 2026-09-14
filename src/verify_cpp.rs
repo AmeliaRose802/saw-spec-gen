@@ -4,8 +4,9 @@ mod compile;
 mod counterexample;
 
 use crate::inventory;
+use crate::project_config::MergedConfig;
 use crate::verify_cache::AstCacheContext;
-use crate::verify_result::write_verify_result;
+use crate::verify_result::{write_verify_result, ContractClause, FunctionContract};
 use crate::verify_tools::ToolPaths;
 use anyhow::{bail, Context, Result};
 use compile::{
@@ -56,15 +57,16 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
     // spec-relative auto-discovery). The forked `gen-verify` subprocess
     // does its own config discovery for shaping; this local copy only
     // drives verify-cpp's own soft-exit decision below.
-    let spec_only_on_missing = {
+    let merged_config = {
         let cwd = std::env::current_dir()?;
         match config.as_deref() {
             Some(p) => crate::project_config::ProjectConfig::load(p)?,
             None => crate::project_config::ProjectConfig::discover_for_spec(&cryptol_spec, &cwd)?,
         }
         .apply(&req.cryptol_fn)
-        .spec_only_on_missing
     };
+    let spec_only_on_missing = merged_config.spec_only_on_missing;
+    let contract = function_contract(&req.cryptol_fn, &merged_config)?;
     let include_dirs = req
         .include_dirs
         .iter()
@@ -297,6 +299,7 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
             Some("z3"),
             Some(time_secs),
             impl_file,
+            &contract,
         )?;
         update_inventory(&output_dir)?;
         return Ok(VerifyOutcome { exit_code: 1 });
@@ -315,6 +318,7 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
             Some("z3"),
             Some(time_secs),
             impl_file,
+            &contract,
         )?;
         update_inventory(&output_dir)?;
         return Ok(VerifyOutcome { exit_code: 0 });
@@ -332,6 +336,7 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
         Some("z3"),
         Some(time_secs),
         impl_file,
+        &contract,
     )?;
     update_inventory(&output_dir)?;
     Ok(VerifyOutcome { exit_code: 2 })
@@ -363,6 +368,57 @@ fn update_inventory(output_dir: &Path) -> Result<()> {
     inventory::aggregate_inventory(root, &root.join("implementation_inventory.json"))
 }
 
+/// Describe every SAW assertion as a clause of one implementation-function
+/// contract. Legacy `cryptol_fn_out` bindings remain valid syntax, but their
+/// model functions are recorded only as clause provenance under this contract.
+fn function_contract(cryptol_fn: &str, config: &MergedConfig) -> Result<FunctionContract> {
+    let mut clauses = vec![ContractClause {
+        name: "return".to_string(),
+        assertion: "llvm_return".to_string(),
+        region: None,
+        cryptol_fn: cryptol_fn.to_string(),
+        projection: config.contract_return.as_deref().map(normalize_projection),
+    }];
+    for binding in &config.cryptol_fn_out {
+        let (region, source) = split_binding(binding, "cryptol_fn_out")?;
+        clauses.push(memory_clause(region, source, None));
+    }
+    for binding in &config.contract_ensures {
+        let (region, projection) = split_binding(binding, "contract_ensures")?;
+        clauses.push(memory_clause(
+            region,
+            cryptol_fn,
+            Some(normalize_projection(projection)),
+        ));
+    }
+    Ok(FunctionContract { clauses })
+}
+
+fn split_binding<'a>(binding: &'a str, key: &str) -> Result<(&'a str, &'a str)> {
+    let (left, right) = binding
+        .split_once('=')
+        .with_context(|| format!("{key} entry must be REGION=VALUE, got {binding:?}"))?;
+    let (left, right) = (left.trim(), right.trim());
+    if left.is_empty() || right.is_empty() {
+        bail!("{key} entry must be REGION=VALUE, got {binding:?}");
+    }
+    Ok((left, right))
+}
+
+fn normalize_projection(field: &str) -> String {
+    field.trim().trim_start_matches('.').to_string()
+}
+
+fn memory_clause(region: &str, source: &str, projection: Option<String>) -> ContractClause {
+    ContractClause {
+        name: region.to_string(),
+        assertion: "llvm_points_to".to_string(),
+        region: Some(region.to_string()),
+        cryptol_fn: source.to_string(),
+        projection,
+    }
+}
+
 fn run_command(cmd: &mut Command, label: &str) -> Result<()> {
     let out = cmd.output()?;
     if !out.status.success() {
@@ -377,7 +433,8 @@ fn run_command(cmd: &mut Command, label: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::is_empty_struct_load_failure;
+    use super::{function_contract, is_empty_struct_load_failure};
+    use crate::project_config::ProjectConfig;
 
     #[test]
     fn detects_memory_load_failure_signatures() {
@@ -395,5 +452,36 @@ mod tests {
         assert!(!is_empty_struct_load_failure("RESULT: VERIFIED"));
         assert!(!is_empty_struct_load_failure("Counterexample: x = 3"));
         assert!(!is_empty_struct_load_failure("z3: unknown"));
+    }
+
+    #[test]
+    fn records_single_model_contract_clause_provenance() {
+        let cfg: ProjectConfig = toml::from_str(
+            r#"[functions.bump]
+contract_return = "ret"
+contract_ensures = ["out=outPost"]"#,
+        )
+        .unwrap();
+        let contract = function_contract("bump", &cfg.apply("bump")).unwrap();
+        assert_eq!(contract.clauses.len(), 2);
+        assert_eq!(contract.clauses[0].cryptol_fn, "bump");
+        assert_eq!(contract.clauses[0].projection.as_deref(), Some("ret"));
+        assert_eq!(contract.clauses[1].name, "out");
+        assert_eq!(contract.clauses[1].cryptol_fn, "bump");
+        assert_eq!(contract.clauses[1].projection.as_deref(), Some("outPost"));
+    }
+
+    #[test]
+    fn legacy_split_model_is_one_contract_with_clause_sources() {
+        let cfg: ProjectConfig = toml::from_str(
+            r#"[functions.activateRet]
+cryptol_fn_out = ["this=activatePost"]"#,
+        )
+        .unwrap();
+        let contract = function_contract("activateRet", &cfg.apply("activateRet")).unwrap();
+        assert_eq!(contract.clauses.len(), 2);
+        assert_eq!(contract.clauses[0].cryptol_fn, "activateRet");
+        assert_eq!(contract.clauses[1].cryptol_fn, "activatePost");
+        assert_eq!(contract.clauses[1].region.as_deref(), Some("this"));
     }
 }
