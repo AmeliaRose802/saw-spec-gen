@@ -40,6 +40,77 @@ fn make_ir_func(quoted_name: &str, ret: TypeInfo) -> FunctionInfo {
 // ---- correct_sret_from_ir tests ----------------------------------------
 
 #[test]
+fn correct_sret_from_ir_resolves_scalar_typedef_returns() {
+    let mangled = "?size@Container@@QEBA_KXZ";
+    for (ir_type, saw_type) in [
+        ("i1", "llvm_int 1"),
+        ("i8", "llvm_int 8"),
+        ("i16", "llvm_int 16"),
+        ("i32", "llvm_int 32"),
+        ("i64", "llvm_int 64"),
+        ("i128", "llvm_int 128"),
+    ] {
+        // An unresolved alias or its byte-buffer fallback is not an ABI type.
+        for size_bytes in [0, 1] {
+            let ast_ret = TypeInfo::Opaque {
+                name: "size_type".into(),
+                size_bytes,
+            };
+            let mut specs = derive_constraints(&[make_func("size", mangled, ast_ret)]).unwrap();
+            assert!(!specs[0].return_constraint.is_sret);
+            let ir_funcs = crate::llvm_ir::extract_functions(
+                &format!("declare noundef {ir_type} @\"{mangled}\"()"),
+                None,
+            )
+            .unwrap();
+
+            super::correct_sret_from_ir(&mut specs[0], &ir_funcs);
+            assert_eq!(specs[0].return_constraint.saw_type, saw_type);
+            assert!(!specs[0].return_constraint.is_sret);
+            assert!(!specs[0].return_constraint.returns_pointer);
+        }
+    }
+}
+
+#[test]
+fn correct_sret_from_ir_preserves_pointer_pointee_type() {
+    let mangled = "?data@Container@@QEBAPEBIXZ";
+    let ast_ret = TypeInfo::Pointer(Box::new(TypeInfo::UnsignedInt(32)));
+    let mut specs = derive_constraints(&[make_func("data", mangled, ast_ret)]).unwrap();
+    let ir_funcs =
+        crate::llvm_ir::extract_functions(&format!("declare ptr @\"{mangled}\"()"), None).unwrap();
+
+    super::correct_sret_from_ir(&mut specs[0], &ir_funcs);
+    assert!(specs[0].return_constraint.returns_pointer);
+    assert!(!specs[0].return_constraint.is_sret);
+    assert_eq!(specs[0].return_constraint.saw_type, "llvm_int 32");
+}
+
+#[test]
+fn correct_sret_from_ir_preserves_sret_with_scalar_pointee() {
+    let mangled = "?result@@YA?AUResult@@XZ";
+    let ast_ret = TypeInfo::Struct {
+        name: "Result".into(),
+        size_bytes: Some(8),
+        fields: vec![],
+    };
+    let mut specs = derive_constraints(&[make_func("result", mangled, ast_ret)]).unwrap();
+    let ir_funcs = crate::llvm_ir::extract_functions(
+        &format!("declare void @\"{mangled}\"(ptr sret(i64) %result)"),
+        None,
+    )
+    .unwrap();
+    assert_eq!(ir_funcs[0].return_type, TypeInfo::SignedInt(64));
+
+    super::correct_sret_from_ir(&mut specs[0], &ir_funcs);
+    assert!(specs[0].return_constraint.is_sret);
+    assert_eq!(
+        specs[0].return_constraint.saw_type,
+        "llvm_array 8 (llvm_int 8)"
+    );
+}
+
+#[test]
 fn correct_sret_from_ir_overrides_small_struct_register_return() {
     let mangled = "?enforceAccess@@YA?AUOutcome@@W4Mode@@@Z";
     let ast_ret = TypeInfo::Struct {
