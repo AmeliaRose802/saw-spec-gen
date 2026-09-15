@@ -14,6 +14,23 @@ pub struct CounterexampleEntry {
     pub bits: Option<u32>,
 }
 
+/// One assertion in the unified contract for an implementation function.
+/// `cryptol_fn` and `projection` identify the exact model term from which
+/// the clause originated, including legacy split return/post functions.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ContractClause {
+    pub name: String,
+    pub assertion: String,
+    pub region: Option<String>,
+    pub cryptol_fn: String,
+    pub projection: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct FunctionContract {
+    pub clauses: Vec<ContractClause>,
+}
+
 #[derive(Serialize)]
 struct VerifyResult<'a> {
     schema_version: &'static str,
@@ -27,6 +44,7 @@ struct VerifyResult<'a> {
     solver: Option<&'a str>,
     time_secs: Option<f64>,
     impl_file: Option<&'a str>,
+    contract: &'a FunctionContract,
 }
 
 #[derive(Serialize)]
@@ -61,6 +79,7 @@ pub fn write_verify_result(
     solver: Option<&str>,
     time_secs: Option<f64>,
     impl_file: Option<&str>,
+    contract: &FunctionContract,
 ) -> Result<()> {
     let payload = VerifyResult {
         schema_version: RESULT_SCHEMA_VERSION,
@@ -74,6 +93,7 @@ pub fn write_verify_result(
         solver,
         time_secs,
         impl_file,
+        contract,
     };
     write_payload(output_dir, &payload)
 }
@@ -125,6 +145,15 @@ mod tests {
             value: Some("7".to_string()),
             bits: Some(32),
         }];
+        let contract = FunctionContract {
+            clauses: vec![ContractClause {
+                name: "return".to_string(),
+                assertion: "llvm_return".to_string(),
+                region: None,
+                cryptol_fn: "f_spec".to_string(),
+                projection: None,
+            }],
+        };
         write_verify_result(
             dir.path(),
             "cpp",
@@ -137,6 +166,7 @@ mod tests {
             Some("z3"),
             Some(1.25),
             Some("f.cpp"),
+            &contract,
         )
         .unwrap();
         let json: serde_json::Value =
@@ -149,6 +179,8 @@ mod tests {
         assert_eq!(json["actual"], "0");
         assert_eq!(json["solver"], "z3");
         assert_eq!(json["impl_file"], "f.cpp");
+        assert_eq!(json["contract"]["clauses"][0]["name"], "return");
+        assert_eq!(json["contract"]["clauses"][0]["cryptol_fn"], "f_spec");
     }
 
     #[test]

@@ -460,7 +460,9 @@ pub fn correct_sret_from_ir(spec: &mut SpecConstraint, ir_funcs: &[FunctionInfo]
         });
         if has_sret_param {
             spec.return_constraint.is_sret = true;
-            spec.return_constraint.saw_type = type_to_saw(&ir_fn.return_type);
+            if !matches!(ir_fn.return_type, TypeInfo::Void) {
+                spec.return_constraint.saw_type = type_to_saw(&ir_fn.return_type);
+            }
         }
     }
 }
@@ -519,3 +521,7 @@ mod sret_tests;
 #[cfg(test)]
 #[path = "derive_annotation_tests.rs"]
 mod annotation_tests;
+
+#[cfg(test)]
+#[path = "derive_sret_ir_tests.rs"]
+mod sret_ir_tests;

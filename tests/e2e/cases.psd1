@@ -664,11 +664,23 @@
            Dir = 'tests/e2e/cases/14-contract/bump';
            File = 'bump_contract_verified.cpp'; Expected = 'VERIFIED';
            Cry = 'bump_contract_spec.cry'; CryptolFn = 'bump'; Function = 'bump';
-           Config = 'bump_contract.toml' }
+           Config = 'bump_contract.toml';
+           ContractClauses = @(
+               @{ name = 'return'; assertion = 'llvm_return'; region = $null;
+                  cryptol_fn = 'bump'; projection = 'ret' },
+               @{ name = 'out'; assertion = 'llvm_points_to'; region = 'out';
+                  cryptol_fn = 'bump'; projection = 'outPost' }
+           ) }
         @{ Tag = 'contract'; Runner = 'cpp';
            Dir = 'tests/e2e/cases/14-contract/bump';
            File = 'bump_contract_disproved.cpp'; Expected = 'DISPROVED';
            Cry = 'bump_contract_spec.cry'; CryptolFn = 'bump'; Function = 'bump';
-           Config = 'bump_contract.toml' }
+           Config = 'bump_contract.toml';
+           ContractClauses = @(
+               @{ name = 'return'; assertion = 'llvm_return'; region = $null;
+                  cryptol_fn = 'bump'; projection = 'ret' },
+               @{ name = 'out'; assertion = 'llvm_points_to'; region = 'out';
+                  cryptol_fn = 'bump'; projection = 'outPost' }
+           ) }
     )
 }

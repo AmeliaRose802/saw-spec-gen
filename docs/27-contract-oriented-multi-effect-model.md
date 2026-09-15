@@ -14,6 +14,12 @@
 > the `--cryptol-fn`, so it can match the C++ symbol — no `…Ret`/`…Post`
 > split and no out-of-band name map. The existing `cryptol_fn_out` /
 > split-function form still works (it is the two-clause special case).
+> Native `verify-cpp` results expose the checked conjunction as one
+> `contract.clauses` array in `result.json`. Each clause records its SAW
+> assertion, memory region (if any), Cryptol source function, and optional
+> record projection. Legacy `…Ret` / `…Post` helpers therefore appear only as
+> provenance beneath one implementation-function verdict, never as separate
+> proof subjects.
 > E2E: `tests/e2e/cases/14-contract/bump/` — VERIFIED (both clauses from
 > one contract), DISPROVED (wrong `outPost` ⇒ the `ensures` clause is
 > checked, not defaulted away).

@@ -221,6 +221,38 @@ function Format-CaseLabel($c) {
     return "$($c.Tag)/$(Split-Path -Leaf $c.Dir)/$($c.File)"
 }
 
+function Get-ContractMetadataError($c) {
+    if (-not $c.ContractClauses) { return $null }
+    if ($c.Runner -ne 'cpp') { return 'ContractClauses is supported by the cpp runner only' }
+    $base = [System.IO.Path]::GetFileNameWithoutExtension($c.File)
+    $resultPath = Join-Path (Resolve-RepoPath $c.Dir) "out_${base}/result.json"
+    if (-not (Test-Path $resultPath)) { return "missing contract result: $resultPath" }
+    try {
+        $result = Get-Content -Raw $resultPath | ConvertFrom-Json
+    } catch {
+        return "invalid contract result JSON: $_"
+    }
+    $defaults = Get-CaseDefaults $c
+    if ($result.function -ne $defaults.Function) {
+        return "contract result names function '$($result.function)', expected '$($defaults.Function)'"
+    }
+    $actual = @($result.contract.clauses)
+    $expected = @($c.ContractClauses)
+    if ($actual.Count -ne $expected.Count) {
+        return "contract has $($actual.Count) clauses, expected $($expected.Count)"
+    }
+    for ($i = 0; $i -lt $expected.Count; $i++) {
+        foreach ($field in @('name', 'assertion', 'region', 'cryptol_fn', 'projection')) {
+            $want = $expected[$i][$field]
+            $got = $actual[$i].$field
+            if ($got -ne $want) {
+                return "contract clause $i field '$field' is '$got', expected '$want'"
+            }
+        }
+    }
+    return $null
+}
+
 if ($List) {
     Write-Host ("Would run {0} case(s):" -f $selected.Count) -ForegroundColor Cyan
     for ($i = 0; $i -lt $selected.Count; $i++) {
@@ -248,6 +280,11 @@ for ($i = 0; $i -lt $total; $i++) {
     try {
         $out = Invoke-Case $c
         $got = Get-Verdict $out
+        $contractError = Get-ContractMetadataError $c
+        if ($contractError) {
+            $out += "`ncontract metadata error: $contractError"
+            $got = 'INVALID-CONTRACT-METADATA'
+        }
     } catch {
         $got = 'EXCEPTION'
         $out = $_ | Out-String

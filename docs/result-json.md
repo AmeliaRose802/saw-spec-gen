@@ -38,6 +38,25 @@ at `<output-dir>/cpp/result.json` and `<output-dir>/rust/result.json`.
 | `solver`         | string \| null                                    | yes      | Solver SAW dispatched to (currently always `"z3"` when set). |
 | `time_secs`      | number \| null                                    | yes      | Wall-clock seconds the SAW invocation took, when measured. |
 | `impl_file`      | string \| null                                    | yes      | Source file basename (the `.cpp` / `.rs` that produced the bitcode/MIR).  For `side="equiv"`, both basenames joined with `" | "`. |
+| `contract`       | object                                            | C++      | Unified implementation-function contract. Its `clauses` array records every checked return or memory assertion and the Cryptol term from which that clause came. |
+
+Each `contract.clauses` entry has this shape:
+
+| Field        | Type           | Meaning |
+|--------------|----------------|---------|
+| `name`       | string         | Clause name: `"return"` or the mutated region name. |
+| `assertion`  | string         | SAW assertion receiving the clause: `"llvm_return"` or `"llvm_points_to"`. |
+| `region`     | string \| null | Mutated memory region, or `null` for the return clause. |
+| `cryptol_fn` | string         | Top-level Cryptol function supplying this clause. |
+| `projection` | string \| null | Record field projected from `cryptol_fn`, or `null` for legacy direct-return functions. |
+
+The C++ implementation function still appears exactly once in the top-level
+`function` field and receives one verdict for the conjunction of all clauses.
+Legacy split syntax remains accepted: for example, a return model `activateRet`
+plus `cryptol_fn_out = ["this=activatePost"]` is represented as one contract
+whose return clause has provenance `activateRet` and whose `this` clause has
+provenance `activatePost`. The two Cryptol helpers are not independent proof
+subjects.
 
 All optional consumer fields are emitted as `null` (or `[]` for
 `counterexample`) rather than omitted, so the keyset is stable.
@@ -66,7 +85,18 @@ All optional consumer fields are emitted as `null` (or `[]` for
   "actual": null,
   "solver": "z3",
   "time_secs": null,
-  "impl_file": "add_one_verified.cpp"
+  "impl_file": "add_one_verified.cpp",
+  "contract": {
+    "clauses": [
+      {
+        "name": "return",
+        "assertion": "llvm_return",
+        "region": null,
+        "cryptol_fn": "add_one_spec",
+        "projection": null
+      }
+    ]
+  }
 }
 ```
 
