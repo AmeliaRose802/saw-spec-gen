@@ -20,6 +20,7 @@ pub mod gen_verify_rust_classify;
 pub mod gen_verify_rust_emit;
 pub mod inventory;
 pub mod mangle;
+pub mod object_layout;
 pub mod project_config;
 pub mod result_json;
 pub mod tool_discovery;

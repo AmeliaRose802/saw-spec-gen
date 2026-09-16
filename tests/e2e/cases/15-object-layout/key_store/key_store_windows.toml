@@ -1,0 +1,7 @@
+contract_return = "ret"
+contract_ensures = ["this=thisPost"]
+# Sequential unlocked-mutex scope, by compiler-resolved field name, not offset.
+preconditions = ["this.mu_._Count == 0"]
+[layout]
+projection = "fields"
+modifies = ["this.key_"]

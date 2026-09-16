@@ -1,8 +1,9 @@
 //! Clang/LLVM compilation pipeline helpers for the native C++ verify flow.
 
 use super::run_command;
+use crate::object_layout::capture;
 use crate::verify_tools::ToolPaths;
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -48,6 +49,33 @@ pub(super) fn build_clang_flags(
     out
 }
 
+// Share all ABI/source flags between bitcode and the IR supplying layout facts.
+fn codegen_command(
+    clang: &Path,
+    llvm_target: &str,
+    user_flags: &[String],
+    cpp_file: &Path,
+    output_file: &Path,
+    opt_level: &str,
+    emit_ir: bool,
+) -> Command {
+    let mut cmd = Command::new(clang);
+    cmd.args([
+        if emit_ir { "-S" } else { "-c" },
+        "-emit-llvm",
+        opt_level,
+        "-fno-rtti",
+        "-target",
+        llvm_target,
+    ])
+    .args(user_flags);
+    if emit_ir {
+        cmd.args(["-Xclang", "-fdump-record-layouts"]);
+    }
+    cmd.arg(clang_path_arg(cpp_file)).arg("-o").arg(output_file);
+    cmd
+}
+
 pub(super) fn emit_bitcode(
     clang: &Path,
     llvm_target: &str,
@@ -57,23 +85,21 @@ pub(super) fn emit_bitcode(
     opt_level: &str,
 ) -> Result<()> {
     run_command(
-        Command::new(clang)
-            .args([
-                "-c",
-                "-emit-llvm",
-                opt_level,
-                "-fno-rtti",
-                "-target",
-                llvm_target,
-            ])
-            .args(user_flags)
-            .arg(clang_path_arg(cpp_file))
-            .arg("-o")
-            .arg(bc_file),
+        &mut codegen_command(
+            clang,
+            llvm_target,
+            user_flags,
+            cpp_file,
+            bc_file,
+            opt_level,
+            false,
+        ),
         "clang bitcode",
     )
 }
 
+/// Capture layouts in the IR-producing invocation, before any IR transforms.
+/// Retain the caller's optional-path API, but never fall back to layout-less IR.
 pub(super) fn emit_llvm_ir(
     clang: &Path,
     llvm_target: &str,
@@ -82,26 +108,48 @@ pub(super) fn emit_llvm_ir(
     ll_file: &Path,
     opt_level: &str,
 ) -> Result<Option<PathBuf>> {
-    let out = Command::new(clang)
-        .args([
-            "-S",
-            "-emit-llvm",
-            opt_level,
-            "-fno-rtti",
-            "-target",
-            llvm_target,
-        ])
-        .args(user_flags)
-        .arg(clang_path_arg(cpp_file))
-        .arg("-o")
-        .arg(ll_file)
-        .output()?;
-    if out.status.success() {
-        Ok(Some(ll_file.to_path_buf()))
-    } else {
-        eprintln!("warning: failed to emit .ll; continuing without --llvm-ir");
-        Ok(None)
+    // A failed retry must not pair fresh IR with a previous build's layouts.
+    for path in [capture::sidecar_path(ll_file), ll_file.to_path_buf()] {
+        if path.try_exists()? {
+            std::fs::remove_file(&path)
+                .with_context(|| format!("removing stale IR/layout artifact {}", path.display()))?;
+        }
     }
+    let mut cmd = codegen_command(
+        clang,
+        llvm_target,
+        user_flags,
+        cpp_file,
+        ll_file,
+        opt_level,
+        true,
+    );
+    let command = std::iter::once(cmd.get_program())
+        .chain(cmd.get_args())
+        .map(|arg| {
+            arg.to_str()
+                .map(str::to_owned)
+                .context("non-UTF-8 clang command argument")
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let out = cmd.output().context("running clang IR/layout emission")?;
+    if !out.status.success() {
+        bail!(
+            "clang IR/layout emission failed ({}):\n{}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let ir = std::fs::read_to_string(ll_file)
+        .with_context(|| format!("reading emitted LLVM IR {}", ll_file.display()))?;
+    // Clang normally dumps AST/IRgen layouts to stdout; accept stderr dumps too.
+    let mut dump = String::from_utf8(out.stdout).context("non-UTF-8 clang layout stdout")?;
+    dump.push('\n');
+    dump.push_str(std::str::from_utf8(&out.stderr).context("non-UTF-8 clang layout stderr")?);
+    let facts = capture::capture(&ir, &dump, command)
+        .with_context(|| format!("capturing compiler layouts for {}", ll_file.display()))?;
+    capture::write(ll_file, &facts)?;
+    Ok(Some(ll_file.to_path_buf()))
 }
 
 pub(super) fn maybe_lower_exceptions(
@@ -162,6 +210,7 @@ pub(super) fn dump_ast(
             "-Xclang",
             "-ast-dump=json",
             "-fsyntax-only",
+            "-fno-rtti",
             "-target",
             llvm_target,
         ])
@@ -397,7 +446,55 @@ pub(super) fn recompile_at_o1(ctx: &O1Recompile) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::strip_optnone;
+    use super::{codegen_command, strip_optnone};
+    use std::path::Path;
+
+    #[test]
+    fn layout_capture_and_bitcode_share_codegen_flags() {
+        let clang = Path::new("toolchain with spaces").join("clang");
+        let cpp = Path::new("source with spaces.cpp");
+        let output = Path::new("module.out");
+        let target = "x86_64-pc-windows-msvc";
+        let flags = vec![
+            "-std=c++20".into(),
+            "-fpack-struct=1".into(),
+            "-I".into(),
+            "include dir".into(),
+        ];
+        for opt in ["-O0", "-O1"] {
+            let bc = codegen_command(&clang, target, &flags, cpp, output, opt, false);
+            let ir = codegen_command(&clang, target, &flags, cpp, output, opt, true);
+            assert_eq!(bc.get_program(), clang.as_os_str());
+            assert_eq!(ir.get_program(), clang.as_os_str());
+            let bc_args: Vec<_> = bc.get_args().map(|a| a.to_str().unwrap()).collect();
+            let mut ir_args: Vec<_> = ir.get_args().map(|a| a.to_str().unwrap()).collect();
+            assert_eq!(bc_args[0], "-c");
+            assert_eq!(ir_args[0], "-S");
+            assert_eq!(
+                &bc_args[1..6],
+                ["-emit-llvm", opt, "-fno-rtti", "-target", target]
+            );
+            let dump = ir_args
+                .iter()
+                .position(|a| *a == "-fdump-record-layouts")
+                .unwrap();
+            assert_eq!(ir_args[dump - 1], "-Xclang");
+            drop(ir_args.drain(dump - 1..=dump));
+            assert_eq!(&ir_args[1..], &bc_args[1..]);
+            assert_eq!(
+                &ir_args[6..],
+                [
+                    "-std=c++20",
+                    "-fpack-struct=1",
+                    "-I",
+                    "include dir",
+                    "source with spaces.cpp",
+                    "-o",
+                    "module.out"
+                ]
+            );
+        }
+    }
 
     #[test]
     fn strips_optnone_only_from_attribute_groups() {

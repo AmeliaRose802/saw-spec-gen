@@ -27,8 +27,8 @@ use std::collections::{HashMap, HashSet};
 
 /// Returns true for STL template types whose internal libstdc++/MSVC
 /// layout is too complex for SAW to handle via `llvm_alias` — these
-/// are always converted to a byte-array regardless of whether the alias
-/// is resolvable in the IR symbol table.
+/// are converted to a byte-array regardless of IR resolution unless
+/// explicitly protected by a validated object layout plan.
 ///
 /// SAW reports `unsupported type: %"std::optional<T>"` and similar
 /// errors for `std::optional` and `std::variant` even when the alias
@@ -60,6 +60,17 @@ pub fn rewrite_unresolved_aliases(
     ir_sizes: &HashMap<String, usize>,
     fallbacks: &AliasFallbacks,
 ) -> (String, HashSet<String>) {
+    rewrite_unresolved_aliases_protected(text, ir_sizes, fallbacks, &HashSet::new())
+}
+
+/// As [`rewrite_unresolved_aliases`], but preserve exact validated object aliases.
+/// Protected names bypass all fallbacks and are not reported as unresolved.
+pub fn rewrite_unresolved_aliases_protected(
+    text: &str,
+    ir_sizes: &HashMap<String, usize>,
+    fallbacks: &AliasFallbacks,
+    protected: &HashSet<String>,
+) -> (String, HashSet<String>) {
     let pattern = "llvm_alias \"";
     let mut unresolved: HashSet<String> = HashSet::new();
     let mut out = String::with_capacity(text.len());
@@ -82,11 +93,14 @@ pub fn rewrite_unresolved_aliases(
             // needs *renaming* (suffix matching on a short C++ name → the
             // IR's fully-qualified `struct.Foo::Bar::Baz`).
             //
-            // Exception: complex STL templates like `std::optional<T>` and
+            // Exception: unprotected templates like `std::optional<T>` and
             // `std::variant<T…>` appear in the IR symbol table but SAW
             // cannot handle their internal layout (anonymous union of
             // payload/base types) — force byte-array conversion for these.
-            if ir_sizes.contains_key(name) && !is_complex_stl_template(name) {
+            // Validated object aliases take priority over every fallback.
+            if protected.contains(name)
+                || (ir_sizes.contains_key(name) && !is_complex_stl_template(name))
+            {
                 out.push_str(&alias_text);
             } else if let Some(&n) = ir_sizes.get(name) {
                 // Complex STL template with a known exact IR size: emit the
@@ -129,10 +143,21 @@ pub fn rewrite_specs_dir(
     ir_sizes: &HashMap<String, usize>,
     fallbacks: &AliasFallbacks,
 ) -> std::io::Result<HashSet<String>> {
+    rewrite_specs_dir_protected(dir, ir_sizes, fallbacks, &HashSet::new())
+}
+
+/// Rewrite every generated script, preserving exact validated aliases everywhere.
+pub fn rewrite_specs_dir_protected(
+    dir: &std::path::Path,
+    ir_sizes: &HashMap<String, usize>,
+    fallbacks: &AliasFallbacks,
+    protected: &HashSet<String>,
+) -> std::io::Result<HashSet<String>> {
     let mut unresolved: HashSet<String> = HashSet::new();
     walk_saw_files(dir, &mut |path| -> std::io::Result<()> {
         let text = std::fs::read_to_string(path)?;
-        let (rewritten, file_unresolved) = rewrite_unresolved_aliases(&text, ir_sizes, fallbacks);
+        let (rewritten, file_unresolved) =
+            rewrite_unresolved_aliases_protected(&text, ir_sizes, fallbacks, protected);
         if rewritten != text {
             std::fs::write(path, rewritten)?;
         }
@@ -172,7 +197,17 @@ pub fn apply_alias_rewrites(
     ir_sizes: &HashMap<String, usize>,
     fallbacks: &AliasFallbacks,
 ) {
-    match rewrite_specs_dir(output, ir_sizes, fallbacks) {
+    apply_alias_rewrites_protected(output, ir_sizes, fallbacks, &HashSet::new());
+}
+
+/// As [`apply_alias_rewrites`], but keep exact validated object aliases intact.
+pub fn apply_alias_rewrites_protected(
+    output: &std::path::Path,
+    ir_sizes: &HashMap<String, usize>,
+    fallbacks: &AliasFallbacks,
+    protected: &HashSet<String>,
+) {
+    match rewrite_specs_dir_protected(output, ir_sizes, fallbacks, protected) {
         Ok(unresolved) if !unresolved.is_empty() => {
             eprintln!(
                 "warning: {} alias type(s) could not be resolved to a byte size;",
@@ -356,5 +391,90 @@ mod tests {
             out.contains("llvm_alias \"struct.UserDefined\""),
             "non-STL exact IR match should remain as alias; got: {out}"
         );
+    }
+
+    #[test]
+    fn rewrite_protected_templates_bypass_all_fallbacks() {
+        let names = ["std::optional<EnrollmentKey>", "std::variant<int, double>"];
+        let protected = names.iter().map(|name| (*name).into()).collect();
+        let mut fb = fallbacks_with_bytes(&[(names[0], 999), (names[1], 999)]);
+        for name in names {
+            fb.enum_bits.insert(name.into(), 32);
+            let input = format!("p <- llvm_alloc (llvm_alias \"{name}\");");
+            for ir in [HashMap::new(), HashMap::from([(name.into(), 16)])] {
+                let (out, unresolved) =
+                    rewrite_unresolved_aliases_protected(&input, &ir, &fb, &protected);
+                assert_eq!(out, input);
+                assert!(unresolved.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn rewrite_protection_is_exact_not_family_or_suffix() {
+        let protected =
+            HashSet::from(["std::optional<ns::Key>".into(), "struct.ns::Object".into()]);
+        let ir = HashMap::from([
+            ("std::optional<ns::Key>".into(), 16),
+            ("std::optional<ns::Other>".into(), 24),
+            ("struct.ns::Object".into(), 32),
+        ]);
+        let mut fb = fallbacks_with_bytes(&[("Payload", 8)]);
+        fb.enum_bits.insert("Flag".into(), 32);
+        let input = concat!(
+            "llvm_alias \"std::optional<ns::Key>\"; ",
+            "llvm_alias \"std::optional<Key>\"; ",
+            "llvm_alias \"std::optional<ns::Other>\"; ",
+            "llvm_alias \"struct.ns::Object\"; llvm_alias \"Object\"; ",
+            "llvm_alias \"Payload\"; llvm_alias \"Flag\"; llvm_alias \"Mystery\";",
+        );
+        let (out, unresolved) = rewrite_unresolved_aliases_protected(input, &ir, &fb, &protected);
+        assert_eq!(
+            out,
+            concat!(
+                "llvm_alias \"std::optional<ns::Key>\"; ",
+                "llvm_array 16 (llvm_int 8); llvm_array 24 (llvm_int 8); ",
+                "llvm_alias \"struct.ns::Object\"; llvm_array 32 (llvm_int 8); ",
+                "llvm_array 8 (llvm_int 8); llvm_int 32; llvm_alias \"Mystery\";",
+            )
+        );
+        assert_eq!(unresolved, HashSet::from(["Mystery".into()]));
+    }
+
+    #[test]
+    fn apply_protected_rewrites_cover_main_and_nested_specs() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "saw_spec_gen_aliases_{}_{stamp}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(dir.join("specs_experimental")).unwrap();
+        let paths = [
+            dir.join("verify.saw"),
+            dir.join("specs_experimental/override.saw"),
+        ];
+        let input = "llvm_alias \"std::optional<Key>\"; llvm_alias \"OverrideBuffer\";";
+        let expected = "llvm_alias \"std::optional<Key>\"; llvm_array 8 (llvm_int 8);";
+        for path in &paths {
+            std::fs::write(path, input).unwrap();
+        }
+        let ir = HashMap::from([("std::optional<Key>".into(), 16)]);
+        let protected = ir.keys().cloned().collect();
+        let fb = fallbacks_with_bytes(&[("OverrideBuffer", 8)]);
+        apply_alias_rewrites_protected(&dir, &ir, &fb, &protected);
+        for path in &paths {
+            assert_eq!(std::fs::read_to_string(path).unwrap(), expected);
+        }
+        apply_alias_rewrites(&dir, &ir, &fb);
+        for path in &paths {
+            assert_eq!(
+                std::fs::read_to_string(path).unwrap(),
+                "llvm_array 16 (llvm_int 8); llvm_array 8 (llvm_int 8);"
+            );
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

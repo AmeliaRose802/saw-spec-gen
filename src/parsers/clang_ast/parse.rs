@@ -81,10 +81,12 @@ pub fn parse_ast(path: &Path) -> Result<AstNode> {
 /// [`Read`] source, streaming the bytes through serde_json without an
 /// intermediate `String`.
 pub fn parse_ast_from_reader<R: Read>(reader: R) -> Result<AstNode> {
-    let stream = serde_json::Deserializer::from_reader(reader).into_iter::<AstNode>();
+    let mut deserializer = serde_json::Deserializer::from_reader(reader);
+    deserializer.disable_recursion_limit();
+    let stream = deserializer.into_iter::<StackedNode>();
     let mut nodes: Vec<AstNode> = Vec::new();
     for item in stream {
-        nodes.push(item.context("Failed to deserialize AST node")?);
+        nodes.push(item.context("Failed to deserialize AST node")?.0);
     }
     finalize_ast_nodes(nodes)
 }
@@ -97,12 +99,19 @@ pub fn parse_ast_from_reader<R: Read>(reader: R) -> Result<AstNode> {
 /// in-tree `parse_ast` no longer routes through it.
 #[allow(dead_code)]
 pub fn parse_ast_str(content: &str) -> Result<AstNode> {
-    let stream = serde_json::Deserializer::from_str(content).into_iter::<AstNode>();
-    let mut nodes: Vec<AstNode> = Vec::new();
-    for item in stream {
-        nodes.push(item.context("Failed to deserialize AST node")?);
+    parse_ast_from_reader(content.as_bytes())
+}
+
+// Standard-library variant instantiations exceed serde_json's default 128
+// nesting limit. Grow the deserializer stack safely rather than dropping AST
+// declarations or changing the program compiled for the proof.
+struct StackedNode(AstNode);
+impl<'de> serde::Deserialize<'de> for StackedNode {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        AstNode::deserialize(serde_stacker::Deserializer::new(deserializer)).map(Self)
     }
-    finalize_ast_nodes(nodes)
 }
 
 /// Collapse the per-object stream into a single [`AstNode`]: pass a

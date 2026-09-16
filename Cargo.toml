@@ -9,9 +9,13 @@ license = "MIT"
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["unbounded_depth"] }
+serde_stacker = "0.1"
+# Later psm releases pull ar_archive_writer requiring Rust 1.88; keep MSRV 1.85.
+psm = "=0.1.28"
 toml = "0.8"
 anyhow = "1"
+sha2 = "0.10"
 
 [[bin]]
 name = "saw-spec-gen"

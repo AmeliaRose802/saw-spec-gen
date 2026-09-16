@@ -1,0 +1,8 @@
+# Generation must fail: the named alternative is absent from compiler facts.
+contract_return = "ret"
+contract_ensures = ["p=pPost"]
+
+[layout]
+projection = "fields"
+modifies = ["p.value.left"]
+active_members = { "p.value" = "missing" }

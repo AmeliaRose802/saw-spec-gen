@@ -1,0 +1,11 @@
+module bump_bits_spec where
+
+type Bits = { value : [3], limit : [5], enabled : [1] }
+
+bump_bits_contract : Bits -> { ret : [32], pPost : Bits }
+bump_bits_contract pre = {
+  ret = zero # next,
+  pPost = { value = next, limit = pre.limit, enabled = pre.enabled }
+}
+  where
+    next = if pre.enabled == 1 then pre.value + 1 else pre.value

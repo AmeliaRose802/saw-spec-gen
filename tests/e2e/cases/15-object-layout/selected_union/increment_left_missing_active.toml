@@ -1,0 +1,7 @@
+# Generation must fail: equal storage does not establish an active member.
+contract_return = "ret"
+contract_ensures = ["p=pPost"]
+
+[layout]
+projection = "fields"
+modifies = ["p.value.left"]

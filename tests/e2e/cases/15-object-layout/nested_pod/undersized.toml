@@ -1,0 +1,5 @@
+out_buffer_param = ["p=31"]
+contract_return = "ret"
+contract_ensures = ["p=pPost"]
+[layout]
+projection = "fields"

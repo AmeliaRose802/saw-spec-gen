@@ -1,0 +1,11 @@
+module update_value_spec where
+
+// data is a framed LLVM pointer, never a Cryptol integer or record member.
+type NodeFields = { value : [64], enabled : [8] }
+
+update_value_contract : NodeFields -> [64] -> { ret : [64], pPost : NodeFields }
+update_value_contract pre delta = {
+  ret = nextValue, pPost = { value = nextValue, enabled = pre.enabled }
+}
+  where
+    nextValue = if pre.enabled == 1 then pre.value + delta else pre.value

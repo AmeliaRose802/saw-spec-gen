@@ -1,0 +1,12 @@
+module increment_left_spec where
+
+// Only the explicitly selected scalar leaf is represented.
+type TaggedFields = { valid : [8], value__left : [32], tail : [64] }
+
+increment_left_contract : TaggedFields -> { ret : [32], pPost : TaggedFields }
+increment_left_contract pre = {
+  ret = nextLeft,
+  pPost = { valid = pre.valid, value__left = nextLeft, tail = pre.tail }
+}
+  where
+    nextLeft = if pre.valid == 1 then pre.value__left + 1 else pre.value__left

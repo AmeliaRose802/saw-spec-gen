@@ -269,8 +269,13 @@ fn normalise_path(p: &Path) -> String {
 pub fn filter_ast_file(input: &Path, output: &Path, keep_paths: &[PathBuf]) -> Result<FilterStats> {
     let content = std::fs::read_to_string(input)
         .with_context(|| format!("Failed to read {}", input.display()))?;
-    let mut value: Value = serde_json::from_str(&content)
-        .with_context(|| format!("Failed to parse JSON from {}", input.display()))?;
+    let mut deserializer = serde_json::Deserializer::from_str(&content);
+    deserializer.disable_recursion_limit();
+    let mut value = <Value as serde::Deserialize>::deserialize(serde_stacker::Deserializer::new(
+        &mut deserializer,
+    ))
+    .with_context(|| format!("Failed to parse JSON from {}", input.display()))?;
+    deserializer.end()?;
     let stats = filter_translation_unit_value(&mut value, keep_paths);
     let pretty = serde_json::to_string(&value)
         .with_context(|| "Failed to re-serialise filtered AST".to_string())?;

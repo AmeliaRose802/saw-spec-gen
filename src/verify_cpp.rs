@@ -1,5 +1,6 @@
 //! Native `saw-spec-gen verify-cpp` implementation for C++ targets.
 
+mod cache_fingerprint;
 mod compile;
 mod counterexample;
 
@@ -114,10 +115,18 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
     let ll_file = output_dir.join(format!("{base_name}.ll"));
     let ast_file = output_dir.join(format!("{base_name}_ast.json"));
 
+    let mut cache_flags = user_clang_flags.clone();
+    cache_flags.push(cache_fingerprint::fingerprint(
+        clang,
+        tools.llvm_target,
+        &user_clang_flags,
+        &cpp_file,
+    )?);
+
     let cache = AstCacheContext::load(
         &cpp_file,
         &include_dirs,
-        &user_clang_flags,
+        &cache_flags,
         tools.llvm_target,
         &output_dir,
         &base_name,
@@ -266,19 +275,25 @@ pub fn run(req: VerifyRequest) -> Result<VerifyOutcome> {
     let impl_file = cpp_file.file_name().and_then(OsStr::to_str);
     if saw_output.contains("Counterexample") {
         let counterexample = parse_counterexample(&saw_output);
-        let (expected, actual) = evaluate_counterexample(
-            saw,
-            clang,
-            &cpp_file,
-            &cry_dest,
-            &output_dir,
-            tools.llvm_target,
-            tools.exe_ext,
-            &user_clang_flags,
-            &req.cryptol_fn,
-            &req.function,
-            &counterexample,
-        )?;
+        let (expected, actual) = if output_dir.join("layout-plan.json").exists() {
+            // Scalar replay cannot represent named aggregate inputs or pointer
+            // provenance. SAW's field-level counterexample is authoritative.
+            (None, None)
+        } else {
+            evaluate_counterexample(
+                saw,
+                clang,
+                &cpp_file,
+                &cry_dest,
+                &output_dir,
+                tools.llvm_target,
+                tools.exe_ext,
+                &user_clang_flags,
+                &req.cryptol_fn,
+                &req.function,
+                &counterexample,
+            )?
+        };
         report_disproved(
             &tools,
             is_msvc,
@@ -427,6 +442,12 @@ fn run_command(cmd: &mut Command, label: &str) -> Result<()> {
             String::from_utf8_lossy(&out.stdout),
             String::from_utf8_lossy(&out.stderr)
         );
+    }
+    for line in String::from_utf8_lossy(&out.stderr)
+        .lines()
+        .filter(|line| line.starts_with("PROOF SCOPE WARNING:"))
+    {
+        eprintln!("{line}");
     }
     Ok(())
 }

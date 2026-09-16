@@ -1,4 +1,4 @@
-# Assert only the first 4 bytes of the 16-byte Rec16 sret return; the
-# trailing 12 bytes are uninitialized and must not be read.
+# Historical unsafe prefix: Rec24.tail is semantic storage, NOT padding.
+# Both source variants must now be rejected before SAW (issue #98).
 [functions.make_rec_ret]
 sret_assert_bytes = 4

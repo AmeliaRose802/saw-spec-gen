@@ -1,0 +1,6 @@
+contract_return = "ret"
+contract_ensures = ["p=pPost"]
+[layout]
+projection = "fields"
+modifies = ["p.choice.value"]
+active_members = { "p.choice" = "0" }

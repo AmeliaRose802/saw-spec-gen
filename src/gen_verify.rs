@@ -7,14 +7,12 @@
 //!      direct in-module callees (compositional verification)
 //!   4. Emit the top-level `verify.saw` script that wires everything together
 
-use crate::alias_fallbacks::{apply_cli_overrides, dump_fallback_diagnostics};
 use crate::gen_verify_callgraph::{collect_external_call_specs, select_reachable_vmethods};
-use crate::spec_rewrite::{apply_alias_rewrites, collect_type_sizes};
 use crate::transform::crucible_safety::SafetyAnalyzer;
 use crate::type_resolve::resolve_spec_types_quiet;
-use crate::{alias_fallbacks_ir, clang_ast, constraints, inventory, llvm_ir, saw_emit};
+use crate::{clang_ast, constraints, inventory, llvm_ir, saw_emit};
 use anyhow::Result;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::Path;
 
 #[allow(clippy::too_many_arguments)]
@@ -228,44 +226,28 @@ pub fn run(
         cryptol_spec,
     );
 
-    // If the LLVM IR contains exception-lower globals (@__exclow_error_*), inject them later.
-
-    let mut all_globals = clang_ast::extract_all_globals(&parsed_ast)?;
-
-    // Augment with mutable globals discovered in the LLVM IR that the
-    // clang AST parser missed (function-local statics, compiler-
-    // generated globals, etc.).  Without this, SAW aborts with
-    // "Global symbol not allocated" when symbolically executing a body
-    // that touches an IR-only global.
-    let ir_struct_defs = if let Some(ir_path) = llvm_ir_path {
-        if let Ok(ir_text) = std::fs::read_to_string(ir_path) {
-            let extra =
-                crate::transform::ir_globals::discover_ir_only_globals(&ir_text, &all_globals);
-            if !extra.is_empty() {
-                eprintln!(
-                    "  discovered {} IR-only mutable global(s) not in clang AST",
-                    extra.len(),
-                );
-                all_globals.extend(extra);
-            }
-            crate::transform::ir_globals::mark_static_initializers(&mut all_globals, &ir_text);
-            llvm_ir::struct_defs(&ir_text)
-        } else {
-            HashMap::new()
-        }
-    } else {
-        HashMap::new()
-    };
-
-    // Inject the exception-lower bookkeeping globals (@__exclow_error_*)
-    // with the right TypeInfo and pre-state init values. Must run after
-    // the AST + IR scans so the explicit `init_value: Some("0")` for the
-    // error flag isn't shadowed by a duplicate entry from
-    // `discover_ir_only_globals` (which would have `init_value: None`
-    // because it can't parse the LLVM `false` literal).
-    if let Some(ir_path) = llvm_ir_path {
-        crate::transform::eh_globals::inject_exclow_globals(&mut all_globals, ir_path);
+    crate::object_layout::plan::prepare(
+        &parsed_ast,
+        llvm_ir_path,
+        &ir_text,
+        &target_fn,
+        &mut target_spec,
+        &mut buffer_overrides,
+        alias_size_overrides,
+        output,
+        cryptol_spec,
+        cryptol_fn,
+        bitcode,
+    )?;
+    if buffer_overrides
+        .layout_plan
+        .as_ref()
+        .is_some_and(|p| !p.objects.is_empty())
+    {
+        safety.allow_opaque_leaves();
     }
+
+    let (all_globals, ir_struct_defs) = collect_globals(&parsed_ast, llvm_ir_path)?;
 
     let mut all_specs = constraints::derive_constraints(&all_functions)?;
     for spec in &mut all_specs {
@@ -454,7 +436,16 @@ pub fn run(
                 .or_else(|| Some(s.function_name.clone()))
         })
         .collect();
-    let bitcode_overrides = saw_emit::scan_and_emit_bitcode_overrides(
+    let scan_overrides = if buffer_overrides
+        .layout_plan
+        .as_ref()
+        .is_some_and(|p| !p.objects.is_empty())
+    {
+        saw_emit::scan_and_emit_typed_bitcode_overrides
+    } else {
+        saw_emit::scan_and_emit_bitcode_overrides
+    };
+    let bitcode_overrides = scan_overrides(
         llvm_ir_path,
         &target_mangled,
         &already_covered,
@@ -494,24 +485,24 @@ pub fn run(
         &uninterpreted,
     )?;
 
-    // Post-processing: rewrite unresolved `llvm_alias "X"` references into
-    // concrete SAW types (structs → byte arrays, enums → `llvm_int N`).
-    let mut fallbacks = collect_type_sizes(&all_functions);
-    // Seed enum_bits from every EnumDecl in the AST so forward-declared
-    // enums like `LatchResult` still get the `llvm_int <bits>` fallback.
-    for (name, bits) in clang_ast::collect_all_enum_bits(&parsed_ast) {
-        fallbacks.enum_bits.entry(name).or_insert(bits);
-    }
-    if !ir_funcs.is_empty() {
-        alias_fallbacks_ir::add_ir_deref_fallbacks(&mut fallbacks, &all_functions, &ir_funcs);
-    }
-    // CLI overrides take priority over inferred sizes.
-    apply_cli_overrides(&mut fallbacks, alias_size_overrides, alias_enum_overrides)?;
-    // SAW_SPEC_GEN_DEBUG_FALLBACKS=1 to see resolved fallback sizes.
-    if std::env::var_os("SAW_SPEC_GEN_DEBUG_FALLBACKS").is_some() {
-        dump_fallback_diagnostics(&fallbacks);
-    }
-    apply_alias_rewrites(output, &ir_struct_sizes, &fallbacks);
+    // Only exact LLVM names from the validated object plan bypass alias fallbacks.
+    let protected: HashSet<String> = buffer_overrides
+        .layout_plan
+        .iter()
+        .flat_map(|plan| plan.objects.values())
+        .map(|object| object.layout.llvm_type.clone())
+        .collect();
+    finalize_aliases(
+        &parsed_ast,
+        &all_functions,
+        &ir_funcs,
+        &ir_struct_sizes,
+        alias_size_overrides,
+        alias_enum_overrides,
+        output,
+        &protected,
+    )?;
+    crate::object_layout::plan::record_emitted_boundaries(output)?;
 
     let source_file = inventory::resolve_cpp_source_file(&parsed_ast, function, &target_mangled);
     inventory::emit_fragment(
@@ -533,6 +524,6 @@ pub fn run(
 }
 
 use crate::gen_verify_helpers::{
-    assemble_and_link_stubs, emit_spec_only_result, gather_and_emit_uninterpreted,
-    warn_missing_interfaces,
+    assemble_and_link_stubs, collect_globals, emit_spec_only_result, finalize_aliases,
+    gather_and_emit_uninterpreted, warn_missing_interfaces,
 };

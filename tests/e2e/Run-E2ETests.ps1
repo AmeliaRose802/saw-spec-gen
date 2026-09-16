@@ -93,6 +93,7 @@ $defaultTags = @(
     'int_ops'
         'string_content'
     'aggregate_bridge'
+    'object_layout'
 )
 if ($All) {
     $selected = $cases
@@ -143,7 +144,9 @@ function Invoke-Case($c) {
                 CryptolFn   = $d.CryptolFn
                 Function    = $d.Function
             }
-            if ($c.Config) { $verifyArgs.Config = Resolve-RepoPath (Join-Path $c.Dir $c.Config) }
+            $config = if ($IsWindows -and $c.WindowsConfig) { $c.WindowsConfig } elseif (-not $IsWindows -and $c.LinuxConfig) { $c.LinuxConfig } else { $c.Config }
+            if ($config) { $verifyArgs.Config = Resolve-RepoPath (Join-Path $c.Dir $config) }
+            if ($c.CxxStandard) { $verifyArgs.CxxStandard = $c.CxxStandard }
             & (Join-Path $RepoRoot 'verify.ps1') @verifyArgs *>&1 | Out-String
         }
         'rust' {
@@ -253,6 +256,33 @@ function Get-ContractMetadataError($c) {
     return $null
 }
 
+function Get-LayoutMetadataError($c) {
+    if (-not $c.LayoutRegions) { return $null }
+    $base = [System.IO.Path]::GetFileNameWithoutExtension($c.File)
+    $dir = Join-Path (Resolve-RepoPath $c.Dir) "out_${base}"
+    if (-not (Test-Path (Join-Path $dir 'result.json'))) { return 'missing result for layout validation' }
+    $result = Get-Content -Raw (Join-Path $dir 'result.json') | ConvertFrom-Json
+    $layout = $result.memory_layout
+    if (-not $layout -or $layout.schema_version -ne 1) { return 'missing compiler layout metadata' }
+    $abi = if ($IsWindows) { 'msvc' } else { 'itanium' }
+    if ($layout.abi -ne $abi) { return "layout ABI $($layout.abi), expected $abi" }
+    foreach ($name in $c.LayoutRegions) {
+        $object = $layout.objects.$name
+        if (-not $object -or $object.layout.size -le 0 -or $object.layout.alignment -le 0) { return "invalid compiler object $name" }
+        if ($object.layout.unresolved.Count -ne 0) { return "unresolved compiler object $name" }
+        if ($name -eq 'return') {
+            if ($object.asserted.Count -ne $object.layout.fields.Count) { return 'return omits semantic fields' }
+            if ($object.lowering -ne 'sret') { return 'return ABI metadata is not sret' }
+        }
+    }
+    $script = Get-Content -Raw (Join-Path $dir 'verify.saw')
+    if ($script -notmatch 'llvm_alloc(?:_readonly)?_aligned \d+ \(llvm_(?:alias|struct_type|packed_struct_type)') { return 'no typed compiler allocation in proof' }
+    foreach ($symbol in $c.ForbiddenOverrides) {
+        if ($script -match ('llvm_unsafe_assume_spec m "[^"\r\n]*' + [regex]::Escape($symbol))) { return "defined helper was overridden: $symbol" }
+    }
+    return $null
+}
+
 if ($List) {
     Write-Host ("Would run {0} case(s):" -f $selected.Count) -ForegroundColor Cyan
     for ($i = 0; $i -lt $selected.Count; $i++) {
@@ -280,11 +310,18 @@ for ($i = 0; $i -lt $total; $i++) {
     try {
         $out = Invoke-Case $c
         $got = Get-Verdict $out
+        if ($c.ExpectedError) {
+            if ($got -eq 'NO-RESULT' -and $out -match $c.ExpectedError -and $out -notmatch 'BEGIN_PROOF') {
+                $got = 'REJECTED'
+            }
+        }
         $contractError = Get-ContractMetadataError $c
         if ($contractError) {
             $out += "`ncontract metadata error: $contractError"
             $got = 'INVALID-CONTRACT-METADATA'
         }
+        $layoutError = Get-LayoutMetadataError $c
+        if ($layoutError) { $out += "`nlayout metadata error: $layoutError"; $got = 'INVALID-LAYOUT-METADATA' }
     } catch {
         $got = 'EXCEPTION'
         $out = $_ | Out-String

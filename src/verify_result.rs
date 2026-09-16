@@ -45,6 +45,8 @@ struct VerifyResult<'a> {
     time_secs: Option<f64>,
     impl_file: Option<&'a str>,
     contract: &'a FunctionContract,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    memory_layout: Option<crate::object_layout::LayoutPlan>,
 }
 
 #[derive(Serialize)]
@@ -94,6 +96,16 @@ pub fn write_verify_result(
         time_secs,
         impl_file,
         contract,
+        memory_layout: if side == "cpp" {
+            let path = output_dir.join("layout-plan.json");
+            if path.exists() {
+                Some(serde_json::from_str(&std::fs::read_to_string(path)?)?)
+            } else {
+                None
+            }
+        } else {
+            None
+        },
     };
     write_payload(output_dir, &payload)
 }

@@ -39,6 +39,7 @@ at `<output-dir>/cpp/result.json` and `<output-dir>/rust/result.json`.
 | `time_secs`      | number \| null                                    | yes      | Wall-clock seconds the SAW invocation took, when measured. |
 | `impl_file`      | string \| null                                    | yes      | Source file basename (the `.cpp` / `.rs` that produced the bitcode/MIR).  For `side="equiv"`, both basenames joined with `" | "`. |
 | `contract`       | object                                            | C++      | Unified implementation-function contract. Its `clauses` array records every checked return or memory assertion and the Cryptol term from which that clause came. |
+| `memory_layout`  | object                                            | no       | Native C++ checked compiler-layout plan, when available. Omitted otherwise; not a separate proof verdict. |
 
 Each `contract.clauses` entry has this shape:
 
@@ -59,13 +60,49 @@ provenance `activatePost`. The two Cryptol helpers are not independent proof
 subjects.
 
 All optional consumer fields are emitted as `null` (or `[]` for
-`counterexample`) rather than omitted, so the keyset is stable.
+`counterexample`) rather than omitted, except `memory_layout`, which is omitted
+when no checked C++ plan is available.
+
+### Compiler-derived memory layout (C++)
+
+Native `verify-cpp` embeds the checked plan in top-level `memory_layout`.
+See [29-compiler-derived-object-layouts.md](29-compiler-derived-object-layouts.md)
+for configuration, supported layouts and proof boundaries.
+
+| Nested field | Meaning |
+|---|---|
+| `schema_version` | Integer `1`, distinct from the outer result schema string `"1"`. |
+| `target_triple`, `data_layout`, `compiler`, `abi`, `command` | Compiler/target provenance; `abi` is `msvc` or `itanium`. |
+| `objects` | Region-keyed map, including `return` for sret; not an array. |
+| `abstract_objects` | Layouts for eligible abstract vptr-only interface parameters using explicit assumed contracts; no complete derived-object coverage claim. |
+| `records`, `llvm_types` | Full captured record trees and named LLVM definition snapshot. The compiler sidecar additionally retains `irgen_types`; the plan does not duplicate that map. |
+| `validity_constraints`, `semantic_preconditions` | Recorded representation/selection constraints and original user preconditions, respectively; user restrictions are not inferred C++ validity. |
+| `warnings`, `abstraction_boundaries` | Allocation assumptions, other scope warnings and remaining runtime/callee abstraction boundaries. Also inspect per-object validation notes. |
+
+Each `objects.<region>` entry contains `region`, `projection`, `mutable`,
+zero-based `argument_index`, `lowering` (`pointer`, `byval`,
+`indirect_by_value` or `sret`), `configured_shape`, `inferred_shape`,
+`asserted`, `framed`, `selectors` and `layout`.
+The layout includes `source_type`, `llvm_type`, `allocation_type`, `size`,
+`alignment`, `llvm_alignment`, `fields`, `padding`, `bases`, `validation` and
+`unresolved`. Field entries record relative paths, source/LLVM types, extents,
+optional bit/array metadata, guards, validity, and pointer/runtime markers.
+`allocation_type` identifies a named alias or the exact inline compiler IRgen
+storage used by SAW.
+
+`contract.clauses` still identifies logical return/state clause provenance;
+`memory_layout` explains sret lowering and the typed, guarded field assertions.
+Padding is not a semantic return field. Frames check unchanged **final values**,
+not absence of transient writes. A VERIFIED result remains subject to its
+preconditions and recorded assumptions; it does not prove concurrency, general
+C++ lifetimes or compiler correctness. `REJECTED` is an E2E classification for
+pre-proof generation failures, not an additional result-schema verdict.
 
 ### Verdict semantics
 
 | `verdict`        | Meaning                                                   |
 |------------------|-----------------------------------------------------------|
-| `VERIFIED`       | SAW proved the implementation matches `cryptol_fn` on every input. |
+| `VERIFIED`       | SAW proved the implementation matches the contract on inputs admitted by the preconditions, under the proof's explicit assumptions. |
 | `DISPROVED`      | SAW returned a counterexample (recorded in `counterexample`). |
 | `UNKNOWN`        | SAW returned neither `VERIFIED` nor a counterexample (timeout, parser error, etc.). |
 | `EQUIVALENT`     | (`side="equiv"` only) both C++ and Rust sides individually `VERIFIED`. |
@@ -123,8 +160,10 @@ All optional consumer fields are emitted as `null` (or `[]` for
 
 ## Producing this file
 
-All three wrappers source the shared helper
-[`scripts/Write-ResultJson.ps1`](../scripts/Write-ResultJson.ps1):
+Native C++/Rust verification writes through
+[the shared Rust writer](../src/verify_result.rs#L1); the C++ writer attaches the
+checked layout plan when present. The PowerShell writer is
+[the shared result helper](../scripts/Write-ResultJson.ps1#L1):
 
 ```powershell
 . (Join-Path $ScriptRoot 'scripts/Write-ResultJson.ps1')
@@ -142,8 +181,8 @@ Write-VerifyResult `
 ```
 
 Adding a new field to schema `1` requires only updating
-[`Write-ResultJson.ps1`](../scripts/Write-ResultJson.ps1) and this
-document.  Anything that changes the meaning of an existing field
+the relevant native/PowerShell writers and this document.
+Anything that changes the meaning of an existing field
 requires bumping `schema_version` and teaching the consumers to handle
 both revisions (or to reject the older one with a clear error).
 

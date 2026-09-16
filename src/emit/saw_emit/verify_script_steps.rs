@@ -205,6 +205,16 @@ pub(super) fn emit_equiv_spec_body(
     // llvm_fresh_var` and SAW aborts with `Value not in scope: nm`.
     let mut deferred_preconds = String::new();
     for (i, param) in target_spec.params.iter().enumerate() {
+        if let Some(object) = buffer_overrides
+            .layout_plan
+            .as_ref()
+            .and_then(|p| p.object(&param.name))
+        {
+            let (value, ptr) = crate::object_layout::emit::setup(out, object);
+            cryptol_args.push(value);
+            execute_args.push(ptr);
+            continue;
+        }
         let iface = target_fn.params.get(i).and_then(|p| interface_of(&p.ty));
         if let Some(iface_name) = iface {
             let safe_iface = sanitize_name(&iface_name).to_lowercase();
@@ -327,7 +337,17 @@ pub(super) fn emit_equiv_spec_body(
     // "Type mismatch in argument 0 ... declared with type: ptr, but
     // provided argument has incompatible type: iN". See
     // `SAW_SPEC_GEN_BUG_REPORT_sret_not_detected.md`.
-    if target_spec.return_constraint.is_sret {
+    if let Some(object) = buffer_overrides
+        .layout_plan
+        .as_ref()
+        .and_then(|p| p.object("return"))
+    {
+        let (value, ptr) = crate::object_layout::emit::setup(out, object);
+        execute_args.insert(object.argument_index, ptr);
+        if target_spec.return_constraint.sret_prestate {
+            cryptol_args.push(value);
+        }
+    } else if target_spec.return_constraint.is_sret {
         out.push_str("\n    // sret: aggregate return passed via hidden output pointer.\n");
         // 8-byte aligned so aligned callee stores/memcpy aren't rejected.
         out.push_str(&format!(

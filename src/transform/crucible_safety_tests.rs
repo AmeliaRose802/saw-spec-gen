@@ -225,3 +225,201 @@ fn extract_function_symbol_handles_quoted_and_bare() {
         Some("_ZSt3maxIjE"),
     );
 }
+
+#[test]
+fn opaque_leaves_are_opt_in_and_invalidate_transitive_cache() {
+    let ir = r#"
+%Mutex = type { i32, i32 }
+define void @target(ptr %mutex) {
+  call void @"?lock@_Mutex_base@std@@QEAAXXZ"(ptr %mutex)
+  ret void
+}
+define linkonce_odr void @"?lock@_Mutex_base@std@@QEAAXXZ"(ptr %self) {
+  %status = call i32 @_Mtx_lock(ptr %self)
+  %ok = icmp eq i32 %status, 0
+  br i1 %ok, label %locked, label %failed
+locked:
+  %count = getelementptr %Mutex, ptr %self, i32 0, i32 1
+  %before = load i32, ptr %count, align 4
+  %after = add i32 %before, 1
+  store i32 %after, ptr %count, align 4
+  ret void
+failed:
+  call void @_Throw_Cpp_error(i32 %status)
+  unreachable
+}
+declare i32 @_Mtx_lock(ptr)
+declare void @_Throw_Cpp_error(i32) noreturn
+"#;
+    let mut analyzer = SafetyAnalyzer::new(ir);
+    for symbol in ["target", "_Mtx_lock", "unknown_leaf"] {
+        assert!(!analyzer.is_safe(symbol).safe, "legacy check: {symbol}");
+    }
+    analyzer.allow_opaque_leaves();
+    for symbol in [
+        "target",
+        "?lock@_Mutex_base@std@@QEAAXXZ",
+        "_Mtx_lock",
+        "_Throw_Cpp_error",
+        "unknown_leaf",
+    ] {
+        let report = analyzer.is_safe(symbol);
+        assert!(report.safe, "traversal only: {symbol}: {report:?}");
+    }
+    assert!(!analyzer.is_safe("llvm.va_start.p0").safe);
+    assert!(analyzer.allow_opaque_leaves().is_safe("target").safe);
+    assert!(!SafetyAnalyzer::new(ir).is_safe("target").safe);
+}
+
+#[test]
+fn diamond_and_repeated_calls_restore_the_visited_stack() {
+    let ir = r#"
+define void @target() {
+  call void @left()
+  call void @right()
+  call void @leaf()
+  call void @leaf()
+  ret void
+}
+define void @left() {
+  call void @leaf()
+  ret void
+}
+define void @right() {
+  call void @leaf()
+  ret void
+}
+define void @leaf() {
+  ret void
+}
+"#;
+    let mut visited = HashSet::from(["ancestor".to_string()]);
+    let original = visited.clone();
+    // Separate one-shot analyzers must not mistake completed siblings
+    // left in the caller's stack for recursion.
+    for symbol in ["target", "left", "right", "leaf"] {
+        let report = is_crucible_safe(symbol, ir, &mut visited);
+        assert!(report.safe, "{symbol}: {report:?}");
+        assert_eq!(visited, original);
+    }
+    let mut analyzer = SafetyAnalyzer::new(ir);
+    analyzer.allow_opaque_leaves();
+    assert!(analyzer.check("target", &mut visited).safe);
+    assert_eq!(visited, original);
+}
+
+#[test]
+fn failed_checks_restore_the_visited_stack() {
+    for (ir, symbol) in [
+        (WITH_INVOKE, "throws"),
+        (WITH_ATOMIC, "increment"),
+        (WITH_PRINTF, "hello"),
+        (RECURSIVE, "fact"),
+        (PURE_ARITH, "missing"),
+    ] {
+        let mut visited = HashSet::from(["ancestor".to_string()]);
+        let original = visited.clone();
+        assert!(!is_crucible_safe(symbol, ir, &mut visited).safe);
+        assert_eq!(visited, original, "unwind failed for {symbol}");
+    }
+}
+
+#[test]
+fn cached_safety_cannot_hide_an_active_recursion_entry() {
+    let mut analyzer = SafetyAnalyzer::new(PURE_ARITH);
+    assert!(analyzer.is_safe("add_one").safe);
+    let mut visited = HashSet::from(["add_one".to_string()]);
+    let original = visited.clone();
+    let report = analyzer.check("add_one", &mut visited);
+    assert!(!report.safe);
+    assert!(report.first_unsafe_inst.unwrap().contains("recursive"));
+    assert_eq!(visited, original, "must not pop the caller's own entry");
+}
+
+#[test]
+fn opaque_mode_keeps_unsafe_opcodes_intrinsics_and_recursion_unsafe() {
+    for (ir, symbol) in [
+        (WITH_INVOKE, "throws"),
+        (WITH_ATOMIC, "increment"),
+        (INDIRECT_CALL, "via_fp"),
+        (RECURSIVE, "fact"),
+    ] {
+        let mut analyzer = SafetyAnalyzer::new(ir);
+        assert!(!analyzer.allow_opaque_leaves().is_safe(symbol).safe);
+    }
+    for (inst, reason) in [
+        (
+            "%old = cmpxchg ptr %p, i32 0, i32 1 seq_cst seq_cst",
+            "atomic",
+        ),
+        ("fence seq_cst", "atomic"),
+        ("%arg = va_arg ptr %p, i32", "varargs"),
+        ("call void @llvm.va_start.p0(ptr %p)", "intrinsic"),
+        ("call void asm sideeffect \"\", \"\"()", "inline asm"),
+        ("unsupported_opcode", "unknown opcode"),
+    ] {
+        let ir = format!(
+            "declare void @external()\n\
+             define void @helper(ptr %p) {{\n\
+               call void @external()\n{inst}\nret void\n}}\n"
+        );
+        let mut analyzer = SafetyAnalyzer::new(&ir);
+        let report = analyzer.allow_opaque_leaves().is_safe("helper");
+        assert!(!report.safe, "must reject {inst}");
+        assert!(report.first_unsafe_inst.unwrap().contains(reason));
+    }
+}
+
+#[test]
+fn opaque_mode_rejects_mutual_recursion_and_unwinds() {
+    let ir = r#"
+declare void @external()
+define void @a() {
+  call void @external()
+  call void @b()
+  ret void
+}
+define void @b() {
+  call void @a()
+  ret void
+}
+"#;
+    let mut analyzer = SafetyAnalyzer::new(ir);
+    analyzer.allow_opaque_leaves();
+    let mut visited = HashSet::new();
+    for symbol in ["a", "b"] {
+        let report = analyzer.check(symbol, &mut visited);
+        assert!(!report.safe);
+        assert!(report.first_unsafe_inst.unwrap().contains("recursive"));
+        assert!(visited.is_empty());
+    }
+}
+
+#[test]
+fn opaque_mode_checks_the_callee_not_its_global_arguments() {
+    let ir = r#"
+@state = global i32 0
+define void @target() {
+  call void @"unsafe_helper"(ptr @state)
+  ret void
+}
+define void @unsafe_helper(ptr %p) {
+  fence seq_cst
+  ret void
+}
+define void @indirect(ptr %fp) {
+  call void %fp(ptr @state)
+  ret void
+}
+"#;
+    let mut analyzer = SafetyAnalyzer::new(ir);
+    analyzer.allow_opaque_leaves();
+    for (symbol, reason) in [("target", "atomic"), ("indirect", "indirect")] {
+        let report = analyzer.is_safe(symbol);
+        assert!(
+            !report.safe,
+            "must inspect {symbol}, not treat @state as a leaf"
+        );
+        assert!(report.first_unsafe_inst.unwrap().contains(reason));
+    }
+}

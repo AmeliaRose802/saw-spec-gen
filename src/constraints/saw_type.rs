@@ -97,7 +97,7 @@ pub fn pointee_saw_type(ty: &TypeInfo) -> String {
 /// (typically because the typedef appeared inside a more complex
 /// qualType that wasn't string-matched) and we still want to recover
 /// the integer width at SAW emission time.
-fn std_integer_typedef_bits(name: &str) -> Option<u32> {
+pub(crate) fn std_integer_typedef_bits(name: &str) -> Option<u32> {
     let stripped = name.strip_prefix("std::").unwrap_or(name);
     match stripped {
         "int8_t" | "uint8_t" => Some(8),

@@ -66,7 +66,7 @@ mod memcmp_override;
 #[allow(unused_imports)]
 pub use bitcode_overrides::{
     emit_overrides as emit_bitcode_overrides, scan_and_emit as scan_and_emit_bitcode_overrides,
-    EmittedBitcodeOverrides,
+    scan_and_emit_typed as scan_and_emit_typed_bitcode_overrides, EmittedBitcodeOverrides,
 };
 #[allow(unused_imports)]
 pub use factory::emit_interface_factory_spec;

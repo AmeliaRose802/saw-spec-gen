@@ -371,6 +371,7 @@ pub fn gen_verify_cmd(
         &merged.preconditions,
     )?;
     let buffer_overrides = crate::buffer_overrides::BufferOverrides {
+        layout_config: merged.layout.clone(),
         sret_assert_bytes: merged.sret_assert_bytes,
         return_projection: merged.contract_return.clone(),
         ..buffer_overrides

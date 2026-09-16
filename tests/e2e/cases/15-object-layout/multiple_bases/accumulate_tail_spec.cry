@@ -1,0 +1,15 @@
+module accumulate_tail_spec where
+
+// Unique inherited field names are flattened, not guessed base byte offsets.
+type DerivedFields = { a : [32], b : [64], ok : [8], tail : [64] }
+
+accumulate_tail_contract : DerivedFields -> { ret : [64], pPost : DerivedFields }
+accumulate_tail_contract pre = {
+  ret = total,
+  pPost = {
+    a = pre.a, b = pre.b, ok = pre.ok,
+    tail = if pre.ok == 1 then pre.tail + total else pre.tail
+  }
+}
+  where
+    total = (zero # pre.a : [64]) + pre.b

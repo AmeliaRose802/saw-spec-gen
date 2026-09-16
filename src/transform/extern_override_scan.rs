@@ -28,10 +28,13 @@
 //! SAW. Every overrideable target is grounded in a symbol that actually
 //! appears in the bitcode, which is the only ground truth SAW will see.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
 use super::ir_globals::extract_store_global_target;
 pub(crate) use super::ir_globals::{scan_mutable_globals, MutableGlobals};
+
+#[path = "extern_override_scan_globals.rs"]
+mod globals;
 
 /// A function in the bitcode that the emitter should wrap in a
 /// signature-based `llvm_unsafe_assume_spec`.
@@ -94,7 +97,7 @@ pub enum BrokenReason {
     /// The bitcode contains only a `declare` line, no body.
     DeclareOnly,
     /// The body uses `llvm.va_start.p0`, `llvm.va_end.p0`,
-    /// `llvm.va_copy`, or `llvm.va_arg`.
+    /// `llvm.va_copy`, `llvm.va_arg`, or the `va_arg` instruction.
     UsesVarargsIntrinsic,
     /// The symbol matched the `saw_spec_gen-jpp` STL functional
     /// override registry — Crucible can technically simulate the
@@ -182,7 +185,7 @@ pub fn scan(ir: &str, target_symbol: &str) -> Vec<OverrideTarget> {
         } else {
             continue;
         };
-        let globals_written = collect_globals_written_from(&f.name, &by_name, &mg);
+        let globals_written = globals::collect_globals_written_from(&f.name, &by_name, &mg);
         let memcmp_const_len = if f.name == "memcmp" {
             super::memcmp_scan::memcmp_const_len_from_ir(ir)
         } else {
@@ -202,58 +205,21 @@ pub fn scan(ir: &str, target_symbol: &str) -> Vec<OverrideTarget> {
     out
 }
 
-/// Walk every defined body reachable from `start` (through `call`/
-/// `invoke` edges), unioning the bare global symbol names that those
-/// bodies directly `store` into. When the walk reaches a DeclareOnly
-/// callee, conservatively union **all externally-visible** mutable
-/// globals — the opaque body could be a forward-declared function
-/// from another project TU that `extern`s any such symbol and writes
-/// it. Globals with `internal`/`private` linkage are excluded since
-/// other TUs cannot reference them.
-fn collect_globals_written_from(
-    start: &str,
-    by_name: &HashMap<&str, &IrFunc>,
-    mg: &MutableGlobals,
-) -> Vec<String> {
-    let mut written: HashSet<String> = HashSet::new();
-    let mut visited: HashSet<String> = HashSet::new();
-    let mut worklist: VecDeque<String> = VecDeque::new();
-    worklist.push_back(start.to_string());
-    while let Some(s) = worklist.pop_front() {
-        if !visited.insert(s.clone()) {
-            continue;
-        }
-        let Some(f) = by_name.get(s.as_str()) else {
-            // Not even declared in the module — skip.
-            continue;
-        };
-        if !f.is_define {
-            // LLVM intrinsics are compiler-implemented primitives,
-            // not real external functions — they cannot access user
-            // globals.
-            if s.starts_with("llvm.") {
-                continue;
-            }
-            // Opaque callee — could be a forward-declared function
-            // from another project TU that writes any externally-
-            // visible global.
-            written.extend(mg.externally_visible.iter().cloned());
-            continue;
-        }
-        for g in &f.body_globals_stored {
-            if mg.all.contains(g.as_str()) {
-                written.insert(g.clone());
-            }
-        }
-        for callee in &f.body_calls {
-            if !visited.contains(callee.as_str()) {
-                worklist.push_back(callee.clone());
-            }
-        }
-    }
-    let mut out: Vec<String> = written.into_iter().collect();
-    out.sort();
-    out
+/// Opt-in scan for compiler-validated typed object verification.
+/// Attempt defined STL/mutex helpers rather than replacing their bodies
+/// by name. Keep declare-only and varargs boundaries, even when their
+/// names match those registries. This does not certify body safety;
+/// callers must still check opcodes and emit contracts for opaque leaves.
+pub fn scan_typed(ir: &str, target_symbol: &str) -> Vec<OverrideTarget> {
+    scan(ir, target_symbol)
+        .into_iter()
+        .filter(|t| {
+            !matches!(
+                t.reason,
+                BrokenReason::MsvcMutexHelper | BrokenReason::StlOverride
+            )
+        })
+        .collect()
 }
 
 fn parse_functions(ir: &str) -> Vec<IrFunc> {
@@ -287,6 +253,13 @@ fn parse_functions(ir: &str) -> Vec<IrFunc> {
                 if bt.starts_with('}') {
                     break;
                 }
+                // A va_list-consuming helper may use va_arg without
+                // calling va_start itself. It still needs a contract.
+                let inst = bt
+                    .split_once('=')
+                    .filter(|(lhs, _)| lhs.trim_start().starts_with('%'))
+                    .map_or(bt, |(_, rhs)| rhs.trim_start());
+                body_uses_va |= inst.split_whitespace().next() == Some("va_arg");
                 if let Some(callee) = extract_call_target(bt) {
                     if callee.starts_with("llvm.va_start")
                         || callee.starts_with("llvm.va_end")
@@ -516,3 +489,7 @@ fn extract_call_target(line: &str) -> Option<String> {
 #[cfg(test)]
 #[path = "extern_override_scan_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "extern_override_scan_typed_tests.rs"]
+mod typed_tests;

@@ -1,0 +1,6 @@
+# Deliberate stale layout: the compiler object is 32 bytes, not 33.
+out_buffer_param = ["p=33"]
+contract_return = "ret"
+contract_ensures = ["p=pPost"]
+[layout]
+projection = "fields"

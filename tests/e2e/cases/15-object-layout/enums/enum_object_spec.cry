@@ -1,0 +1,5 @@
+module enum_object_spec where
+
+type State = { mode : [32], flags : [8], active : [8] }
+read_code_spec : State -> [32]
+read_code_spec p = p.mode + (zero # p.flags : [32]) + (if p.active == 1 then 1 else 0)

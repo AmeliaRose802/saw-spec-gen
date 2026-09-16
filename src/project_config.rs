@@ -47,6 +47,8 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FunctionConfig {
+    /// Compiler-derived object layout projection, named fields and frame scope.
+    pub layout: Option<crate::object_layout::LayoutConfig>,
     /// Per-function `--no-struct-shape-recognizer`.
     pub no_struct_shape_recognizer: Option<bool>,
 
@@ -144,6 +146,8 @@ pub struct FunctionConfig {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectConfig {
+    /// Defaults for compiler-derived object layouts; per-function table wins.
+    pub layout: Option<crate::object_layout::LayoutConfig>,
     /// Equivalent to `--no-struct-shape-recognizer`.
     pub no_struct_shape_recognizer: Option<bool>,
 
@@ -310,6 +314,10 @@ impl ProjectConfig {
             |sel: fn(&FunctionConfig) -> Option<bool>| -> bool { f.and_then(sel).unwrap_or(false) };
 
         MergedConfig {
+            layout: f
+                .and_then(|c| c.layout.clone())
+                .or_else(|| self.layout.clone())
+                .unwrap_or_default(),
             no_struct_shape_recognizer: pf_bool(|c| c.no_struct_shape_recognizer)
                 || self.no_struct_shape_recognizer.unwrap_or(false),
             use_llvm_combine_modules: pf_bool(|c| c.use_llvm_combine_modules)
@@ -355,6 +363,7 @@ fn merged_vec(per_fn: &[String], global: &[String]) -> Vec<String> {
 
 /// Fully-resolved values after merging the project config with CLI flags.
 pub struct MergedConfig {
+    pub layout: crate::object_layout::LayoutConfig,
     pub no_struct_shape_recognizer: bool,
     pub use_llvm_combine_modules: bool,
     pub spec_only_on_missing: bool,

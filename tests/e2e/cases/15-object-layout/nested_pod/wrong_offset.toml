@@ -1,0 +1,5 @@
+contract_return = "ret"
+contract_ensures = ["p=pPost"]
+[layout]
+projection = "fields"
+offsets = { "p.inner.x" = 1 }

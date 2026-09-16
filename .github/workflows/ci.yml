@@ -43,7 +43,7 @@ jobs:
       run: cargo test --lib --verbose
 
     - name: Run integration tests
-      run: cargo test --test integration_test --verbose
+      run: cargo test --tests --verbose
 
     - name: Check no warnings
       run: cargo build 2>&1
@@ -129,6 +129,14 @@ jobs:
       # via the standard search paths — no env.ps1 or PATH munging needed.
       run: pwsh -NoLogo -NoProfile -File tests/e2e/Run-E2ETests.ps1
 
+    - name: Upload validated object layouts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: object-layouts-Linux
+        path: tests/e2e/cases/15-object-layout/**/result.json
+        if-no-files-found: ignore
+
     - name: Upload failing-case logs
       if: failure()
       uses: actions/upload-artifact@v4
@@ -211,4 +219,12 @@ jobs:
       with:
         name: e2e-tests-fail-logs-Windows
         path: tests/e2e/last-fail-*.log
+        if-no-files-found: ignore
+
+    - name: Upload validated object layouts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: object-layouts-Windows
+        path: tests/e2e/cases/15-object-layout/**/result.json
         if-no-files-found: ignore

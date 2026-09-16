@@ -1,9 +1,12 @@
 //! Helpers extracted from [`super::gen_verify`] to stay under the
 //! 500-non-whitespace-line limit.
 
-use crate::clang_ast;
-use crate::saw_emit;
+use crate::alias_fallbacks::{apply_cli_overrides, dump_fallback_diagnostics};
+use crate::constraints::{FunctionInfo, GlobalVarInfo};
+use crate::spec_rewrite::{apply_alias_rewrites_protected, collect_type_sizes};
+use crate::{clang_ast, llvm_ir, saw_emit};
 use anyhow::Result;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 /// Gather uninterpreted-primitive contracts (`@uninterpreted` annotations
@@ -130,5 +133,80 @@ pub(crate) fn emit_spec_only_result(
         function,
         output.join("result.json").display(),
     );
+    Ok(())
+}
+
+/// Collect AST and IR globals, preserving static and exception-lowering initializers.
+pub(crate) fn collect_globals(
+    parsed_ast: &clang_ast::AstNode,
+    llvm_ir_path: Option<&Path>,
+) -> Result<(Vec<GlobalVarInfo>, HashMap<String, llvm_ir::IrStructDef>)> {
+    let mut all_globals = clang_ast::extract_all_globals(parsed_ast)?;
+
+    // Augment with mutable globals discovered in the LLVM IR that the
+    // clang AST parser missed (function-local statics, compiler-
+    // generated globals, etc.). Without this, SAW aborts with
+    // "Global symbol not allocated" when symbolically executing a body
+    // that touches an IR-only global.
+    let ir_struct_defs = if let Some(ir_path) = llvm_ir_path {
+        if let Ok(ir_text) = std::fs::read_to_string(ir_path) {
+            let extra =
+                crate::transform::ir_globals::discover_ir_only_globals(&ir_text, &all_globals);
+            if !extra.is_empty() {
+                eprintln!(
+                    "  discovered {} IR-only mutable global(s) not in clang AST",
+                    extra.len(),
+                );
+                all_globals.extend(extra);
+            }
+            crate::transform::ir_globals::mark_static_initializers(&mut all_globals, &ir_text);
+            llvm_ir::struct_defs(&ir_text)
+        } else {
+            HashMap::new()
+        }
+    } else {
+        HashMap::new()
+    };
+
+    // Inject the exception-lower bookkeeping globals (@__exclow_error_*)
+    // with the right TypeInfo and pre-state init values. Must run after
+    // the AST + IR scans so the explicit `init_value: Some("0")` for the
+    // error flag isn't shadowed by a duplicate entry from
+    // `discover_ir_only_globals` (which would have `init_value: None`
+    // because it can't parse the LLVM `false` literal).
+    if let Some(ir_path) = llvm_ir_path {
+        crate::transform::eh_globals::inject_exclow_globals(&mut all_globals, ir_path);
+    }
+    Ok((all_globals, ir_struct_defs))
+}
+
+/// Finalize aliases without flattening exact names from the validated object plan.
+#[allow(clippy::too_many_arguments)]
+pub fn finalize_aliases(
+    parsed_ast: &clang_ast::AstNode,
+    all_functions: &[FunctionInfo],
+    ir_funcs: &[FunctionInfo],
+    ir_struct_sizes: &HashMap<String, usize>,
+    alias_size_overrides: &[String],
+    alias_enum_overrides: &[String],
+    output: &Path,
+    protected: &HashSet<String>,
+) -> Result<()> {
+    let mut fallbacks = collect_type_sizes(all_functions);
+    // Seed enum_bits from every EnumDecl in the AST so forward-declared
+    // enums like `LatchResult` still get the `llvm_int <bits>` fallback.
+    for (name, bits) in clang_ast::collect_all_enum_bits(parsed_ast) {
+        fallbacks.enum_bits.entry(name).or_insert(bits);
+    }
+    if !ir_funcs.is_empty() {
+        crate::alias_fallbacks_ir::add_ir_deref_fallbacks(&mut fallbacks, all_functions, ir_funcs);
+    }
+    // CLI overrides take priority over inferred sizes.
+    apply_cli_overrides(&mut fallbacks, alias_size_overrides, alias_enum_overrides)?;
+    // SAW_SPEC_GEN_DEBUG_FALLBACKS=1 to see resolved fallback sizes.
+    if std::env::var_os("SAW_SPEC_GEN_DEBUG_FALLBACKS").is_some() {
+        dump_fallback_diagnostics(&fallbacks);
+    }
+    apply_alias_rewrites_protected(output, ir_struct_sizes, &fallbacks, protected);
     Ok(())
 }

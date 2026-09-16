@@ -1,0 +1,9 @@
+module variant_spec where
+
+type State = { choice__index : [8], choice__value : [64], count : [64] }
+increment_choice_contract : State -> { ret : [64], pPost : State }
+increment_choice_contract pre = {
+  ret = pre.choice__value + 1,
+  pPost = { choice__index = pre.choice__index,
+            choice__value = pre.choice__value + 1, count = pre.count }
+}

@@ -39,6 +39,10 @@ pub enum CryArg {
 
 #[derive(Debug, Default, Clone)]
 pub struct BufferOverrides {
+    /// Compiler-grounded layout settings and validated per-target plan.
+    pub layout_config: crate::object_layout::LayoutConfig,
+    pub layout_plan: Option<crate::object_layout::LayoutPlan>,
+    pub in_buffer_auto: HashSet<String>,
     /// `--in-buffer-size NAME=SHAPE` — pointer param NAME is a
     /// read-only input buffer. The map value is the resolved SAW
     /// allocation type (accepted SHAPEs: `BYTES`, `iW`, `NxiW`,
@@ -115,6 +119,10 @@ impl BufferOverrides {
         let mut me = BufferOverrides::default();
         for s in in_buffer_size {
             let (k, v) = split_name_eq(s, "--in-buffer-size")?;
+            if v.eq_ignore_ascii_case("auto") {
+                me.in_buffer_auto.insert(k.to_string());
+                continue;
+            }
             let saw_ty = parse_buf_saw_type(v, "--in-buffer-size")?;
             me.in_buffers.insert(k.to_string(), saw_ty);
         }
@@ -158,14 +166,8 @@ impl BufferOverrides {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
-        // Cross-validate: every --cryptol-fn-out NAME must have a
-        // matching --out-buffer-param NAME (otherwise there's no
-        // allocated pointer to post-assert against).
-        for (name, fn_) in &me.cryptol_fn_out {
-            if name != "this" && !me.is_out_buffer(name) {
-                bail!("--cryptol-fn-out {name}={fn_}: no matching --out-buffer-param {name}=...");
-            }
-        }
+        // Validate regions after compiler object inference: a mutable aggregate
+        // no longer requires a redundant configured output allocation.
         Ok(me)
     }
 
@@ -238,7 +240,7 @@ impl BufferOverrides {
     }
 
     pub fn has_in_buffer_size(&self, param_name: &str) -> bool {
-        self.in_buffers.contains_key(param_name)
+        self.in_buffers.contains_key(param_name) || self.in_buffer_auto.contains(param_name)
     }
 
     pub fn has_auto_out_buffers(&self) -> bool {

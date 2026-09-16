@@ -28,8 +28,9 @@ use std::collections::{HashMap, HashSet};
 /// Outcome of `is_crucible_safe`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SafetyReport {
-    /// True iff every instruction in the (transitive) body is on the
-    /// allow-list and every callee resolves to another safe body.
+    /// Every visible instruction is allowed and callees resolve to safe
+    /// bodies (or opaque leaves when explicitly enabled). This is a
+    /// traversal check, not a proof or permission to trust externs.
     pub safe: bool,
     /// First instruction line that violated the allow-list. Useful for
     /// `SAW_SPEC_GEN_DEBUG=1` diagnostics.
@@ -62,6 +63,8 @@ pub struct SafetyAnalyzer<'a> {
     cache: HashMap<String, SafetyReport>,
     /// Line storage materialised lazily (split once, reused).
     lines: Vec<&'a str>,
+    /// Opaque leaves still require assumed contracts, not native execution.
+    opaque_leaves_allowed: bool,
 }
 
 impl<'a> SafetyAnalyzer<'a> {
@@ -72,34 +75,58 @@ impl<'a> SafetyAnalyzer<'a> {
             bodies,
             cache: HashMap::new(),
             lines,
+            opaque_leaves_allowed: false,
         }
     }
 
+    /// Enable opaque leaves for traversal with compiler-validated object
+    /// layouts. Unknown/declare-only callees still need assumed contracts
+    /// from `extern_override_scan::scan_typed`; they are NOT native-safe.
+    /// Opcode, intrinsic and recursion checks remain strict. Clear cached
+    /// transitive failures so enabling this after a check takes effect.
+    pub fn allow_opaque_leaves(&mut self) -> &mut Self {
+        if !self.opaque_leaves_allowed {
+            self.opaque_leaves_allowed = true;
+            self.cache.clear();
+        }
+        self
+    }
+
     /// Returns whether `mangled` resolves to a body whose every
-    /// instruction is Crucible-safe. Unknown symbols (no `define` in
-    /// this module) return `unsafe` so the caller falls back to the
-    /// adversarial-override path.
+    /// instruction is Crucible-safe for traversal. By default, unknown
+    /// symbols (no `define`) return `unsafe` for the override fallback.
+    /// [`Self::allow_opaque_leaves`] only relaxes that missing-body gate.
     pub fn is_safe(&mut self, mangled: &str) -> SafetyReport {
         let mut visited = HashSet::new();
         self.check(mangled, &mut visited)
     }
 
     fn check(&mut self, mangled: &str, visited: &mut HashSet<String>) -> SafetyReport {
+        // `visited` is the active stack, not every previously seen callee.
+        // Check it before the cache, including caller-supplied ancestors.
+        if visited.contains(mangled) {
+            return SafetyReport::unsafe_with(format!("recursive call to @{mangled}"));
+        }
         if let Some(cached) = self.cache.get(mangled) {
             return cached.clone();
         }
-        // Recursion: a function that (transitively) calls itself can't
-        // be unrolled by Crucible in finite time. Treat as unsafe.
-        if !visited.insert(mangled.to_string()) {
-            let r = SafetyReport::unsafe_with(format!("recursive call to @{mangled}"));
-            self.cache.insert(mangled.to_string(), r.clone());
-            return r;
-        }
+        visited.insert(mangled.to_string());
+        let report = self.check_body(mangled, visited);
+        // Unwind on every outcome, including missing bodies and errors.
+        visited.remove(mangled);
+        self.cache.insert(mangled.to_string(), report.clone());
+        report
+    }
+
+    fn check_body(&mut self, mangled: &str, visited: &mut HashSet<String>) -> SafetyReport {
         let Some(&(start, end)) = self.bodies.get(mangled) else {
-            // Declare-only (or absent) — caller will treat as external.
-            let r = SafetyReport::unsafe_with(format!("no body for @{mangled} in module"));
-            self.cache.insert(mangled.to_string(), r.clone());
-            return r;
+            // Opaque callees remain assumption boundaries. Intrinsics
+            // must go through the explicit allow-list in classify_call.
+            return if self.opaque_leaves_allowed && !mangled.starts_with("llvm.") {
+                SafetyReport::safe()
+            } else {
+                SafetyReport::unsafe_with(format!("no body for @{mangled} in module"))
+            };
         };
         // Snapshot the body lines before recursing so we don't hold a
         // borrow on `self.lines` across `self.check`.
@@ -112,9 +139,7 @@ impl<'a> SafetyAnalyzer<'a> {
             match classify_instruction(inst) {
                 InstClass::Safe => {}
                 InstClass::Unsafe(reason) => {
-                    let r = SafetyReport::unsafe_with(format!("{reason}: {}", inst.trim()));
-                    self.cache.insert(mangled.to_string(), r.clone());
-                    return r;
+                    return SafetyReport::unsafe_with(format!("{reason}: {}", inst.trim()));
                 }
                 InstClass::Call(callees) => {
                     for callee in callees {
@@ -123,18 +148,15 @@ impl<'a> SafetyAnalyzer<'a> {
                             let why = sub
                                 .first_unsafe_inst
                                 .unwrap_or_else(|| "unsafe transitively".to_string());
-                            let r =
-                                SafetyReport::unsafe_with(format!("transitive: @{callee} → {why}"));
-                            self.cache.insert(mangled.to_string(), r.clone());
-                            return r;
+                            return SafetyReport::unsafe_with(format!(
+                                "transitive: @{callee} → {why}"
+                            ));
                         }
                     }
                 }
             }
         }
-        let r = SafetyReport::safe();
-        self.cache.insert(mangled.to_string(), r.clone());
-        r
+        SafetyReport::safe()
     }
 }
 
@@ -408,27 +430,29 @@ fn classify_call(inst: &str) -> InstClass {
     if inst.contains(" asm ") || inst.contains("asm sideeffect") || inst.contains(" asm\t") {
         return InstClass::Unsafe("inline asm");
     }
-    // Find `@"name"(` or `@name(`. Choose the **rightmost** `@` token
-    // that is followed eventually by `(`, because earlier `@` tokens
-    // may appear inside metadata or attribute groups (rare in real
-    // bodies, but cheap to guard against).
-    let Some(at) = inst.rfind('@') else {
+    // The direct callee precedes any global-valued arguments. Require
+    // `(` immediately after its name so an indirect call passing a
+    // global cannot masquerade as an opaque, traversal-safe leaf.
+    let Some(at) = inst.find('@') else {
         // Indirect call through a `%reg` — we can't know what it is.
         // Treat as unsafe; this catches function pointers.
         return InstClass::Unsafe("indirect call");
     };
     let after = &inst[at + 1..];
-    let name = if let Some(rest) = after.strip_prefix('"') {
+    let (name, rest) = if let Some(rest) = after.strip_prefix('"') {
         let Some(end) = rest.find('"') else {
             return InstClass::Unsafe("malformed callee");
         };
-        rest[..end].to_string()
+        (&rest[..end], &rest[end + 1..])
     } else {
         let end = after
-            .find(|c: char| c == '(' || c.is_whitespace())
+            .find(|c: char| matches!(c, '(' | ')' | ',') || c.is_whitespace())
             .unwrap_or(after.len());
-        after[..end].to_string()
+        (&after[..end], &after[end..])
     };
+    if name.is_empty() || !rest.trim_start().starts_with('(') {
+        return InstClass::Unsafe("indirect or malformed call");
+    }
     if name.starts_with("llvm.") {
         if SAFE_INTRINSICS.iter().any(|&s| name.starts_with(s)) {
             return InstClass::Safe;
@@ -436,7 +460,7 @@ fn classify_call(inst: &str) -> InstClass {
         // llvm.va_start, llvm.va_end, llvm.eh.*, llvm.stackrestore, etc.
         return InstClass::Unsafe("disallowed intrinsic");
     }
-    InstClass::Call(vec![name])
+    InstClass::Call(vec![name.to_string()])
 }
 
 #[cfg(test)]

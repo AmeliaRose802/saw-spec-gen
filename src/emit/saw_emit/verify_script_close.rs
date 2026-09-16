@@ -87,9 +87,24 @@ pub(super) fn emit_postcondition_and_close(
         out.push_str(&format!(
             "    // Postcondition: *{out_name}_ptr == Cryptol {fn_name}\n",
         ));
+        if let Some(object) = buffer_overrides
+            .layout_plan
+            .as_ref()
+            .and_then(|p| p.object(out_name))
+        {
+            crate::object_layout::emit::postcondition(out, object, Some(&call));
+            continue;
+        }
         out.push_str(&format!(
             "    llvm_points_to {out_name}_ptr (llvm_term {{{{ {call} }}}});\n",
         ));
+    }
+    if let Some(plan) = &buffer_overrides.layout_plan {
+        for (name, object) in &plan.objects {
+            if name != "return" && !buffer_overrides.cryptol_fn_out.contains_key(name) {
+                crate::object_layout::emit::postcondition(out, object, None);
+            }
+        }
     }
     // Auto-detected output-buffer postconditions from _Out_writes_ + <param>_post convention.
     for (out_name, fn_name) in ctx.auto_out_postconds {
@@ -142,7 +157,13 @@ pub(super) fn emit_postcondition_and_close(
         return;
     }
 
-    if ctx.is_sret {
+    if let Some(object) = buffer_overrides
+        .layout_plan
+        .as_ref()
+        .and_then(|p| p.object("return"))
+    {
+        crate::object_layout::emit::postcondition(out, object, Some(&cryptol_return));
+    } else if ctx.is_sret {
         if ctx.sub_callee_specs.is_empty() {
             out.push_str("    // Postcondition (sret): *result_ptr == Cryptol spec\n");
         } else {

@@ -49,11 +49,11 @@ fn parses_in_and_out_buffers() {
 }
 
 #[test]
-fn cryptol_fn_out_requires_matching_out_buffer_param() {
-    let err =
-        BufferOverrides::from_cli(&[], &[], &["out=foo".into()], &[], &[], &[], &[]).unwrap_err();
-    let msg = format!("{err:#}");
-    assert!(msg.contains("--out-buffer-param"), "msg = {msg}");
+fn cryptol_fn_out_defers_region_validation_until_layout_inference() {
+    let overrides =
+        BufferOverrides::from_cli(&[], &[], &["out=foo".into()], &[], &[], &[], &[]).unwrap();
+    assert_eq!(overrides.cryptol_fn_out["out"], "foo");
+    assert!(!overrides.is_out_buffer("out"));
 }
 
 #[test]

@@ -1,0 +1,22 @@
+module advance_outer_spec where
+
+// Field paths, not bytes: no ABI offsets, padding, or result prestate argument.
+type OuterFields = {
+  tag : [8], inner__x : [32], inner__enabled : [8],
+  arr_0 : [64], arr_1 : [64]
+}
+
+advance_outer_contract : OuterFields -> [32] -> { ret : OuterFields, pPost : OuterFields }
+advance_outer_contract pre delta = { ret = snapshot, pPost = stored }
+  where
+    enabled = pre.inner__enabled == 1
+    nextX = if enabled then pre.inner__x + delta else pre.inner__x
+    snapshot = {
+      tag = pre.tag, inner__x = nextX, inner__enabled = pre.inner__enabled,
+      arr_0 = pre.arr_0,
+      arr_1 = if enabled then pre.arr_1 + pre.arr_0 else pre.arr_1
+    }
+    stored = {
+      tag = pre.tag, inner__x = nextX, inner__enabled = pre.inner__enabled,
+      arr_0 = pre.arr_0, arr_1 = pre.arr_1
+    }

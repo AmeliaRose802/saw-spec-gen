@@ -4,6 +4,8 @@ End-to-end regression suite for every `tests/e2e/cases/` scenario. Each case run
 the full verification pipeline (compile → spec generation → SAW) and
 asserts the verdict matches an expected `VERIFIED` / `DISPROVED` /
 `EQUIVALENT` / `NOT EQUIVALENT` / `UNKNOWN`.
+Negative generation cases can instead expect `REJECTED` before proof begins;
+this is a runner classification, not a SAW verdict.
 
 ## Files
 
@@ -49,6 +51,7 @@ $env:SKIP_SAW_TESTS = '1'
 | `int_ops`            | `tests/e2e/cases/06-int-ops/**` — integer-op coverage fillers (multi-arg signed min, predicate bit-trick, byte swap, u8 popcount). |
 | `cpp_stateful`       | `tests/e2e/cases/09-stateful/**` — stateful-method whole-object post-state via out-buffer postconditions, including inferred mutable `this` receivers, byte buffers, typed wide fields (`i32`), and named heterogeneous structs with padding (`llvm_struct`).  |
 | `aggregate_bridge`   | `tests/e2e/cases/12-aggregate-bridge/**` — aggregate/struct ABI bridge tests: packed tuple returns, sret byte-buffer allocation, niche-packed enum remaps, and sret sub-callee havoc specs (issue #68). |
+| `object_layout`      | Compiler-derived C++ storage: nested POD/sret, multiple bases, pointer frames, selected unions/variants, enums, bitfields and real mutex/optional KeyStore code; includes pre-proof rejection cases. |
 | `rust_adversarial`   | `tests/e2e/cases/99-research/rust_adversarial/**` — research cases for known verifier blind spots.  |
 | `box_allocator`      | `tests/e2e/cases/99-research/box_allocator` — excluded by default; produces `UNKNOWN` under the current pipeline. |
 
@@ -74,6 +77,33 @@ Do **not** add `Runner = 'custom'` or `Script = ...` to `cases.psd1`.
 If a built-in runner lacks a needed capability, extend the runner instead
 of wrapping a custom script. CI enforces this via the `no-custom-runners`
 job; run `bash scripts/check-no-custom-runners.sh` locally to check.
+
+### Compiler-layout case options
+
+Use the built-in `cpp` runner; no custom script or runner is needed.
+The current 19-case `object_layout` group has been validated on Windows and
+Linux. Run it with:
+
+```powershell
+pwsh tests/e2e/Run-E2ETests.ps1 -Tag object_layout
+```
+
+| Manifest key | Behavior |
+|---|---|
+| `CxxStandard` | Forwards the language standard, e.g. `c++17`, to C++ verification. |
+| `WindowsConfig`, `LinuxConfig` | Selects a platform-specific config relative to `Dir`, falling back to `Config`. The runner uses `LinuxConfig` on non-Windows hosts. |
+| `ExpectedError` | Regex for an expected diagnostic. Classifies output as `REJECTED` only when it has no recognized `RESULT:` verdict, matches the regex and contains no `BEGIN_PROOF`. Pair with `Expected = 'REJECTED'`; an exception is not a rejection pass. |
+| `LayoutRegions` | Checks top-level `memory_layout` schema `1`, platform ABI, and each named object's positive size/alignment and empty `unresolved` list. For `return`, requires sret lowering and asserted-field count equal to semantic-field count. Also requires a typed aligned allocation in the generated proof. |
+| `ForbiddenOverrides` | With `LayoutRegions`, rejects generated `llvm_unsafe_assume_spec m` bindings whose symbols contain any listed literal substring. |
+
+KeyStore checks `LayoutRegions = @('this','newKey','return')` and forbids
+`_Mutex_base@std`/`scoped_lock` overrides, while keeping low-level runtime
+assumptions explicit. Its DISPROVED twin has a correct return but corrupts
+receiver state. See the [compiler-layout guide](../../docs/29-compiler-derived-object-layouts.md#L1).
+
+The two legacy `partial_sret` cases under `aggregate_bridge` now intentionally
+expect `REJECTED`: their prefix omits a real `tail` array, not compiler padding.
+The expected diagnostic is `omits semantic field return.tail`, before proof.
 
 ## Pre-commit integration
 

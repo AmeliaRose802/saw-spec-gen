@@ -37,6 +37,30 @@
 # ─────────────────────────────────────────────────────────────────────────
 @{
     Cases = @(
+      # Compiler-derived layouts: identical source/model, target-specific ABI facts.
+      @{ Tag = 'object_layout'; Runner = 'cpp'; Dir = 'tests/e2e/cases/15-object-layout/nested_pod'; File = 'advance_outer_verified.cpp'; Cry = 'advance_outer_spec.cry'; CryptolFn = 'advance_outer_contract'; Function = 'advance_outer'; Config = 'oversized.toml'; ExpectedError = 'neither undersize nor oversize'; Expected = 'REJECTED' }
+      @{ Tag = 'object_layout'; Runner = 'cpp'; Dir = 'tests/e2e/cases/15-object-layout/nested_pod'; File = 'advance_outer_verified.cpp'; Cry = 'advance_outer_spec.cry'; CryptolFn = 'advance_outer_contract'; Function = 'advance_outer'; Config = 'undersized.toml'; ExpectedError = 'neither undersize nor oversize'; Expected = 'REJECTED' }
+      @{ Tag = 'object_layout'; Runner = 'cpp'; Dir = 'tests/e2e/cases/15-object-layout/nested_pod'; File = 'advance_outer_verified.cpp'; Cry = 'advance_outer_spec.cry'; CryptolFn = 'advance_outer_contract'; Function = 'advance_outer'; Config = 'wrong_offset.toml'; ExpectedError = 'offset assertion.*disagrees with compiler'; Expected = 'REJECTED' }
+      @{ Tag = 'object_layout'; Runner = 'cpp'; Dir = 'tests/e2e/cases/15-object-layout/nested_pod'; File = 'advance_outer_verified.cpp'; Cry = 'advance_outer_spec.cry'; CryptolFn = 'advance_outer_contract'; Function = 'advance_outer'; Config = 'omitted_field.toml'; ExpectedError = 'omits semantic field return.arr'; Expected = 'REJECTED' }
+      @{ Tag = 'object_layout'; Runner = 'cpp'; Dir = 'tests/e2e/cases/15-object-layout/variant'; File = 'variant_verified.cpp'; Cry = 'variant_spec.cry'; CryptolFn = 'increment_choice_contract'; Function = 'increment_choice'; CxxStandard = 'c++17'; LayoutRegions = @('p'); Expected = 'VERIFIED' }
+      @{ Tag = 'object_layout'; Runner = 'cpp'; Dir = 'tests/e2e/cases/15-object-layout/variant'; File = 'variant_disproved.cpp'; Cry = 'variant_spec.cry'; CryptolFn = 'increment_choice_contract'; Function = 'increment_choice'; CxxStandard = 'c++17'; LayoutRegions = @('p'); Expected = 'DISPROVED' }
+      @{ Tag = 'object_layout'; Runner = 'cpp'; Dir = 'tests/e2e/cases/15-object-layout/enums'; File = 'enum_object_verified.cpp'; Cry = 'enum_object_spec.cry'; CryptolFn = 'read_code_spec'; Function = 'read_code'; LayoutRegions = @('p'); Expected = 'VERIFIED' }
+      @{ Tag = 'object_layout'; Runner = 'cpp'; Dir = 'tests/e2e/cases/15-object-layout/enums'; File = 'enum_object_disproved.cpp'; Cry = 'enum_object_spec.cry'; CryptolFn = 'read_code_spec'; Function = 'read_code'; LayoutRegions = @('p'); Expected = 'DISPROVED' }
+      @{ Tag = 'object_layout'; Runner = 'cpp'; Dir = 'tests/e2e/cases/15-object-layout/bitfields'; File = 'bump_bits_verified.cpp'; Cry = 'bump_bits_spec.cry'; CryptolFn = 'bump_bits_contract'; Function = 'bump_bits'; LayoutRegions = @('p'); Expected = 'VERIFIED' }
+      @{ Tag = 'object_layout'; Runner = 'cpp'; Dir = 'tests/e2e/cases/15-object-layout/bitfields'; File = 'bump_bits_disproved.cpp'; Cry = 'bump_bits_spec.cry'; CryptolFn = 'bump_bits_contract'; Function = 'bump_bits'; LayoutRegions = @('p'); Expected = 'DISPROVED' }
+      @{ Tag = 'object_layout'; Runner = 'cpp'; Dir = 'tests/e2e/cases/15-object-layout/key_store'; File = 'key_store_verified.cpp'; Cry = 'key_store_spec.cry'; CryptolFn = 'provision_contract'; Function = 'provision'; CxxStandard = 'c++17'; WindowsConfig = 'key_store_windows.toml'; LinuxConfig = 'key_store_linux.toml'; LayoutRegions = @('this','newKey','return'); ForbiddenOverrides = @('_Mutex_base@std','scoped_lock'); Expected = 'VERIFIED' }
+      @{ Tag = 'object_layout'; Runner = 'cpp'; Dir = 'tests/e2e/cases/15-object-layout/key_store'; File = 'key_store_disproved.cpp'; Cry = 'key_store_spec.cry'; CryptolFn = 'provision_contract'; Function = 'provision'; CxxStandard = 'c++17'; WindowsConfig = 'key_store_windows.toml'; LinuxConfig = 'key_store_linux.toml'; LayoutRegions = @('this','newKey','return'); ForbiddenOverrides = @('_Mutex_base@std','scoped_lock'); Expected = 'DISPROVED' }
+      @{ Tag = 'object_layout'; Runner = 'cpp'; Dir = 'tests/e2e/cases/15-object-layout/nested_pod'; File = 'advance_outer_verified.cpp'; Cry = 'advance_outer_spec.cry'; CryptolFn = 'advance_outer_contract'; Function = 'advance_outer'; LayoutRegions = @('p','return'); Expected = 'VERIFIED' }
+      @{ Tag = 'object_layout'; Runner = 'cpp'; Dir = 'tests/e2e/cases/15-object-layout/nested_pod'; File = 'advance_outer_return_disproved.cpp'; Cry = 'advance_outer_spec.cry'; CryptolFn = 'advance_outer_contract'; Function = 'advance_outer'; LayoutRegions = @('p','return'); Expected = 'DISPROVED' }
+      @{ Tag = 'object_layout'; Runner = 'cpp'; Dir = 'tests/e2e/cases/15-object-layout/nested_pod'; File = 'advance_outer_state_disproved.cpp'; Cry = 'advance_outer_spec.cry'; CryptolFn = 'advance_outer_contract'; Function = 'advance_outer'; LayoutRegions = @('p','return'); Expected = 'DISPROVED' }
+      @{ Tag = 'object_layout'; Runner = 'cpp'; Dir = 'tests/e2e/cases/15-object-layout/pointer_frame'; File = 'update_value_verified.cpp'; Cry = 'update_value_spec.cry'; CryptolFn = 'update_value_contract'; Function = 'update_value'; LayoutRegions = @('p'); Expected = 'VERIFIED' }
+      @{ Tag = 'object_layout'; Runner = 'cpp'; Dir = 'tests/e2e/cases/15-object-layout/pointer_frame'; File = 'update_value_disproved.cpp'; Cry = 'update_value_spec.cry'; CryptolFn = 'update_value_contract'; Function = 'update_value'; LayoutRegions = @('p'); Expected = 'DISPROVED' }
+      @{ Tag = 'object_layout'; Runner = 'cpp'; Dir = 'tests/e2e/cases/15-object-layout/multiple_bases'; File = 'accumulate_tail_verified.cpp'; Cry = 'accumulate_tail_spec.cry'; CryptolFn = 'accumulate_tail_contract'; Function = 'accumulate_tail'; LayoutRegions = @('p'); Expected = 'VERIFIED' }
+      @{ Tag = 'object_layout'; Runner = 'cpp'; Dir = 'tests/e2e/cases/15-object-layout/multiple_bases'; File = 'accumulate_tail_disproved.cpp'; Cry = 'accumulate_tail_spec.cry'; CryptolFn = 'accumulate_tail_contract'; Function = 'accumulate_tail'; LayoutRegions = @('p'); Expected = 'DISPROVED' }
+      @{ Tag = 'object_layout'; Runner = 'cpp'; Dir = 'tests/e2e/cases/15-object-layout/selected_union'; File = 'increment_left_verified.cpp'; Cry = 'increment_left_spec.cry'; CryptolFn = 'increment_left_contract'; Function = 'increment_left'; LayoutRegions = @('p'); Expected = 'VERIFIED' }
+      @{ Tag = 'object_layout'; Runner = 'cpp'; Dir = 'tests/e2e/cases/15-object-layout/selected_union'; File = 'increment_left_disproved.cpp'; Cry = 'increment_left_spec.cry'; CryptolFn = 'increment_left_contract'; Function = 'increment_left'; LayoutRegions = @('p'); Expected = 'DISPROVED' }
+      @{ Tag = 'object_layout'; Runner = 'cpp'; Dir = 'tests/e2e/cases/15-object-layout/selected_union'; File = 'increment_left_verified.cpp'; Cry = 'increment_left_spec.cry'; CryptolFn = 'increment_left_contract'; Function = 'increment_left'; Config = 'increment_left_missing_active.toml'; ExpectedError = 'requires an explicit active_members'; Expected = 'REJECTED' }
+      @{ Tag = 'object_layout'; Runner = 'cpp'; Dir = 'tests/e2e/cases/15-object-layout/selected_union'; File = 'increment_left_verified.cpp'; Cry = 'increment_left_spec.cry'; CryptolFn = 'increment_left_contract'; Function = 'increment_left'; Config = 'increment_left_unknown_active.toml'; ExpectedError = 'does not identify one real member'; Expected = 'REJECTED' }
         # ── C++ havoc tests (verify.ps1) ─────────────────────────────────────
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/nothing_sketchy';            File = 'add_one_verified.cpp';                   Expected = 'VERIFIED' }
         @{ Tag = 'cpp_havoc'; Runner = 'cpp'; Dir = 'tests/e2e/cases/02-havoc-coverage/nothing_sketchy';            File = 'add_one_disproved.cpp';                  Expected = 'DISPROVED' }
@@ -611,11 +635,11 @@
         # vacuous).
         @{ Tag = 'aggregate_bridge'; Runner = 'cpp';
            Dir = 'tests/e2e/cases/12-aggregate-bridge/partial_sret';
-           File = 'partial_sret_verified.cpp'; Expected = 'VERIFIED';
+           File = 'partial_sret_verified.cpp'; Expected = 'REJECTED'; ExpectedError = 'omits semantic field return.tail';
            Cry = 'partial_sret_spec.cry'; CryptolFn = 'make_rec_ret'; Function = 'make_rec' }
         @{ Tag = 'aggregate_bridge'; Runner = 'cpp';
            Dir = 'tests/e2e/cases/12-aggregate-bridge/partial_sret';
-           File = 'partial_sret_disproved.cpp'; Expected = 'DISPROVED';
+           File = 'partial_sret_disproved.cpp'; Expected = 'REJECTED'; ExpectedError = 'omits semantic field return.tail';
            Cry = 'partial_sret_spec.cry'; CryptolFn = 'make_rec_ret'; Function = 'make_rec' }
 
         # sret sub-callee recovered from IR (hmac_sha256 arg-mismatch):

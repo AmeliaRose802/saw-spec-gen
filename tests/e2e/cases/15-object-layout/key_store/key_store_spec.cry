@@ -1,0 +1,29 @@
+module key_store_spec where
+
+type Key = { id : [64], version : [64], generation : [64], isActive : [8] }
+type State = {
+  key___has_value : [8],
+  key___value__id : [64],
+  key___value__version : [64],
+  key___value__generation : [64],
+  key___value__isActive : [8]
+}
+type OptionalKey = {
+  has_value : [8], value__id : [64], value__version : [64],
+  value__generation : [64], value__isActive : [8]
+}
+
+provision_contract : State -> Key -> { ret : OptionalKey, thisPost : State }
+provision_contract pre key = { ret = ret, thisPost = post }
+  where
+    occupied = pre.key___has_value == 1
+    ret = {
+      has_value = if occupied then 0 else 1,
+      value__id = key.id, value__version = key.version,
+      value__generation = key.generation, value__isActive = 0
+    }
+    post = if occupied then pre else {
+      key___has_value = 1,
+      key___value__id = key.id, key___value__version = key.version,
+      key___value__generation = key.generation, key___value__isActive = 0
+    }
