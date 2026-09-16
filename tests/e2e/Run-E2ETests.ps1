@@ -200,12 +200,12 @@ function Get-Verdict([string]$text) {
     # Taking the last one consistently lands on the verdict the script
     # treats as authoritative.  Single-result runs (cpp, rust) are
     # unaffected since they only emit one match.
-    $matches = [regex]::Matches(
+    $verdictMatches = [regex]::Matches(
         $text,
         'RESULT:\s*(NOT EQUIVALENT|EQUIVALENT|VERIFIED|DISPROVED|UNKNOWN)'
     )
-    if ($matches.Count -gt 0) {
-        return $matches[$matches.Count - 1].Groups[1].Value.Trim()
+    if ($verdictMatches.Count -gt 0) {
+        return $verdictMatches[$verdictMatches.Count - 1].Groups[1].Value.Trim()
     }
     return 'NO-RESULT'
 }
